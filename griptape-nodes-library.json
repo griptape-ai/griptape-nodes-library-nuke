@@ -47,5 +47,9 @@
                 "icon": "logos/nuke.png"
             }
         }
-    ]
+    ],
+    "workflows": [
+        "workflows/templates/image_edit_nano_banana.py"
+      ]
+    
 }
