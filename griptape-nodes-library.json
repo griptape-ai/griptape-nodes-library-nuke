@@ -1,0 +1,99 @@
+{
+    "name": "Example Library",
+    "library_schema_version": "0.5.0",
+    "metadata": {
+        "author": "<Your-Name>",
+        "description": "<Your-Description>",
+        "library_version": "0.2.0",
+        "engine_version": "0.73.0",
+        "tags": [
+            "Griptape",
+            "AI",
+            "Examples"
+        ],
+        "dependencies": {
+            "pip_dependencies": []
+        }
+    },
+    "widgets": [
+        {
+            "name": "AnglePicker",
+            "path": "widgets/AnglePicker.js",
+            "description": "3D camera angle picker for roll, tilt, and pan rotation values"
+        }
+    ],
+    "categories": [
+        {
+            "ControlNodes": {
+                "color": "border-red-500",
+                "title": "ControlNodes",
+                "description": "Example nodes of Control Type",
+                "icon": "Scale"
+            }
+        },
+        {
+            "DataNodes": {
+                "color": "border-purple-500",
+                "title": "DataNodes",
+                "description": "Example nodes of Data Type",
+                "icon": "Truck"
+            }
+        }
+    ],
+    "nodes": [
+        {
+            "class_name": "CreateIntroduction",
+            "file_path": "create_introduction.py",
+            "metadata": {
+                "category": "ControlNodes",
+                "description": "Example Griptape Node that creates an introduction.",
+                "display_name": "Create an Introduction"
+            }
+        },
+        {
+            "class_name": "ConvertToPigLatin",
+            "file_path": "pig_latin.py",
+            "metadata": {
+                "category": "ControlNodes",
+                "description": "Example Griptape Node that converts to pig latin",
+                "display_name": "Convert to Pig Latin"
+            }
+        },
+        {
+            "class_name": "OpenAIChat",
+            "file_path": "openai_chat.py",
+            "metadata": {
+                "category": "ControlNodes",
+                "description": "Example Griptape Node that displays how to account for dependencies.",
+                "display_name": "Example Dependency Node"
+            }
+        },
+        {
+            "class_name": "CreateName",
+            "file_path": "create_name.py",
+            "metadata": {
+                "category": "DataNodes",
+                "description": "Example Griptape Node that creates a name.",
+                "display_name": "Create a Name"
+            }
+        },
+        {
+            "class_name": "Age",
+            "file_path": "age_node.py",
+            "metadata": {
+                "category": "DataNodes",
+                "description": "Example Griptape Node that sets an age.",
+                "display_name": "Set Age"
+            }
+        },
+        {
+            "class_name": "CameraAnglePicker",
+            "file_path": "camera_angle_picker.py",
+            "metadata": {
+                "category": "DataNodes",
+                "description": "Example Griptape Node with custom AnglePicker widget for 3D rotation angles",
+                "display_name": "Camera Angle Picker"
+            }
+        }
+    ]
+}
