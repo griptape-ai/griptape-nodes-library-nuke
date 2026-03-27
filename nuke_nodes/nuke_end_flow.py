@@ -1,7 +1,6 @@
 from typing import Any
 
 from griptape_nodes.exe_types.node_types import EndNode
-from griptape_nodes.exe_types.param_types.parameter_image import ParameterImage
 
 
 class NukeEndFlow(EndNode):
@@ -14,13 +13,6 @@ class NukeEndFlow(EndNode):
             metadata = {}
         super().__init__(name, metadata)
         metadata["showaddparameter"] = True
-        image_output_param = ParameterImage(
-            name="output_image",
-            default_value=None,
-            tooltip="Output image",
-        )
-        self.add_parameter(image_output_param)
-        self.move_element_up_down(image_output_param.name, up=True)
 
     def process(self) -> None:
         super().process()
