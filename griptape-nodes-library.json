@@ -1,6 +1,7 @@
 {
     "name": "Nuke Nodes Library",
     "library_schema_version": "0.5.0",
+    "advanced_library_path": "nuke_nodes/nuke_library_advanced.py",
     "metadata": {
         "author": "Griptape",
         "description": "Library for Nuke nodes",
