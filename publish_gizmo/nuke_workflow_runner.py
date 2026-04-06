@@ -142,11 +142,14 @@ def main() -> None:
         print(json.dumps({"error": "Workflow module has no execute_workflow() function"}))
         sys.exit(1)
 
+    script_dir = Path(__file__).parent
+    project_file = script_dir / "project.yml"
+
     try:
         output = module.execute_workflow(
             input=flow_input,
             storage_backend=args.storage_backend,
-            project_file_path=args.output_dir,
+            project_file_path=str(project_file) if project_file.exists() else None,
         )
     except Exception as e:
         print(json.dumps({"error": f"Workflow execution failed: {e}"}), file=sys.stderr)

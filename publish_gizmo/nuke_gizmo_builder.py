@@ -10,17 +10,25 @@ _SKIP_OUTPUT_PARAM_NAMES = {"was_successful", "result_details", "exec_in", "fail
 
 # Maps Griptape parameter types to Nuke knob type IDs and Nuke knob class names
 _TYPE_TO_NUKE_KNOB: dict[str, tuple[int, str]] = {
-    "ImageUrlArtifact": (12, "File_Knob"),
-    "ImageArtifact": (12, "File_Knob"),
-    "BlobArtifact": (12, "File_Knob"),
+    "ImageUrlArtifact": (2, "File_Knob"),
+    "ImageArtifact": (2, "File_Knob"),
+    "BlobArtifact": (2, "File_Knob"),
+    "AudioArtifact": (2, "File_Knob"),
+    "TextArtifact": (1, "String_Knob"),
     "str": (1, "String_Knob"),
     "float": (7, "Double_Knob"),
     "int": (3, "Int_Knob"),
-    "bool": (2, "Boolean_Knob"),
+    "bool": (6, "Bool_Knob"),
+    "CsvArtifact": (28, "MultiLine_String_Knob"),
+    "JsonArtifact": (28, "MultiLine_String_Knob"),
 }
 
-# Image-like types that use a file browser in Nuke
-_IMAGE_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact"}
+# File-path types that use a file browser in Nuke
+_FILE_PATH_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact"}
+
+# Types that use a multi-line text field in Nuke
+_MULTILINE_TYPES = {"CsvArtifact", "JsonArtifact"}
+
 
 
 def _is_control_param(param_info: dict) -> bool:
@@ -180,15 +188,15 @@ class NukeGizmoBuilder:
                 idx = choices.index(default)
                 lines.append(f" {knob_name} {idx}")
 
-        # Image / file path knob
-        elif param_type in _IMAGE_TYPES:
-            lines.append(f' addUserKnob {{12 {knob_name} l "{label}"}}')
+        # File path knob (images, audio, blobs)
+        elif param_type in _FILE_PATH_TYPES:
+            lines.append(f' addUserKnob {{2 {knob_name} l "{label}"}}')
             if default:
                 lines.append(f' {knob_name} "{default}"')
 
         # Boolean knob
         elif param_type == "bool":
-            lines.append(f' addUserKnob {{2 {knob_name} l "{label}"}}')
+            lines.append(f' addUserKnob {{6 {knob_name} l "{label}"}}')
             if default is not None:
                 lines.append(f" {knob_name} {'1' if default else '0'}")
 
@@ -204,6 +212,12 @@ class NukeGizmoBuilder:
             if default is not None:
                 lines.append(f" {knob_name} {default}")
 
+        # Multi-line string knob (CSV, JSON, etc.)
+        elif param_type in _MULTILINE_TYPES:
+            lines.append(f' addUserKnob {{28 {knob_name} l "{label}"}}')
+            if default:
+                lines.append(f' {knob_name} "{default}"')
+
         # String knob (default for str and anything else)
         else:
             lines.append(f' addUserKnob {{1 {knob_name} l "{label}"}}')
@@ -218,8 +232,10 @@ class NukeGizmoBuilder:
         label = info.get("ui_options", {}).get("display_name") or _label(name)
         param_type = info.get("type", "str")
 
-        if param_type in _IMAGE_TYPES:
-            return [f' addUserKnob {{12 {knob_name} l "{label}" +DISABLED}}']
+        if param_type in _FILE_PATH_TYPES:
+            return [f' addUserKnob {{2 {knob_name} l "{label}" +DISABLED}}']
+        if param_type in _MULTILINE_TYPES:
+            return [f' addUserKnob {{28 {knob_name} l "{label}" +DISABLED}}']
         return [f' addUserKnob {{1 {knob_name} l "{label}" +DISABLED}}']
 
     def _build_run_button_code(self, input_params: dict[str, dict], start_node_name: str) -> str:
@@ -287,6 +303,6 @@ if uv:
         except Exception as _e:
             nuke.message("Error parsing output: " + str(_e) + "\\n" + result.stdout[:300])
     else:
-        nuke.message("Workflow failed:\\n" + result.stderr[:500])\
+        nuke.message("Workflow failed:\\n" + result.stderr[:2000])\
 """
         return code
