@@ -224,19 +224,18 @@ class NukeGizmoBuilder:
 
     def _build_run_button_code(self, input_params: dict[str, dict], start_node_name: str) -> str:
         """Build the Python code that runs when the user clicks 'Run Workflow'."""
-        # Build the list of input param names to collect from knobs
         param_names = list(input_params.keys())
         param_names_repr = repr(param_names)
 
-        # The workflow file name (just the filename, in the companion dir)
         import os
         workflow_filename = os.path.basename(self._workflow_file)
 
-        # Use the pre-built .venv inside the companion dir. This venv is created
-        # at publish time via "uv sync", so no runtime dependency on uv or any
-        # external Python tooling. The folder is fully self-contained and shareable.
+        # The button code runs inside Nuke's Python 3.11 interpreter (stdlib only).
+        # It locates uv (auto-installing if absent) and delegates execution to
+        # "uv run --project companion", which manages the .venv transparently:
+        # first run creates and populates it; subsequent runs reuse it instantly.
         code = f"""\
-import subprocess, json, os, platform
+import subprocess, json, os, platform, shutil
 node = nuke.thisNode()
 companion = node["_companion_dir"].value()
 workflow_file = os.path.join(companion, {workflow_filename!r})
@@ -247,14 +246,36 @@ for _k in {param_names_repr}:
         inputs[_k] = node[_k].value()
 output_dir = node["output_dir"].value() or companion
 flow_input = json.dumps({{{start_node_name!r}: inputs}})
-if platform.system() == "Windows":
-    venv_python = os.path.join(companion, ".venv", "Scripts", "python.exe")
-else:
-    venv_python = os.path.join(companion, ".venv", "bin", "python")
-if not os.path.isfile(venv_python):
-    nuke.message("Error: .venv not found in companion directory.\\nRe-publish the gizmo to rebuild it, or run 'uv sync --project ' + companion + ' in a terminal.")
-else:
-    cmd = [venv_python, runner, "--workflow-file", workflow_file, "--json-input", flow_input, "--output-dir", output_dir]
+uv = shutil.which("uv")
+if not uv:
+    _fallbacks = [os.path.expanduser("~/.local/bin/uv"), os.path.expanduser("~/.cargo/bin/uv")]
+    if platform.system() == "Windows":
+        _lappdata = os.environ.get("LOCALAPPDATA", "")
+        if _lappdata:
+            _fallbacks.append(os.path.join(_lappdata, "uv", "uv.exe"))
+    for _p in _fallbacks:
+        if os.path.isfile(_p):
+            uv = _p
+            break
+if not uv:
+    if platform.system() == "Windows":
+        _install = subprocess.run(["powershell", "-Command", "irm https://astral.sh/uv/install.ps1 | iex"], capture_output=True, text=True, timeout=120)
+    else:
+        _install = subprocess.run(["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"], capture_output=True, text=True, timeout=120)
+    if _install.returncode == 0:
+        _fallbacks = [os.path.expanduser("~/.local/bin/uv"), os.path.expanduser("~/.cargo/bin/uv")]
+        if platform.system() == "Windows":
+            _lappdata = os.environ.get("LOCALAPPDATA", "")
+            if _lappdata:
+                _fallbacks.append(os.path.join(_lappdata, "uv", "uv.exe"))
+        for _p in _fallbacks:
+            if os.path.isfile(_p):
+                uv = _p
+                break
+    else:
+        nuke.message("Failed to install uv automatically.\\nInstall it manually: https://docs.astral.sh/uv/getting-started/installation/\\nThen restart Nuke.")
+if uv:
+    cmd = [uv, "run", "--project", companion, "python", runner, "--workflow-file", workflow_file, "--json-input", flow_input, "--output-dir", output_dir]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=companion, timeout=600)
     if result.returncode == 0:
         try:

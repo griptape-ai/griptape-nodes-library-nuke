@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,23 +68,6 @@ class NukeGizmoPublisher:
             runner_src = Path(__file__).parent / "nuke_workflow_runner.py"
             runner_dest = companion_dir / "run_workflow.py"
             shutil.copy2(runner_src, runner_dest)
-
-            # Create a self-contained .venv so the gizmo needs no runtime tooling.
-            # uv is available here (publisher runs in the user's normal shell).
-            self._packager.emit_progress(5.0, "Building .venv (this may take a minute)...")
-            uv = shutil.which("uv")
-            if uv:
-                subprocess.run(
-                    [uv, "sync", "--project", str(companion_dir)],
-                    check=True,
-                    cwd=str(companion_dir),
-                    timeout=300,
-                )
-            else:
-                logger.warning(
-                    "uv not found on PATH; skipping .venv creation. Run 'uv sync --project %s' manually.",
-                    companion_dir,
-                )
 
             # Generate the .gizmo file
             self._packager.emit_progress(10.0, "Generating gizmo...")
