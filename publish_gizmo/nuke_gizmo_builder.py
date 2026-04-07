@@ -29,6 +29,12 @@ _FILE_PATH_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioA
 # Types that use a multi-line text field in Nuke
 _MULTILINE_TYPES = {"CsvArtifact", "JsonArtifact"}
 
+# Media types whose outputs should be displayed in an internal Read node in Nuke
+_MEDIA_OUTPUT_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact"}
+
+# Media input types that support upstream Nuke node connections (render-to-temp)
+_MEDIA_INPUT_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact"}
+
 
 
 def _is_control_param(param_info: dict) -> bool:
@@ -87,6 +93,10 @@ class NukeGizmoBuilder:
         output_params = self._collect_output_params()
         start_node_name = self._get_start_node_name()
 
+        media_output_names = [n for n, i in output_params.items() if i.get("type") in _MEDIA_OUTPUT_TYPES]
+        media_input_names = [n for n, i in input_params.items() if i.get("type") in _MEDIA_INPUT_TYPES]
+        has_media_output = bool(media_output_names)
+
         lines: list[str] = []
         lines.append("Gizmo {")
         lines.append(f" name {_safe_knob_name(self._workflow_name)}")
@@ -113,7 +123,7 @@ class NukeGizmoBuilder:
 
         # Run button
         lines.append(' addUserKnob {26 _run_divider l "" +STARTLINE}')
-        run_code = self._build_run_button_code(input_params, start_node_name)
+        run_code = self._build_run_button_code(input_params, start_node_name, media_output_names, media_input_names)
         escaped_code = _tcl_escape(run_code)
         lines.append(f' addUserKnob {{22 run_workflow l "Run Workflow" T "{escaped_code}" +STARTLINE}}')
 
@@ -124,21 +134,42 @@ class NukeGizmoBuilder:
         lines.append("}")
 
         # Internal Nuke nodes for graph connectivity
+        lines.extend(self._build_internal_graph_lines(has_media_output))
+        lines.append("end_group")
+
+        return "\n".join(lines) + "\n"
+
+    def _build_internal_graph_lines(self, has_media_output: bool) -> list[str]:
+        """Return TCL lines for the gizmo's internal node graph.
+
+        When the workflow has media outputs a Read node (GEN_READ) is included and
+        wired to the Output so the result image appears inline in Nuke's viewer.
+        The Input node is always present so upstream connections work regardless.
+        """
+        lines: list[str] = []
         lines.append(" Input {")
         lines.append("  inputs 0")
         lines.append("  name Input1")
         lines.append("  xpos 0")
         lines.append("  ypos -100")
         lines.append(" }")
+        if has_media_output:
+            lines.append(" Read {")
+            lines.append("  inputs 0")
+            lines.append("  name GEN_READ")
+            lines.append('  file ""')
+            lines.append("  xpos 0")
+            lines.append("  ypos 0")
+            lines.append(" }")
         lines.append(" Output {")
-        lines.append("  inputs 0")
+        if not has_media_output:
+            # Without a Read node the Output must declare no inputs so it floats
+            lines.append("  inputs 0")
         lines.append("  name Output1")
         lines.append("  xpos 0")
         lines.append("  ypos 100")
         lines.append(" }")
-        lines.append("end_group")
-
-        return "\n".join(lines) + "\n"
+        return lines
 
     def _get_start_node_name(self) -> str:
         inputs = self._workflow_shape.get("input", {})
@@ -238,10 +269,18 @@ class NukeGizmoBuilder:
             return [f' addUserKnob {{28 {knob_name} l "{label}" +DISABLED}}']
         return [f' addUserKnob {{1 {knob_name} l "{label}" +DISABLED}}']
 
-    def _build_run_button_code(self, input_params: dict[str, dict], start_node_name: str) -> str:
+    def _build_run_button_code(
+        self,
+        input_params: dict[str, dict],
+        start_node_name: str,
+        media_output_names: list[str],
+        media_input_names: list[str],
+    ) -> str:
         """Build the Python code that runs when the user clicks 'Run Workflow'."""
         param_names = list(input_params.keys())
         param_names_repr = repr(param_names)
+        media_output_names_repr = repr(media_output_names)
+        media_input_names_repr = repr(media_input_names)
 
         import os
         workflow_filename = os.path.basename(self._workflow_file)
@@ -251,7 +290,7 @@ class NukeGizmoBuilder:
         # "uv run --project companion", which manages the .venv transparently:
         # first run creates and populates it; subsequent runs reuse it instantly.
         code = f"""\
-import subprocess, json, os, platform, shutil
+import subprocess, json, os, platform, shutil, tempfile
 node = nuke.thisNode()
 companion = node["_companion_dir"].value()
 workflow_file = os.path.join(companion, {workflow_filename!r})
@@ -260,6 +299,22 @@ inputs = {{}}
 for _k in {param_names_repr}:
     if node.knob(_k):
         inputs[_k] = node[_k].value()
+# For media inputs, render the upstream Nuke connection to a temp file when connected
+for _mk in {media_input_names_repr}:
+    if node.input(0) is not None:
+        _tmp = os.path.join(tempfile.gettempdir(), "gt_input_{{}}_{{}}.jpg".format(node.name(), int(nuke.frame())))
+        node.begin()
+        try:
+            _in = nuke.toNode("Input1")
+            _w = nuke.nodes.Write(name="_GT_TMP_WRITE")
+            _w["file"].setValue(_tmp)
+            _w["file_type"].setValue("jpg")
+            _w.setInput(0, _in)
+            nuke.execute(_w, int(nuke.frame()), int(nuke.frame()))
+            nuke.delete(_w)
+        finally:
+            node.end()
+        inputs[_mk] = _tmp
 output_dir = node["output_dir"].value() or companion
 flow_input = json.dumps({{{start_node_name!r}: inputs}})
 uv = shutil.which("uv")
@@ -299,6 +354,27 @@ if uv:
             for _k, _v in output.items():
                 if node.knob(_k):
                     node[_k].setValue(str(_v))
+            # Display the first media output in the internal Read node (GEN_READ)
+            _media_path = None
+            for _mk in {media_output_names_repr}:
+                _mv = output.get(_mk, "")
+                if _mv and os.path.isfile(str(_mv)):
+                    _media_path = str(_mv)
+                    break
+            if _media_path:
+                try:
+                    node.begin()
+                    _r = nuke.toNode("GEN_READ")
+                    if _r:
+                        _r["file"].setValue(_media_path)
+                        try:
+                            _r["reload"].execute()
+                        except Exception:
+                            pass
+                finally:
+                    node.end()
+                for _viewer in nuke.allNodes("Viewer"):
+                    _viewer.invalidate()
             nuke.message("Workflow completed!")
         except Exception as _e:
             nuke.message("Error parsing output: " + str(_e) + "\\n" + result.stdout[:300])

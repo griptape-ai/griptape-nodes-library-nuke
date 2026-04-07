@@ -5,6 +5,9 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from griptape_nodes.common.project_templates import load_project_template_from_yaml
+from griptape_nodes.common.project_templates.directory import DirectoryDefinition
+from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.workflow_events import (
@@ -63,6 +66,9 @@ class NukeGizmoPublisher:
             # (workflow file, libraries, config, .env, static files, pyproject.toml)
             self._packager.package_to_folder(companion_dir, workflow)
 
+            # Overwrite project.yml with absolute paths so outputs save in the gizmo folder
+            self._write_nuke_project_template(companion_dir)
+
             # Copy the runner script into companion directory
             self._packager.emit_progress(5.0, "Writing runner script...")
             runner_src = Path(__file__).parent / "nuke_workflow_runner.py"
@@ -97,6 +103,41 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    def _write_nuke_project_template(self, companion_dir: Path) -> None:
+        """Overwrite project.yml with absolute paths so outputs save in the gizmo folder.
+
+        The packager writes relative path_macros (e.g. "outputs"). Nuke runs the workflow
+        in a subprocess with GTN_CONFIG_WORKSPACE_DIRECTORY set to companion_dir, so
+        ProjectFileDestination converts written paths back to macro form (e.g.
+        "{outputs}/file.jpg") when storing output values. Absolute path_macros ensure the
+        gizmo receives real absolute paths.
+        """
+        project_yml = companion_dir / "project.yml"
+        if not project_yml.exists():
+            return
+
+        validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
+        template = load_project_template_from_yaml(project_yml.read_text(encoding="utf-8"), validation_info)
+        if template is None:
+            logger.warning("Could not parse project.yml for Nuke path rewrite. Skipping.")
+            return
+
+        # Point outputs and inputs directly at the companion directory so all
+        # generated files land in the gizmo folder alongside the workflow.
+        absolute_path_overrides = {
+            "outputs": str(companion_dir),
+            "inputs": str(companion_dir),
+            "temp": str(companion_dir / "temp"),
+        }
+        for dir_name, override_path in absolute_path_overrides.items():
+            if dir_name in template.directories:
+                template.directories[dir_name] = DirectoryDefinition(
+                    name=dir_name,
+                    path_macro=override_path,
+                )
+
+        project_yml.write_text(template.to_yaml(include_comments=False), encoding="utf-8")
 
     def _validate(self) -> list[Exception]:
         errors: list[Exception] = []

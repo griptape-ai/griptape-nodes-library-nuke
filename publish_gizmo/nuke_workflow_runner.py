@@ -23,10 +23,14 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from griptape_nodes.common.project_templates import load_project_template_from_yaml
+from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
 
 
 def _bootstrap_environment() -> None:
@@ -64,12 +68,42 @@ def _load_workflow_module(workflow_file: str):
     return module
 
 
-def _serialize_output(output: dict | None) -> dict[str, str]:
+def _build_macro_map(script_dir: Path) -> dict[str, str]:
+    """Build a map of macro names to absolute paths from the project.yml.
+
+    The project system stores output values in macro form (e.g. {outputs}/file.jpg).
+    This map lets us resolve those macros to real paths that Nuke can open.
+    """
+    project_yml = script_dir / "project.yml"
+    if not project_yml.exists():
+        return {}
+
+    validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
+    template = load_project_template_from_yaml(project_yml.read_text(encoding="utf-8"), validation_info)
+    if template is None:
+        return {}
+
+    return {dir_def.name: dir_def.path_macro for dir_def in template.directories.values()}
+
+
+def _resolve_macro_path(value: str, macro_map: dict[str, str]) -> str:
+    """Replace {outputs}, {inputs}, etc. in a path string with their resolved values."""
+    if "{" not in value:
+        return value
+
+    def _replace(match: re.Match) -> str:
+        return macro_map.get(match.group(1), match.group(0))
+
+    return re.sub(r"\{([\w-]+)\}", _replace, value)
+
+
+def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[str, str]:
     """Flatten and serialize the workflow output dict for JSON printing.
 
     The executor returns a nested dict: {node_name: {param_name: value}}.
     We flatten it to {param_name: str(value)} for the gizmo to consume.
     Image artifacts expose a .url or .value attribute that contains the path.
+    Macro paths like {outputs}/file.jpg are resolved to absolute paths.
     """
     if not output:
         return {}
@@ -86,15 +120,15 @@ def _serialize_output(output: dict | None) -> dict[str, str]:
                 url = str(value.url)
                 if url.startswith("file://"):
                     url = url[7:]
-                result[param_name] = url
+                result[param_name] = _resolve_macro_path(url, macro_map)
             elif hasattr(value, "value") and isinstance(getattr(value, "value"), (str, bytes)):
                 raw = value.value
                 if isinstance(raw, bytes):
                     result[param_name] = f"<binary {len(raw)} bytes>"
                 else:
-                    result[param_name] = raw
+                    result[param_name] = _resolve_macro_path(raw, macro_map)
             else:
-                result[param_name] = str(value)
+                result[param_name] = _resolve_macro_path(str(value), macro_map)
 
     return result
 
@@ -155,7 +189,8 @@ def main() -> None:
         print(json.dumps({"error": f"Workflow execution failed: {e}"}), file=sys.stderr)
         sys.exit(1)
 
-    result = _serialize_output(output)
+    macro_map = _build_macro_map(Path(__file__).parent)
+    result = _serialize_output(output, macro_map)
     print(json.dumps(result))
 
 
