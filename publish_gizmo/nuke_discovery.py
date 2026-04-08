@@ -11,7 +11,6 @@ import shutil
 import sys
 from pathlib import Path
 
-
 GIZMO_INSTALL_CUSTOM = "Custom path\u2026"
 
 

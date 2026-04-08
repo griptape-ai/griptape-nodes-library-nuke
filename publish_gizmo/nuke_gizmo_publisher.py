@@ -126,7 +126,7 @@ class NukeGizmoPublisher:
         # Point outputs and inputs directly at the companion directory so all
         # generated files land in the gizmo folder alongside the workflow.
         absolute_path_overrides = {
-            "outputs": str(companion_dir),
+            "outputs": str(companion_dir / "output"),
             "inputs": str(companion_dir),
             "temp": str(companion_dir / "temp"),
         }

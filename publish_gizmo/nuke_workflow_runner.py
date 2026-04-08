@@ -28,7 +28,6 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-
 from griptape_nodes.common.project_templates import load_project_template_from_yaml
 from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
 
@@ -121,7 +120,7 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
                 if url.startswith("file://"):
                     url = url[7:]
                 result[param_name] = _resolve_macro_path(url, macro_map)
-            elif hasattr(value, "value") and isinstance(getattr(value, "value"), (str, bytes)):
+            elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value
                 if isinstance(raw, bytes):
                     result[param_name] = f"<binary {len(raw)} bytes>"
@@ -166,6 +165,10 @@ def main() -> None:
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
     _bootstrap_environment()
 
+    # Ensure the output directory exists before the workflow writes to it
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+
     try:
         module = _load_workflow_module(str(workflow_file))
     except Exception as e:
@@ -190,6 +193,8 @@ def main() -> None:
         sys.exit(1)
 
     macro_map = _build_macro_map(Path(__file__).parent)
+    if args.output_dir:
+        macro_map["outputs"] = args.output_dir
     result = _serialize_output(output, macro_map)
     print(json.dumps(result))
 

@@ -103,8 +103,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
             label="Gizmo Install Path",
             field_type="dropdown",
             tooltip=(
-                "Directory where the gizmo will be installed. "
-                "Choose 'Custom path\u2026' to enter a path manually."
+                "Directory where the gizmo will be installed. Choose 'Custom path\u2026' to enter a path manually."
             ),
             choices=gizmo_choices,
             default_value=selected_gizmo,
