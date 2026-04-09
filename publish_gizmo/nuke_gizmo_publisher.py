@@ -69,11 +69,14 @@ class NukeGizmoPublisher:
             # Overwrite project.yml with absolute paths so outputs save in the gizmo folder
             self._write_nuke_project_template(companion_dir)
 
-            # Copy the runner script into companion directory
+            # Copy the runner and button scripts into companion directory
             self._packager.emit_progress(5.0, "Writing runner script...")
             runner_src = Path(__file__).parent / "nuke_workflow_runner.py"
             runner_dest = companion_dir / "run_workflow.py"
             shutil.copy2(runner_src, runner_dest)
+
+            run_button_src = Path(__file__).parent / "run_button.py"
+            shutil.copy2(run_button_src, companion_dir / "run_button.py")
 
             # Generate the .gizmo file
             self._packager.emit_progress(10.0, "Generating gizmo...")
@@ -126,8 +129,8 @@ class NukeGizmoPublisher:
         # Point outputs and inputs directly at the companion directory so all
         # generated files land in the gizmo folder alongside the workflow.
         absolute_path_overrides = {
-            "outputs": str(companion_dir / "output"),
-            "inputs": str(companion_dir),
+            "outputs": str(companion_dir / "outputs"),
+            "inputs": str(companion_dir / "inputs"),
             "temp": str(companion_dir / "temp"),
         }
         for dir_name, override_path in absolute_path_overrides.items():

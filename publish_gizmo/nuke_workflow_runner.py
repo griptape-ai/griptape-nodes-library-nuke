@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -164,6 +165,18 @@ def main() -> None:
 
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
     _bootstrap_environment()
+
+    # Download HuggingFace models if a download script was bundled at publish time
+    download_script = Path(__file__).parent / "download_models.py"
+    if download_script.exists():
+        result = subprocess.run(
+            [sys.executable, str(download_script)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(json.dumps({"error": f"Model download failed: {result.stderr}"}))
+            sys.exit(1)
 
     # Ensure the output directory exists before the workflow writes to it
     if args.output_dir:
