@@ -124,7 +124,7 @@ class NukeGizmoBuilder:
 
         # Output directory picker
         w.add_divider("_output_divider", label="Outputs")
-        w.add_string_knob("output_dir", label="Output Directory", default=f"{self._companion_dir}/output")
+        w.add_string_knob("output_dir", label="Output Directory", default=f"{self._companion_dir}/outputs")
 
         # Output result knobs (read-only, filled after run)
         for name, info in output_params.items():

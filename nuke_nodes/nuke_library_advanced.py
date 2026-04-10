@@ -11,9 +11,13 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 from publish_gizmo.nuke_publish_options import get_nuke_publish_options
+from publish_livegroup.nuke_livegroup_publisher import NukeLiveGroupPublisher
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("griptape_nodes")
+
+_PUBLISH_FORMAT_LIVEGROUP = "livegroup"
+_PUBLISH_FORMAT_GIZMO = "gizmo"
 
 
 def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
@@ -21,10 +25,19 @@ def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
         msg = f"Expected PublishWorkflowRequest, got {type(request).__name__}"
         raise TypeError(msg)
 
-    publisher = NukeGizmoPublisher(
-        workflow_name=request.workflow_name,
-        metadata=request.metadata,
-    )
+    publish_format = (request.metadata or {}).get("publish_format", _PUBLISH_FORMAT_LIVEGROUP)
+
+    if publish_format == _PUBLISH_FORMAT_GIZMO:
+        publisher = NukeGizmoPublisher(
+            workflow_name=request.workflow_name,
+            metadata=request.metadata,
+        )
+    else:
+        publisher = NukeLiveGroupPublisher(
+            workflow_name=request.workflow_name,
+            metadata=request.metadata,
+        )
+
     return publisher.publish_workflow()
 
 

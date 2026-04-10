@@ -1,4 +1,4 @@
-"""Publish-time options provider for the Nuke Gizmo publisher.
+"""Publish-time options provider for the Nuke publisher.
 
 Called by the engine when the frontend opens the publish dialog for the Nuke publisher.
 Returns the fields to display and pre-populates them from saved publish_config metadata
@@ -85,7 +85,21 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
     custom_gizmo_default = current.get("custom_gizmo_path", str(Path.home() / ".nuke"))
     custom_hidden = selected_gizmo != GIZMO_INSTALL_CUSTOM
 
+    saved_format = current.get("publish_format", "livegroup")
+
     fields = [
+        PublishOptionField(
+            name="publish_format",
+            label="Publish Format",
+            field_type="dropdown",
+            tooltip=(
+                "LiveGroup: publishes as a versioned .nk file that Nuke can reload when updated (recommended). "
+                "Gizmo: publishes as a static .gizmo file."
+            ),
+            choices=["livegroup", "gizmo"],
+            default_value=saved_format,
+            depends_on=None,
+        ),
         PublishOptionField(
             name="nuke",
             label="Nuke Installation",
