@@ -83,7 +83,15 @@ def _build_macro_map(script_dir: Path) -> dict[str, str]:
     if template is None:
         return {}
 
-    return {dir_def.name: dir_def.path_macro for dir_def in template.directories.values()}
+    # Resolve relative macros against script_dir so the companion bundle is portable.
+    # Absolute path_macros (e.g. from a legacy publish) are kept as-is.
+    result = {}
+    for dir_def in template.directories.values():
+        value = dir_def.path_macro
+        if value and not Path(value).is_absolute():
+            value = str(script_dir / value)
+        result[dir_def.name] = value
+    return result
 
 
 def _resolve_macro_path(value: str, macro_map: dict[str, str]) -> str:

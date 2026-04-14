@@ -142,7 +142,7 @@ class NukeGizmoBuilder:
 
         # Output directory picker
         w.add_divider("_output_divider", label="Outputs")
-        w.add_string_knob("output_dir", label="Output Directory", default=f"{self._companion_dir}/outputs")
+        w.add_string_knob("output_dir", label="Output Directory")
 
         # Output result knobs (read-only, filled after run)
         for name, info in output_params.items():
@@ -155,8 +155,10 @@ class NukeGizmoBuilder:
         )
         w.add_pyscript_knob("run_workflow", label="Run Workflow", python_code=run_code)
 
-        # Hidden companion dir knob (so the button can locate run_button.py)
-        w.add_invisible_string_knob("_companion_dir", value=self._companion_dir)
+        # Hidden companion dir knob. Left empty so the gizmo file contains no absolute paths
+        # and can be shared across machines. The bootstrap resolves it at runtime via
+        # nuke.pluginPath() (see _build_run_button_bootstrap).
+        w.add_invisible_string_knob("_companion_dir")
 
         w.end_gizmo_header()
 
@@ -322,10 +324,23 @@ class NukeGizmoBuilder:
             }
         )
 
+        gizmo_class = _safe_knob_name(self._workflow_name)
+        companion_subdir = f"griptape_gizmos/{self._workflow_name}"
         return f"""\
 import os as _os
-_companion = nuke.thisNode()["_companion_dir"].value()
-_btn_path = _os.path.join(_companion, "run_button.py")
-with open(_btn_path) as _f:
-    exec(compile(_f.read(), _btn_path, "exec"), dict(globals(), **{{"__file__": _btn_path, "_config": {config_repr}}}))
+_node = nuke.thisNode()
+_companion = _node["_companion_dir"].value()
+if not _companion or not _os.path.isdir(_companion):
+    for _d in nuke.pluginPath():
+        _c = _os.path.join(_d, "{companion_subdir}")
+        if _os.path.isdir(_c):
+            _companion = _c
+            _node["_companion_dir"].setValue(_companion)
+            break
+if not _companion or not _os.path.isdir(_companion):
+    nuke.message("Griptape: cannot find companion directory for '{gizmo_class}'. Make sure the griptape_gizmos folder is in the same directory as the .gizmo file.")
+else:
+    _btn_path = _os.path.join(_companion, "run_button.py")
+    with open(_btn_path) as _f:
+        exec(compile(_f.read(), _btn_path, "exec"), dict(globals(), **{{"__file__": _btn_path, "_config": {config_repr}}}))
 """

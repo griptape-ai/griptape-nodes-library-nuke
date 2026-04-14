@@ -161,10 +161,11 @@ class GizmoWriter:
             f' addUserKnob {{{NukeKnobType.PYSCRIPT} {knob_name} l "{label}" T "{escaped}"{flag_suffix}}}'
         )
 
-    def add_invisible_string_knob(self, knob_name: str, value: str) -> None:
-        """Add a hidden string knob storing a value (no label shown)."""
+    def add_invisible_string_knob(self, knob_name: str, value: str | None = None) -> None:
+        """Add a hidden string knob. Omit ``value`` to leave it unset in the file."""
         self._lines.append(f' addUserKnob {{{NukeKnobType.STRING} {knob_name} l "" +INVISIBLE}}')
-        self._lines.append(f" {knob_name} {value}")
+        if value is not None:
+            self._lines.append(f" {knob_name} {value}")
 
     # -- Internal graph nodes --
 

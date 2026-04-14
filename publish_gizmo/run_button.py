@@ -46,7 +46,16 @@ _temp_file_prefix: str = _config.get("temp_file_prefix", "gt_input")
 # -- Resolve paths from the gizmo node --
 
 node = nuke.thisNode()  # noqa: F821  # 'nuke' is in scope when exec'd from the gizmo
+
+# _companion_dir is resolved by the bootstrap before this file is exec'd.
+# By the time we get here it should be set, but guard against stale .nk values
+# (absolute path from a different machine that no longer exists on disk).
 companion = node["_companion_dir"].value()
+if not companion or not os.path.isdir(companion):
+    raise RuntimeError(
+        f"Griptape: companion directory not found: {companion!r}. "
+        "Re-publish the gizmo or ensure griptape_gizmos/ is in the same directory as the .gizmo file."
+    )
 
 # Versioned gizmos store each workflow file in a version subdir (v1/, v2/, ...).
 # The griptape_version knob on the node controls which version is run.
@@ -58,7 +67,12 @@ else:
     workflow_file = os.path.join(companion, _workflow_filename)
 
 runner = os.path.join(companion, "run_workflow.py")
-output_dir = node["output_dir"].value() or companion
+
+# Populate output_dir from the companion if the knob is empty (first run on a shared gizmo).
+output_dir = node["output_dir"].value()
+if not output_dir:
+    output_dir = os.path.join(companion, "outputs")
+    node["output_dir"].setValue(output_dir)
 
 # -- Node error state helpers --
 # Tile color values: 0xff9900ff = Griptape orange (default), 0xff0000ff = red (error)
