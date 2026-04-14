@@ -51,7 +51,6 @@ class NukeGizmoPublisher:
             if not isinstance(save_result, SaveWorkflowResultSuccess):
                 return PublishWorkflowResultFailure(result_details="Failed to save workflow before packaging.")
 
-            # Package everything into the companion directory
             self._packager.emit_progress(5.0, "Packaging workflow bundle...")
             install_dir = self._resolve_gizmo_install_path()
             if install_dir is None:
@@ -60,63 +59,77 @@ class NukeGizmoPublisher:
 
             workflow_file_path = Path(WorkflowRegistry.get_complete_file_path(workflow.file_path))
             workflow_stem = workflow_file_path.stem
-            companion_dir = install_dir / "griptape_gizmos" / workflow_stem
 
-            # Use WorkflowPackager for the full standard bundle
-            # (workflow file, libraries, config, .env, static files, pyproject.toml)
-            self._packager.package_to_folder(companion_dir, workflow)
+            # Single companion base dir per workflow; versions are subdirectories inside it
+            companion_base = install_dir / "griptape_gizmos" / workflow_stem
 
-            # Overwrite project.yml with absolute paths so outputs save in the gizmo folder
-            self._write_nuke_project_template(companion_dir)
+            # Determine which version to write (new version or update current)
+            version = self._determine_version(companion_base)
+            version_dir = companion_base / f"v{version}"
+            version_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy the runner and button scripts into companion directory
+            # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
+            # The workflow file also lands here first — we move it into the version subdir below.
+            self._packager.package_to_folder(companion_base, workflow)
+
+            # Move the workflow file from companion base into the version subdir
+            src_workflow = companion_base / workflow_file_path.name
+            dest_workflow = version_dir / workflow_file_path.name
+            if src_workflow.exists():
+                shutil.move(str(src_workflow), str(dest_workflow))
+
+            # Overwrite project.yml with absolute paths so outputs save in the companion folder
+            self._write_nuke_project_template(companion_base)
+
+            # Copy the runner and button scripts (shared, overwrite on each publish)
             self._packager.emit_progress(5.0, "Writing runner script...")
             runner_src = Path(__file__).parent / "nuke_workflow_runner.py"
-            runner_dest = companion_dir / "run_workflow.py"
-            shutil.copy2(runner_src, runner_dest)
-
+            shutil.copy2(runner_src, companion_base / "run_workflow.py")
             run_button_src = Path(__file__).parent / "run_button.py"
-            shutil.copy2(run_button_src, companion_dir / "run_button.py")
+            shutil.copy2(run_button_src, companion_base / "run_button.py")
 
-            # Generate the .gizmo file
+            # Collect all version subdirectories for the gizmo version knob
+            available_versions = self._collect_versions(companion_base)
+
+            # Generate the wrapper gizmo with the stable name and version knob
             self._packager.emit_progress(10.0, "Generating gizmo...")
-            dest_workflow = companion_dir / workflow_file_path.name
             builder = NukeGizmoBuilder(
                 workflow_name=workflow_stem,
                 workflow_shape=workflow_shape,
-                companion_dir=str(companion_dir),
+                companion_dir=str(companion_base),
                 workflow_file=str(dest_workflow),
+                available_versions=available_versions,
+                current_version=version,
             )
             gizmo_text = builder.generate()
 
-            gizmo_path = install_dir / f"{workflow_stem}.gizmo"
-            gizmo_path.write_text(gizmo_text, encoding="utf-8")
-            logger.info("Gizmo written to: %s", gizmo_path)
+            wrapper_path = install_dir / f"{workflow_stem}.gizmo"
+            wrapper_path.write_text(gizmo_text, encoding="utf-8")
+            logger.info("Gizmo written to: %s", wrapper_path)
 
-            # Persist the user's publish selections into the NukeStartFlow node metadata
-            # so the next publish dialog is pre-populated.
-            self._save_publish_config()
+            # Persist the user's publish selections and version into the NukeStartFlow node metadata
+            self._save_publish_config(wrapper_path, version)
 
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
             return PublishWorkflowResultSuccess(
-                published_workflow_file_path=str(gizmo_path),
+                published_workflow_file_path=str(wrapper_path),
                 skip_published_workflow_registration=True,
-                result_details=f"Gizmo installed to: {gizmo_path}",
+                result_details=f"Gizmo v{version} installed to: {wrapper_path}",
             )
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
 
-    def _write_nuke_project_template(self, companion_dir: Path) -> None:
-        """Overwrite project.yml with absolute paths so outputs save in the gizmo folder.
+    def _write_nuke_project_template(self, companion_base: Path) -> None:
+        """Overwrite project.yml with absolute paths so outputs save in the companion folder.
 
         The packager writes relative path_macros (e.g. "outputs"). Nuke runs the workflow
-        in a subprocess with GTN_CONFIG_WORKSPACE_DIRECTORY set to companion_dir, so
+        in a subprocess with GTN_CONFIG_WORKSPACE_DIRECTORY set to companion_base, so
         ProjectFileDestination converts written paths back to macro form (e.g.
         "{outputs}/file.jpg") when storing output values. Absolute path_macros ensure the
         gizmo receives real absolute paths.
         """
-        project_yml = companion_dir / "project.yml"
+        project_yml = companion_base / "project.yml"
         if not project_yml.exists():
             return
 
@@ -126,12 +139,10 @@ class NukeGizmoPublisher:
             logger.warning("Could not parse project.yml for Nuke path rewrite. Skipping.")
             return
 
-        # Point outputs and inputs directly at the companion directory so all
-        # generated files land in the gizmo folder alongside the workflow.
         absolute_path_overrides = {
-            "outputs": str(companion_dir / "outputs"),
-            "inputs": str(companion_dir / "inputs"),
-            "temp": str(companion_dir / "temp"),
+            "outputs": str(companion_base / "outputs"),
+            "inputs": str(companion_base / "inputs"),
+            "temp": str(companion_base / "temp"),
         }
         for dir_name, override_path in absolute_path_overrides.items():
             if dir_name in template.directories:
@@ -161,16 +172,64 @@ class NukeGizmoPublisher:
             return None
         return Path(choice)
 
-    def _save_publish_config(self) -> None:
-        """Persist publish selections into the NukeStartFlow node metadata for future pre-population."""
+    def _get_saved_version(self) -> int | None:
+        """Read the saved version number from NukeStartFlow metadata, falling back to dialog metadata."""
+        start_flow = self._get_nuke_start_flow_node()
+        if start_flow is not None:
+            saved = start_flow.metadata.get("publish_config", {})
+            v = saved.get("version")
+            if v is not None:
+                return int(v)
+        v = self._metadata.get("version")
+        if v is not None:
+            return int(v)
+        return None
+
+    def _collect_versions(self, companion_base: Path) -> list[int]:
+        """Return a sorted list of version numbers from existing version subdirs."""
+        versions = []
+        if not companion_base.exists():
+            return versions
+        for p in companion_base.iterdir():
+            if p.is_dir() and p.name.startswith("v"):
+                try:
+                    versions.append(int(p.name[1:]))
+                except ValueError:
+                    continue
+        return sorted(versions)
+
+    def _determine_version(self, companion_base: Path) -> int:
+        """Determine the target version number based on update_mode metadata.
+
+        - "update current version": keep the same version number (overwrite in place)
+        - "publish new version": increment the version number
+        - no saved version / first-time publish: scan disk, default to 1
+        """
+        update_mode = self._metadata.get("update_mode", "").lower()
+        saved_version = self._get_saved_version()
+
+        if "new version" in update_mode:
+            return (saved_version or 0) + 1
+        if "current version" in update_mode and saved_version is not None:
+            return saved_version
+
+        # First-time publish or fallback: scan disk for existing versions
+        existing = self._collect_versions(companion_base)
+        if existing:
+            return max(existing) + 1
+        return 1
+
+    def _save_publish_config(self, gizmo_path: Path, version: int) -> None:
+        """Persist publish selections and version into the NukeStartFlow node metadata for future pre-population."""
         start_flow = self._get_nuke_start_flow_node()
         if start_flow is None:
             return
         start_flow.metadata["publish_config"] = {
-            "publish_format": "gizmo",
             "nuke": self._metadata.get("nuke"),
             "gizmo_install_path": self._metadata.get("gizmo_install_path"),
             "custom_gizmo_path": self._metadata.get("custom_gizmo_path"),
+            "gizmo_path": str(gizmo_path),
+            "version": version,
         }
 
     def _get_nuke_start_flow_node(self):  # noqa: ANN202

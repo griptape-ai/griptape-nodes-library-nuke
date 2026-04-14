@@ -16,6 +16,7 @@ readable and testable.
     media_output_read_map (dict[str,str]): media output name -> internal Read node name
     input_node_prefix (str): prefix for internal Input node names (e.g. "Input")
     temp_file_prefix (str): prefix for temp render files (e.g. "gt_input")
+    versioned (bool): True when the gizmo uses the versioned layout (v1/, v2/, etc.)
 
 This module runs inside Nuke's Python interpreter (stdlib only — no third-party
 packages available). ``nuke`` is already in scope when exec'd from the gizmo.
@@ -46,14 +47,23 @@ _temp_file_prefix: str = _config.get("temp_file_prefix", "gt_input")
 
 node = nuke.thisNode()  # noqa: F821  # 'nuke' is in scope when exec'd from the gizmo
 companion = node["_companion_dir"].value()
-workflow_file = os.path.join(companion, _workflow_filename)
+
+# Versioned gizmos store each workflow file in a version subdir (v1/, v2/, ...).
+# The griptape_version knob on the node controls which version is run.
+# Unversioned gizmos (published before this feature) store the workflow directly in companion.
+if _config.get("versioned") and node.knob("griptape_version"):
+    _selected_version = node["griptape_version"].value()
+    workflow_file = os.path.join(companion, _selected_version, _workflow_filename)
+else:
+    workflow_file = os.path.join(companion, _workflow_filename)
+
 runner = os.path.join(companion, "run_workflow.py")
 output_dir = node["output_dir"].value() or companion
 
 # -- Node error state helpers --
 # Tile color values: 0xff9900ff = Griptape orange (default), 0xff0000ff = red (error)
-_DEFAULT_TILE_COLOR = 0xff9900ff
-_ERROR_TILE_COLOR = 0xff0000ff
+_DEFAULT_TILE_COLOR = 0xFF9900FF
+_ERROR_TILE_COLOR = 0xFF0000FF
 
 
 def _set_node_error(message: str) -> None:
@@ -67,6 +77,7 @@ def _clear_node_error() -> None:
     """Restore the gizmo to its default (non-error) appearance."""
     node["tile_color"].setValue(_DEFAULT_TILE_COLOR)
     node["label"].setValue("")
+
 
 # -- Collect input values from knobs --
 
@@ -139,9 +150,11 @@ if not uv:
                 uv = _p
                 break
     else:
-        msg = ("Failed to install uv automatically.\n"
+        msg = (
+            "Failed to install uv automatically.\n"
             "Install it manually: https://docs.astral.sh/uv/getting-started/installation/\n"
-            "Then restart Nuke.")
+            "Then restart Nuke."
+        )
         nuke.message(msg)  # noqa: F821
         _set_node_error(msg)
 

@@ -86,6 +86,10 @@ class NukeGizmoBuilder:
     - A hidden knob storing the companion directory path
     - One Input pipe per media input parameter for Nuke graph connectivity
     - One Output pipe per media output parameter (each backed by an internal Read node)
+
+    When ``available_versions`` is provided (versioned publish), an enumeration knob named
+    ``griptape_version`` is added at the top of the tab so users can switch between published
+    versions. The run button bootstrap reads this knob to locate the correct workflow file.
     """
 
     def __init__(
@@ -94,11 +98,15 @@ class NukeGizmoBuilder:
         workflow_shape: dict,
         companion_dir: str,
         workflow_file: str,
+        available_versions: list[int] | None = None,
+        current_version: int | None = None,
     ) -> None:
         self._workflow_name = workflow_name
         self._workflow_shape = workflow_shape
         self._companion_dir = companion_dir
         self._workflow_file = workflow_file
+        self._available_versions: list[int] = available_versions or []
+        self._current_version: int | None = current_version
 
     def generate(self) -> str:
         """Return the full text content of the .gizmo file."""
@@ -115,6 +123,16 @@ class NukeGizmoBuilder:
 
         # --- Griptape tab ---
         w.add_tab("griptape_tab", label=_label(self._workflow_name))
+
+        # Version selector — only present on versioned (updated) gizmos
+        if self._available_versions:
+            version_choices = [f"v{v}" for v in self._available_versions]
+            default_idx = None
+            if self._current_version is not None:
+                current_label = f"v{self._current_version}"
+                if current_label in version_choices:
+                    default_idx = version_choices.index(current_label)
+            w.add_enumeration_knob("griptape_version", "Version", version_choices, default_index=default_idx)
 
         # Input knobs
         if input_params:
@@ -300,6 +318,7 @@ class NukeGizmoBuilder:
                 "media_output_read_map": media_output_read_map,
                 "input_node_prefix": _INPUT_NODE_PREFIX,
                 "temp_file_prefix": _TEMP_FILE_PREFIX,
+                "versioned": bool(self._available_versions),
             }
         )
 

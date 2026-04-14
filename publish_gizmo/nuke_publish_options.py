@@ -85,21 +85,9 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
     custom_gizmo_default = current.get("custom_gizmo_path", str(Path.home() / ".nuke"))
     custom_hidden = selected_gizmo != GIZMO_INSTALL_CUSTOM
 
-    saved_format = current.get("publish_format", "livegroup")
+    is_update = bool(current.get("gizmo_path") and current.get("version") is not None)
 
     fields = [
-        PublishOptionField(
-            name="publish_format",
-            label="Publish Format",
-            field_type="dropdown",
-            tooltip=(
-                "LiveGroup: publishes as a versioned .nk file that Nuke can reload when updated (recommended). "
-                "Gizmo: publishes as a static .gizmo file."
-            ),
-            choices=["livegroup", "gizmo"],
-            default_value=saved_format,
-            depends_on=None,
-        ),
         PublishOptionField(
             name="nuke",
             label="Nuke Installation",
@@ -135,7 +123,50 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
         ),
     ]
 
+    if is_update:
+        saved_version = int(current["version"])
+        next_version = saved_version + 1
+
+        # Update mode selector prepended at the top of the dialog
+        fields.insert(
+            0,
+            PublishOptionField(
+                name="update_mode",
+                label="Update Mode",
+                field_type="dropdown",
+                tooltip=f"Currently published as v{saved_version} at {current.get('gizmo_path', '')}",
+                choices=[
+                    f"Update current version (v{saved_version})",
+                    f"Publish new version (v{next_version})",
+                ],
+                default_value=f"Update current version (v{saved_version})",
+                depends_on=None,
+            ),
+        )
+
+        # Hidden fields pass version info through to the publisher via metadata
+        fields.append(
+            PublishOptionField(
+                name="version",
+                label="",
+                field_type="text",
+                default_value=str(saved_version),
+                hidden=True,
+            )
+        )
+        fields.append(
+            PublishOptionField(
+                name="gizmo_path",
+                label="",
+                field_type="text",
+                default_value=current.get("gizmo_path", ""),
+                hidden=True,
+            )
+        )
+
     return GetPublishOptionsResultSuccess(
         fields=fields,
+        title="Update Published Gizmo" if is_update else None,
+        button_label="Update" if is_update else None,
         result_details="Nuke publish options resolved successfully.",
     )
