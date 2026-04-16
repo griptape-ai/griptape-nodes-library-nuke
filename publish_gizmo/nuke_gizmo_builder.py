@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 
+from publish_gizmo.constants import RUN_BUTTON_FILENAME, versioned_gizmo_glob, versioned_node_name
 from publish_gizmo.gizmo_validator import validate_gizmo_text
 from publish_gizmo.gizmo_writer import GizmoWriter, NukeKnobType
 
@@ -78,18 +79,10 @@ def _label(name: str) -> str:
 class NukeGizmoBuilder:
     """Generates a Nuke .gizmo text file from a Griptape workflow shape.
 
-    The generated gizmo has:
-    - One knob per user-defined input parameter (mapped from Griptape types to Nuke knob types)
-    - A file picker for output directory
-    - One read-only knob per user-defined output parameter (filled after workflow runs)
-    - A "Run Workflow" button that loads and executes run_button.py from the companion directory
-    - A hidden knob storing the companion directory path
-    - One Input pipe per media input parameter for Nuke graph connectivity
-    - One Output pipe per media output parameter (each backed by an internal Read node)
-
-    When ``available_versions`` is provided (versioned publish), an enumeration knob named
-    ``griptape_version`` is added at the top of the tab so users can switch between published
-    versions. The run button bootstrap reads this knob to locate the correct workflow file.
+    Every generated gizmo is versioned (e.g. ``my_workflow_v01``). When
+    ``available_versions`` is provided, a ``griptape_version`` enumeration knob
+    and a ``knobChanged`` swap callback are added so artists can switch between
+    published versions without leaving the properties panel.
     """
 
     def __init__(
@@ -119,12 +112,16 @@ class NukeGizmoBuilder:
 
         w = GizmoWriter()
 
-        w.begin_gizmo(_safe_knob_name(self._workflow_name))
+        safe_name = _safe_knob_name(self._workflow_name)
+        gizmo_node_name = versioned_node_name(safe_name, self._current_version or 1)
+        w.begin_gizmo(gizmo_node_name)
+
+        if self._available_versions:
+            w.set_knob_changed(self._build_knob_changed_code())
 
         # --- Griptape tab ---
         w.add_tab("griptape_tab", label=_label(self._workflow_name))
 
-        # Version selector — only present on versioned (updated) gizmos
         if self._available_versions:
             version_choices = [f"v{v}" for v in self._available_versions]
             default_idx = None
@@ -177,33 +174,21 @@ class NukeGizmoBuilder:
         media_input_names: list[str],
         media_output_names: list[str],
     ) -> None:
-        """Write the gizmo's internal node graph into w.
-
-        Creates one Input node per media input parameter and one Output node per
-        media output parameter. Each Output is backed by its own Read node so the
-        result image appears inline in Nuke's viewer.
-
-        When there are no media inputs, a single Input is still created so the gizmo
-        has at least one pipe. When there are no media outputs a single floating
-        Output is created.
-        """
+        """Write the gizmo's internal node graph into w."""
         ypos = -100
 
-        # --- Input nodes ---
         if media_input_names:
             for idx, _name in enumerate(media_input_names):
                 w.add_input_node(_input_node_name(idx), xpos=idx * 200, ypos=ypos)
         else:
             w.add_input_node(_input_node_name(0), xpos=0, ypos=ypos)
 
-        # --- Output nodes (one per media output, each with its own Read node) ---
         if media_output_names:
             for idx, name in enumerate(media_output_names):
                 xpos = idx * 200
                 w.add_read_node(_read_node_name(name), xpos=xpos, ypos=0)
                 w.add_output_node(_output_node_name(idx), xpos=xpos, ypos=100)
         else:
-            # No media outputs — floating Output with no Read node
             w.add_output_node(_output_node_name(0), xpos=0, ypos=100, no_inputs=True)
 
     def _get_start_node_name(self) -> str:
@@ -243,33 +228,20 @@ class NukeGizmoBuilder:
         ui_options = info.get("ui_options", {})
         default = info.get("default_value")
 
-        # Enumeration (dropdown) knob
         if "simple_dropdown" in ui_options:
             choices = ui_options["simple_dropdown"]
             default_index = choices.index(default) if default and default in choices else None
             w.add_enumeration_knob(knob_name, label, choices, default_index=default_index)
-
-        # File path knob (images, audio, blobs)
         elif param_type in _FILE_PATH_TYPES:
             w.add_file_knob(knob_name, label, default=default or None)
-
-        # Boolean knob
         elif param_type == "bool":
             w.add_bool_knob(knob_name, label, default=default)
-
-        # Float knob
         elif param_type == "float":
             w.add_double_knob(knob_name, label, default=default)
-
-        # Int knob
         elif param_type == "int":
             w.add_int_knob(knob_name, label, default=default)
-
-        # Multi-line string knob (CSV, JSON, etc.)
         elif param_type in _MULTILINE_TYPES:
             w.add_multiline_string_knob(knob_name, label, default=default or None)
-
-        # String knob (default for str and anything else)
         else:
             w.add_string_knob(knob_name, label, default=default or None)
 
@@ -286,6 +258,115 @@ class NukeGizmoBuilder:
         else:
             w.add_string_knob(knob_name, label, flags="+DISABLED")
 
+    def _build_knob_changed_code(self) -> str:
+        """Build the knobChanged callback embedded in the gizmo.
+
+        Handles two events:
+        - ``showPanel``: resolves the companion dir and refreshes the version
+          dropdown from ``nuke.plugins()`` so newly published versions appear
+          without re-publishing.
+        - ``griptape_version``: swaps the current node for the selected version's
+          gizmo (LiveGroup-style), transferring all connections and knob values.
+        """
+        workflow_name = self._workflow_name
+        safe_name = _safe_knob_name(workflow_name)
+        version_glob = versioned_gizmo_glob(safe_name)
+        return f"""\
+import os as _os, re as _re
+_k = nuke.thisKnob()
+_node = nuke.thisNode()
+
+def _resolve_companion(_node):
+    _companion = _node["_companion_dir"].value()
+    if not _companion or not _os.path.isdir(_companion):
+        for _d in nuke.pluginPath():
+            _c = _os.path.join(_d, "{workflow_name}")
+            if _os.path.isdir(_c) and _os.path.isfile(_os.path.join(_c, "{RUN_BUTTON_FILENAME}")):
+                _companion = _c
+                _node["_companion_dir"].setValue(_companion)
+                break
+    return _companion
+
+if _k and _k.name() == "showPanel":
+    _companion = _resolve_companion(_node)
+    if _companion and _os.path.isdir(_companion):
+        _found = nuke.plugins(nuke.ALL, "{version_glob}")
+        _nums = []
+        for _p in _found:
+            _m = _re.search(r"_v(\\d+)\\.gizmo$", _os.path.basename(_p))
+            if _m:
+                _nums.append(int(_m.group(1)))
+        if _nums:
+            _choices = ["v" + str(n) for n in sorted(_nums)]
+            _vk = _node.knob("griptape_version")
+            if _vk:
+                _cur = _vk.value()
+                _vk.setValues(_choices)
+                if _cur in _choices:
+                    _vk.setValue(_cur)
+
+elif _k and _k.name() == "griptape_version":
+    _new_ver = _node["griptape_version"].value()  # e.g. "v2"
+    _padded = _new_ver[1:].zfill(2)
+    _target = "{safe_name}_v" + _padded
+    if _node.Class() != _target:
+        _name = _node.name()
+        _xpos = _node.xpos()
+        _ypos = _node.ypos()
+        _companion = _resolve_companion(_node)
+        _output_dir = _node["output_dir"].value() if _node.knob("output_dir") else ""
+        _upstream = {{}}
+        for _i in range(_node.inputs()):
+            _inp = _node.input(_i)
+            if _inp:
+                _upstream[_i] = _inp.name()
+        _downstream = []
+        for _n in nuke.allNodes():
+            if _n == _node:
+                continue
+            for _i in range(_n.inputs()):
+                if _n.input(_i) == _node:
+                    _downstream.append((_n.name(), _i))
+        _skip = {{"griptape_version", "run_workflow", "tile_color", "label", "xpos", "ypos", "name"}}
+        _vals = {{}}
+        for _kn in _node.allKnobs():
+            _kn_name = _kn.name()
+            if _kn_name and not _kn_name.startswith("_") and _kn_name not in _skip:
+                try:
+                    _vals[_kn_name] = _kn.value()
+                except Exception:
+                    pass
+        # Free the name before creating the replacement so there is no conflict
+        _node.setName("__gt_swap_pending__")
+        _new = nuke.createNode(_target, inpanel=False)
+        _new.setName(_name)
+        _new.setXpos(_xpos)
+        _new.setYpos(_ypos)
+        if _companion and _new.knob("_companion_dir"):
+            _new["_companion_dir"].setValue(_companion)
+        if _output_dir and _new.knob("output_dir"):
+            _new["output_dir"].setValue(_output_dir)
+        if _new.knob("griptape_version"):
+            _new["griptape_version"].setValue(_new_ver)
+        for _kn_name, _val in _vals.items():
+            if _new.knob(_kn_name):
+                try:
+                    _new[_kn_name].setValue(_val)
+                except Exception:
+                    pass
+        for _i, _inp_name in _upstream.items():
+            _inp = nuke.toNode(_inp_name)
+            if _inp:
+                _new.setInput(_i, _inp)
+        for _dep_name, _dep_i in _downstream:
+            _dep = nuke.toNode(_dep_name)
+            if _dep:
+                _dep.setInput(_dep_i, _new)
+        nuke.show(_new)
+        # Defer deletion — destroying thisNode() inside its own knobChanged is unsafe
+        nuke.executeDeferred(lambda _n=_node: nuke.delete(_n))
+"""
+
     def _build_run_button_bootstrap(
         self,
         input_params: dict[str, dict],
@@ -293,54 +374,45 @@ class NukeGizmoBuilder:
         media_output_names: list[str],
         media_input_names: list[str],
     ) -> str:
-        """Build a short bootstrap script that loads run_button.py from the companion dir.
-
-        The full button logic lives in run_button.py (shipped alongside the workflow).
-        The gizmo only needs to load it — this keeps the TCL-escaped content minimal.
-        The workflow-specific values (param names, media input/output lists, etc.) are
-        passed to run_button.py via a JSON config dict stored in the gizmo's knobs.
-        """
+        """Build a short bootstrap that loads run_button.py from the companion dir."""
         workflow_filename = os.path.basename(self._workflow_file)
+        workflow_name = self._workflow_name
+        safe_name = _safe_knob_name(workflow_name)
 
         param_names = list(input_params.keys())
         media_input_index_map = {name: idx for idx, name in enumerate(media_input_names)}
         media_output_read_map = {name: _read_node_name(name) for name in media_output_names}
 
-        # The config dict is embedded as a Python literal at publish time so that
-        # run_button.py receives workflow-specific context without needing to parse
-        # additional files. All values are plain Python types (str, list, dict).
-        config_repr = repr(
-            {
-                "workflow_filename": workflow_filename,
-                "start_node_name": start_node_name,
-                "param_names": param_names,
-                "media_input_names": media_input_names,
-                "media_output_names": media_output_names,
-                "media_input_index_map": media_input_index_map,
-                "media_output_read_map": media_output_read_map,
-                "input_node_prefix": _INPUT_NODE_PREFIX,
-                "temp_file_prefix": _TEMP_FILE_PREFIX,
-                "versioned": bool(self._available_versions),
-            }
-        )
+        config: dict = {
+            "workflow_name": workflow_name,
+            "workflow_filename": workflow_filename,
+            "start_node_name": start_node_name,
+            "param_names": param_names,
+            "media_input_names": media_input_names,
+            "media_output_names": media_output_names,
+            "media_input_index_map": media_input_index_map,
+            "media_output_read_map": media_output_read_map,
+            "input_node_prefix": _INPUT_NODE_PREFIX,
+            "temp_file_prefix": _TEMP_FILE_PREFIX,
+            "version": f"v{self._current_version}",
+        }
+        config_repr = repr(config)
 
-        gizmo_class = _safe_knob_name(self._workflow_name)
-        companion_subdir = f"griptape_gizmos/{self._workflow_name}"
         return f"""\
 import os as _os
 _node = nuke.thisNode()
 _companion = _node["_companion_dir"].value()
 if not _companion or not _os.path.isdir(_companion):
     for _d in nuke.pluginPath():
-        _c = _os.path.join(_d, "{companion_subdir}")
-        if _os.path.isdir(_c):
+        _c = _os.path.join(_d, "{workflow_name}")
+        if _os.path.isdir(_c) and _os.path.isfile(_os.path.join(_c, "{RUN_BUTTON_FILENAME}")):
             _companion = _c
             _node["_companion_dir"].setValue(_companion)
             break
 if not _companion or not _os.path.isdir(_companion):
-    nuke.message("Griptape: cannot find companion directory for '{gizmo_class}'. Make sure the griptape_gizmos folder is in the same directory as the .gizmo file.")
+    nuke.message("Griptape: cannot find companion directory for '{safe_name}'. Make sure the griptape folder is on Nuke's plugin path.")
 else:
-    _btn_path = _os.path.join(_companion, "run_button.py")
+    _btn_path = _os.path.join(_companion, "{RUN_BUTTON_FILENAME}")
     with open(_btn_path) as _f:
         exec(compile(_f.read(), _btn_path, "exec"), dict(globals(), **{{"__file__": _btn_path, "_config": {config_repr}}}))
 """

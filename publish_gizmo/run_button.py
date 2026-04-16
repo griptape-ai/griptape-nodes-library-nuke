@@ -16,7 +16,8 @@ readable and testable.
     media_output_read_map (dict[str,str]): media output name -> internal Read node name
     input_node_prefix (str): prefix for internal Input node names (e.g. "Input")
     temp_file_prefix (str): prefix for temp render files (e.g. "gt_input")
-    versioned (bool): True when the gizmo uses the versioned layout (v1/, v2/, etc.)
+    version (str): version string, e.g. "v1". The workflow file is resolved as
+        ``companion/<version>/workflow.py``.
 
 This module runs inside Nuke's Python interpreter (stdlib only — no third-party
 packages available). ``nuke`` is already in scope when exec'd from the gizmo.
@@ -30,7 +31,6 @@ import subprocess
 import tempfile
 
 # _config is injected by the gizmo bootstrap before this file is exec'd.
-# globals().get reads the injected value when present; falls back to {} otherwise.
 _config: dict = globals().get("_config", {})
 
 _workflow_filename: str = _config.get("workflow_filename", "")
@@ -43,25 +43,32 @@ _media_output_read_map: dict = _config.get("media_output_read_map", {})
 _input_node_prefix: str = _config.get("input_node_prefix", "Input")
 _temp_file_prefix: str = _config.get("temp_file_prefix", "gt_input")
 
-# -- Resolve paths from the gizmo node --
+# -- Resolve companion directory --
 
 node = nuke.thisNode()  # noqa: F821  # 'nuke' is in scope when exec'd from the gizmo
 
-# _companion_dir is resolved by the bootstrap before this file is exec'd.
-# By the time we get here it should be set, but guard against stale .nk values
-# (absolute path from a different machine that no longer exists on disk).
+# Guard against stale .nk values (absolute path from a different machine).
 companion = node["_companion_dir"].value()
+if not companion or not os.path.isdir(companion):
+    _workflow_name = _config.get("workflow_name", "")
+    if _workflow_name:
+        for _d in nuke.pluginPath():  # noqa: F821
+            _c = os.path.join(_d, _workflow_name)
+            if os.path.isdir(_c) and os.path.isfile(os.path.join(_c, "run_button.py")):
+                companion = _c
+                node["_companion_dir"].setValue(companion)
+                break
+
 if not companion or not os.path.isdir(companion):
     raise RuntimeError(
         f"Griptape: companion directory not found: {companion!r}. "
-        "Re-publish the gizmo or ensure griptape_gizmos/ is in the same directory as the .gizmo file."
+        "Re-publish the gizmo or ensure the griptape folder is on Nuke's plugin path."
     )
 
-# Versioned gizmos store each workflow file in a version subdir (v1/, v2/, ...).
-# The griptape_version knob on the node controls which version is run.
-# Unversioned gizmos (published before this feature) store the workflow directly in companion.
-if _config.get("versioned") and node.knob("griptape_version"):
-    _selected_version = node["griptape_version"].value()
+# -- Resolve workflow file from version subdir --
+
+_selected_version = _config.get("version")
+if _selected_version:
     workflow_file = os.path.join(companion, _selected_version, _workflow_filename)
 else:
     workflow_file = os.path.join(companion, _workflow_filename)
@@ -196,7 +203,6 @@ if uv:
             for _k, _v in output.items():
                 if node.knob(_k):
                     node[_k].setValue(str(_v))
-            # Display each media output in its corresponding internal Read node
             for _mk in _media_output_names:
                 _mv = output.get(_mk, "")
                 if _mv and os.path.isfile(str(_mv)):

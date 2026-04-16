@@ -79,6 +79,16 @@ class GizmoWriter:
         self._lines.append(f" tile_color {tile_color}")
         self._lines.append("")
 
+    def set_knob_changed(self, python_code: str) -> None:
+        """Set a knobChanged callback on the Gizmo block.
+
+        Must be called between ``begin_gizmo()`` and ``end_gizmo_header()``.
+        Nuke fires the callback whenever any knob on the node changes;
+        the code should check ``nuke.thisKnob().name()`` to filter events.
+        """
+        escaped = _tcl_escape(python_code)
+        self._lines.append(f' knobChanged "{escaped}"')
+
     def end_gizmo_header(self) -> None:
         """Close the ``Gizmo { ... }`` knob block (does NOT end the group)."""
         self._lines.append("}")

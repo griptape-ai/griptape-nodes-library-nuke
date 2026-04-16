@@ -16,6 +16,12 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.publishing import WorkflowPackager
 
+from publish_gizmo.constants import (
+    GRIPTAPE_DIR_NAME,
+    INIT_MARKER,
+    VERSION_RE,
+    versioned_gizmo_filename,
+)
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
 from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder
 
@@ -57,16 +63,15 @@ class NukeGizmoPublisher:
             workflow_file_path = Path(WorkflowRegistry.get_complete_file_path(workflow.file_path))
             workflow_stem = workflow_file_path.stem
 
-            # Single companion base dir per workflow; versions are subdirectories inside it
-            companion_base = install_dir / "griptape_gizmos" / workflow_stem
+            # All griptape artifacts live under a single subdirectory of the install dir
+            griptape_dir = install_dir / GRIPTAPE_DIR_NAME
+            companion_base = griptape_dir / workflow_stem
 
-            # Determine which version to write (new version or update current)
             version = self._determine_version(companion_base)
             version_dir = companion_base / f"v{version}"
             version_dir.mkdir(parents=True, exist_ok=True)
 
             # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
-            # The workflow file also lands here first — we move it into the version subdir below.
             self._packager.package_to_folder(companion_base, workflow)
 
             # Move the workflow file from companion base into the version subdir
@@ -77,15 +82,12 @@ class NukeGizmoPublisher:
 
             # Copy the runner and button scripts (shared, overwrite on each publish)
             self._packager.emit_progress(5.0, "Writing runner script...")
-            runner_src = Path(__file__).parent / "nuke_workflow_runner.py"
-            shutil.copy2(runner_src, companion_base / "run_workflow.py")
-            run_button_src = Path(__file__).parent / "run_button.py"
-            shutil.copy2(run_button_src, companion_base / "run_button.py")
+            shutil.copy2(Path(__file__).parent / "nuke_workflow_runner.py", companion_base / "run_workflow.py")
+            shutil.copy2(Path(__file__).parent / "run_button.py", companion_base / "run_button.py")
 
-            # Collect all version subdirectories for the gizmo version knob
             available_versions = self._collect_versions(companion_base)
 
-            # Generate the wrapper gizmo with the stable name and version knob
+            # Generate the versioned gizmo (flat in griptape_dir, not inside companion)
             self._packager.emit_progress(10.0, "Generating gizmo...")
             builder = NukeGizmoBuilder(
                 workflow_name=workflow_stem,
@@ -95,33 +97,34 @@ class NukeGizmoPublisher:
                 available_versions=available_versions,
                 current_version=version,
             )
-            gizmo_text = builder.generate()
+            gizmo_path = griptape_dir / versioned_gizmo_filename(workflow_stem, version)
+            gizmo_path.write_text(builder.generate(), encoding="utf-8")
+            logger.info("Gizmo written to: %s", gizmo_path)
 
-            wrapper_path = install_dir / f"{workflow_stem}.gizmo"
-            wrapper_path.write_text(gizmo_text, encoding="utf-8")
-            logger.info("Gizmo written to: %s", wrapper_path)
+            # One-time plugin path setup + regenerate menu
+            self._ensure_init_plugin_path(install_dir)
+            self._regenerate_menu_py(griptape_dir)
 
-            # Persist the user's publish selections and version into the NukeStartFlow node metadata
-            self._save_publish_config(wrapper_path, version)
+            self._save_publish_config(gizmo_path, version)
 
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
             return PublishWorkflowResultSuccess(
-                published_workflow_file_path=str(wrapper_path),
+                published_workflow_file_path=str(gizmo_path),
                 skip_published_workflow_registration=True,
-                result_details=f"Gizmo v{version} installed to: {wrapper_path}",
+                result_details=f"Gizmo v{version} installed to: {gizmo_path}",
             )
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
 
+    # -- Validation and path helpers --
+
     def _validate(self) -> list[Exception]:
         errors: list[Exception] = []
-        start_flow = self._get_nuke_start_flow_node()
-        if start_flow is None:
+        if self._get_nuke_start_flow_node() is None:
             errors.append(ValueError("No NukeStartFlow node found in the workflow."))
             return errors
-        install_dir = self._resolve_gizmo_install_path()
-        if install_dir is None:
+        if self._resolve_gizmo_install_path() is None:
             errors.append(ValueError("Gizmo install path is not configured. Please set it in the publish dialog."))
         return errors
 
@@ -133,24 +136,32 @@ class NukeGizmoPublisher:
             return None
         return Path(choice)
 
+    def _get_nuke_start_flow_node(self):  # noqa: ANN202
+        result = GriptapeNodes.handle_request(GetTopLevelFlowRequest())
+        if not isinstance(result, GetTopLevelFlowResultSuccess) or result.flow_name is None:
+            return None
+        control_flow = GriptapeNodes.FlowManager().get_flow_by_name(result.flow_name)
+        for node in control_flow.nodes.values():
+            if node.__class__.__name__ == "NukeStartFlow":
+                return node
+        return None
+
+    # -- Version management --
+
     def _get_saved_version(self) -> int | None:
-        """Read the saved version number from NukeStartFlow metadata, falling back to dialog metadata."""
         start_flow = self._get_nuke_start_flow_node()
         if start_flow is not None:
-            saved = start_flow.metadata.get("publish_config", {})
-            v = saved.get("version")
+            v = start_flow.metadata.get("publish_config", {}).get("version")
             if v is not None:
                 return int(v)
         v = self._metadata.get("version")
-        if v is not None:
-            return int(v)
-        return None
+        return int(v) if v is not None else None
 
     def _collect_versions(self, companion_base: Path) -> list[int]:
         """Return a sorted list of version numbers from existing version subdirs."""
-        versions = []
         if not companion_base.exists():
-            return versions
+            return []
+        versions = []
         for p in companion_base.iterdir():
             if p.is_dir() and p.name.startswith("v"):
                 try:
@@ -160,12 +171,6 @@ class NukeGizmoPublisher:
         return sorted(versions)
 
     def _determine_version(self, companion_base: Path) -> int:
-        """Determine the target version number based on update_mode metadata.
-
-        - "update current version": keep the same version number (overwrite in place)
-        - "publish new version": increment the version number
-        - no saved version / first-time publish: scan disk, default to 1
-        """
         update_mode = self._metadata.get("update_mode", "").lower()
         saved_version = self._get_saved_version()
 
@@ -174,14 +179,10 @@ class NukeGizmoPublisher:
         if "current version" in update_mode and saved_version is not None:
             return saved_version
 
-        # First-time publish or fallback: scan disk for existing versions
         existing = self._collect_versions(companion_base)
-        if existing:
-            return max(existing) + 1
-        return 1
+        return max(existing) + 1 if existing else 1
 
     def _save_publish_config(self, gizmo_path: Path, version: int) -> None:
-        """Persist publish selections and version into the NukeStartFlow node metadata for future pre-population."""
         start_flow = self._get_nuke_start_flow_node()
         if start_flow is None:
             return
@@ -193,12 +194,47 @@ class NukeGizmoPublisher:
             "version": version,
         }
 
-    def _get_nuke_start_flow_node(self):  # noqa: ANN202
-        result = GriptapeNodes.handle_request(GetTopLevelFlowRequest())
-        if not isinstance(result, GetTopLevelFlowResultSuccess) or result.flow_name is None:
-            return None
-        control_flow = GriptapeNodes.FlowManager().get_flow_by_name(result.flow_name)
-        for node in control_flow.nodes.values():
-            if node.__class__.__name__ == "NukeStartFlow":
-                return node
-        return None
+    # -- Plugin registration file writers --
+
+    def _ensure_init_plugin_path(self, install_dir: Path) -> None:
+        """Append a single pluginAddPath for the griptape dir to init.py, once.
+
+        Uses a marker comment to detect an existing entry so subsequent
+        publishes are no-ops and the user's own init.py content is preserved.
+        """
+        init_path = install_dir / "init.py"
+        existing = init_path.read_text(encoding="utf-8") if init_path.exists() else ""
+        if INIT_MARKER in existing:
+            return
+
+        line = (
+            f"import nuke as _nuke, os as _os  {INIT_MARKER}\n"
+            f"_nuke.pluginAddPath(_os.path.join(_os.path.dirname(__file__), '{GRIPTAPE_DIR_NAME}'))"
+        )
+        updated = (existing.rstrip("\n") + "\n\n" + line + "\n") if existing.strip() else line + "\n"
+        init_path.write_text(updated, encoding="utf-8")
+        logger.info("init.py updated at: %s", init_path)
+
+    def _regenerate_menu_py(self, griptape_dir: Path) -> None:
+        """Regenerate griptape/menu.py by scanning all versioned gizmo files on disk.
+
+        Groups gizmo files by workflow stem, picks the highest version per
+        workflow, and writes one menu entry per workflow pointing at that version.
+        """
+        workflows: dict[str, tuple[int, str]] = {}  # stem -> (max_version, node_name)
+        for gizmo_file in griptape_dir.glob("*_v*.gizmo"):
+            match = VERSION_RE.match(gizmo_file.name)
+            if not match:
+                continue
+            stem, ver = match.group(1), int(match.group(2))
+            if stem not in workflows or ver > workflows[stem][0]:
+                workflows[stem] = (ver, gizmo_file.stem)
+
+        lines = ["import nuke", "", "toolbar = nuke.menu('Nodes')", "griptape_menu = toolbar.addMenu('Griptape')", ""]
+        for stem in sorted(workflows):
+            _, node_name = workflows[stem]
+            label = stem.replace("_", " ").title()
+            lines.append(f"griptape_menu.addCommand('{label}', \"nuke.createNode('{node_name}')\")")
+
+        (griptape_dir / "menu.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        logger.info("menu.py regenerated at: %s (%d workflows)", griptape_dir / "menu.py", len(workflows))
