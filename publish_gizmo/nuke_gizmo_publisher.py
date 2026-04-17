@@ -219,11 +219,16 @@ class NukeGizmoPublisher:
         """Write griptape/menu.py with a dynamic refresh function.
 
         The generated menu.py defines ``_refresh_griptape_menu()`` which uses
-        ``nuke.plugins()`` to discover versioned ``.gizmo`` files at call time,
+        ``nuke.plugins()`` to discover ALL versioned ``.gizmo`` files at call time,
         calls ``nuke.load()`` on each to force Nuke to re-read the TCL from disk,
-        and rebuilds the Griptape menu entries. A "Refresh Griptape Gizmos" command
-        at the top of the menu lets artists pick up new or updated gizmos without
-        restarting Nuke.
+        and rebuilds the Griptape node-creation entries on the Nodes toolbar.
+
+        "Refresh Griptape Gizmos" lives on the main Nuke menu bar (not the Nodes
+        toolbar) so that clicking it never triggers Nuke's node-placement mode.
+
+        When a workflow has multiple published versions each version gets its own
+        entry inside a per-workflow submenu (e.g. Griptape > My Workflow > v1 / v2).
+        Single-version workflows get a flat entry with no submenu.
         """
         menu_code = """\
 import nuke
@@ -233,7 +238,7 @@ _GRIPTAPE_DIR = os.path.dirname(__file__)
 
 
 def _refresh_griptape_menu():
-    \"\"\"Rescan the griptape directory and rebuild the Griptape menu.
+    \"\"\"Rescan the griptape directory and rebuild the Griptape node-creation menu.
 
     Call this after publishing a new or updated gizmo to make it available
     without restarting Nuke.
@@ -242,49 +247,62 @@ def _refresh_griptape_menu():
     nuke.pluginAddPath(_GRIPTAPE_DIR)
 
     # Use nuke.plugins() to discover all versioned gizmos across registered plugin paths.
-    # This is consistent with how the knobChanged callback discovers gizmo versions.
     gizmo_paths = nuke.plugins(nuke.ALL, '*_v*.gizmo')
 
-    # Group by workflow stem, keeping only the highest version per stem.
+    # Collect ALL versions per stem (not just the highest).
     # Filenames follow the pattern "<stem>_v<N>.gizmo"; we parse with rsplit.
-    workflows = {}  # stem -> (max_version, node_name)
+    workflows = {}  # stem -> sorted list of (version, node_name)
     for path in gizmo_paths:
         fname = os.path.basename(path)
         if not fname.endswith('.gizmo'):
             continue
-        name = fname[:-len('.gizmo')]  # strip extension, e.g. "my_workflow_v02"
+        name = fname[:-len('.gizmo')]  # e.g. "my_workflow_v02"
         parts = name.rsplit('_v', 1)
         if len(parts) != 2 or not parts[1].isdigit():
             continue
         stem, ver = parts[0], int(parts[1])
-        if stem not in workflows or ver > workflows[stem][0]:
-            workflows[stem] = (ver, name)
+        workflows.setdefault(stem, []).append((ver, name))
+
+    for stem in workflows:
+        workflows[stem].sort()
 
     # Force Nuke to re-read each gizmo file from disk so that updated definitions
     # take effect for new nuke.createNode() calls.
-    for stem in workflows:
-        node_name = workflows[stem][1]
-        try:
-            nuke.load(node_name + '.gizmo')
-        except RuntimeError:
-            pass  # already loaded; nuke.load raises RuntimeError in that case
+    for stem, versions in workflows.items():
+        for _ver, node_name in versions:
+            try:
+                nuke.load(node_name + '.gizmo')
+            except RuntimeError:
+                pass  # already loaded; nuke.load raises RuntimeError in that case
 
-    # Rebuild the Griptape menu. Remove the existing submenu first so that
-    # repeated calls (e.g. after clicking Refresh) don't accumulate duplicates.
-    toolbar = nuke.menu('Nodes')
+    # Rebuild the Griptape submenu on the Nodes toolbar.
+    # Remove the existing entry first so repeated calls don't accumulate duplicates.
+    nodes_toolbar = nuke.menu('Nodes')
     try:
-        toolbar.removeItem('Griptape')
+        nodes_toolbar.removeItem('Griptape')
     except Exception:
         pass
-    griptape_menu = toolbar.addMenu('Griptape')
-    griptape_menu.addCommand('Refresh Griptape Gizmos', _refresh_griptape_menu)
+    griptape_nodes = nodes_toolbar.addMenu('Griptape')
+
     for stem in sorted(workflows):
-        _, node_name = workflows[stem]
         label = stem.replace('_', ' ').title()
-        griptape_menu.addCommand(label, "nuke.createNode('{}')".format(node_name))
+        versions = workflows[stem]
+        if len(versions) == 1:
+            # Only one version — flat entry, no submenu.
+            node_name = versions[0][1]
+            griptape_nodes.addCommand(label, "nuke.createNode('{}')".format(node_name))
+        else:
+            # Multiple versions — nest them under a per-workflow submenu.
+            workflow_submenu = griptape_nodes.addMenu(label)
+            for ver, node_name in versions:
+                workflow_submenu.addCommand('v{}'.format(ver), "nuke.createNode('{}')".format(node_name))
 
 
-# Populate the menu on startup.
+# "Refresh Griptape Gizmos" lives on the main Nuke menu bar so that clicking
+# it never triggers node-placement mode on the Nodes toolbar.
+nuke.menu('Nuke').addMenu('Griptape').addCommand('Refresh Griptape Gizmos', _refresh_griptape_menu)
+
+# Populate the Nodes toolbar on startup.
 _refresh_griptape_menu()
 """
         (griptape_dir / "menu.py").write_text(menu_code, encoding="utf-8")
