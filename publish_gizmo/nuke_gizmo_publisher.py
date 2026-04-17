@@ -164,7 +164,7 @@ class NukeGizmoPublisher:
         template.situations["save_node_output"] = SituationTemplate(
             name="save_node_output",
             description="Node generates and saves output (Nuke gizmo)",
-            macro="{outputs}/{workflow_name}/{workflow_name}_{node_name}_v{_index:04}.{file_extension}",
+            macro="{outputs}/{workflow_name}/{workflow_name}_{node_name}_v{_index?:04}.{file_extension}",
             policy=SituationPolicy(
                 on_collision=SituationFilePolicy.CREATE_NEW,
                 create_dirs=True,
