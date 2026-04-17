@@ -141,9 +141,11 @@ class NukeGizmoPublisher:
         * ``outputs`` directory is set to ``griptape_outputs`` (relative) so that
           outputs resolve next to the ``.nk`` file when a Nuke script directory
           is passed as the workspace at runtime.
-        * ``save_node_output`` uses a naming convention that includes the
-          workflow name and node name:
-          ``{outputs}/{workflow_name}/{workflow_name}_{node_name}_v{_index:04}.{file_extension}``
+        * ``save_node_output`` uses a naming convention compatible with Nuke conventions.
+          Both ``workflow_name`` and ``node_name`` are optional so that utility callers
+          that omit them (e.g. pillow_nodes_library, video_utils, audio_utils) do not
+          cause "missing required variables" errors:
+          ``{outputs}/{workflow_name?:/}{node_name?:_}{file_name_base}_v{_index?:04}.{file_extension}``
         """
         project_yml = companion_base / "project.yml"
         if not project_yml.exists():
@@ -164,7 +166,7 @@ class NukeGizmoPublisher:
         template.situations["save_node_output"] = SituationTemplate(
             name="save_node_output",
             description="Node generates and saves output (Nuke gizmo)",
-            macro="{outputs}/{workflow_name}/{workflow_name}_{node_name}_v{_index?:04}.{file_extension}",
+            macro="{outputs}/{workflow_name?:/}{node_name?:_}{file_name_base}_v{_index?:04}.{file_extension}",
             policy=SituationPolicy(
                 on_collision=SituationFilePolicy.CREATE_NEW,
                 create_dirs=True,
