@@ -14,6 +14,7 @@ from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowReque
 from griptape_nodes.retained_mode.events.workflow_events import (
     GetPublishOptionsRequest,
     GetPublishOptionsResultSuccess,
+    PublishFieldType,
     PublishOptionField,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
@@ -91,7 +92,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
         PublishOptionField(
             name="nuke",
             label="Nuke Installation",
-            field_type="dropdown",
+            field_type=PublishFieldType.DROPDOWN,
             tooltip=(
                 "Nuke install location (version folder under /Applications, Program Files, etc.). "
                 "The main Nuke binary for that install is used automatically."
@@ -103,7 +104,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
         PublishOptionField(
             name="gizmo_install_path",
             label="Gizmo Install Path",
-            field_type="dropdown",
+            field_type=PublishFieldType.DROPDOWN,
             tooltip=(
                 "Directory where the gizmo will be installed. Choose 'Custom path\u2026' to enter a path manually."
             ),
@@ -114,7 +115,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
         PublishOptionField(
             name="custom_gizmo_path",
             label="Custom Gizmo Path",
-            field_type="file_picker",
+            field_type=PublishFieldType.FILE_PICKER,
             tooltip="Directory where the gizmo should be installed (shown when 'Custom path\u2026' is selected above).",
             choices=None,
             default_value=custom_gizmo_default,
@@ -133,7 +134,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
             PublishOptionField(
                 name="update_mode",
                 label="Update Mode",
-                field_type="dropdown",
+                field_type=PublishFieldType.DROPDOWN,
                 tooltip=f"Currently published as v{saved_version} at {current.get('gizmo_path', '')}",
                 choices=[
                     f"Update current version (v{saved_version})",
@@ -149,7 +150,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
             PublishOptionField(
                 name="version",
                 label="",
-                field_type="text",
+                field_type=PublishFieldType.TEXT,
                 default_value=str(saved_version),
                 hidden=True,
             )
@@ -158,7 +159,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
             PublishOptionField(
                 name="gizmo_path",
                 label="",
-                field_type="text",
+                field_type=PublishFieldType.TEXT,
                 default_value=current.get("gizmo_path", ""),
                 hidden=True,
             )

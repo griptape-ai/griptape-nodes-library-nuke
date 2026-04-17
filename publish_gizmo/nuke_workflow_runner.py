@@ -33,8 +33,15 @@ from griptape_nodes.common.project_templates import load_project_template_from_y
 from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
 
 
-def _bootstrap_environment() -> None:
-    """Load .env and set workspace config, matching LocalPublisher's run.py entrypoint."""
+def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
+    """Load .env and set workspace config, matching LocalPublisher's run.py entrypoint.
+
+    Args:
+        nk_script_dir: If provided, use this as the workspace directory so that
+            project directory macros (``{outputs}``, ``{inputs}``, etc.) resolve
+            relative to the Nuke script rather than the companion bundle.  When
+            *None*, the companion directory is used (original behaviour).
+    """
     script_dir = Path(__file__).parent
 
     # Load .env with python-dotenv (handles quoted values correctly)
@@ -42,11 +49,15 @@ def _bootstrap_environment() -> None:
     if env_path.exists():
         load_dotenv(env_path)
 
-    # Set workspace directory to this script's directory
-    os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = str(script_dir)
+    # When a Nuke script directory is available, use it as the workspace so
+    # that relative directory macros in project.yml (like ``outputs``) resolve
+    # next to the .nk file instead of inside the companion bundle.
+    workspace_dir = nk_script_dir if nk_script_dir else str(script_dir)
+    os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = workspace_dir
     os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 
-    # Supply the project file path if not already set
+    # Supply the project file path if not already set.  The project.yml
+    # always lives in the companion bundle regardless of the workspace.
     project_yml = script_dir / "project.yml"
     if project_yml.exists() and "--project-file-path" not in sys.argv:
         sys.argv.extend(["--project-file-path", str(project_yml)])
@@ -68,11 +79,18 @@ def _load_workflow_module(workflow_file: str):
     return module
 
 
-def _build_macro_map(script_dir: Path) -> dict[str, str]:
+def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dict[str, str]:
     """Build a map of macro names to absolute paths from the project.yml.
 
     The project system stores output values in macro form (e.g. {outputs}/file.jpg).
     This map lets us resolve those macros to real paths that Nuke can open.
+
+    Args:
+        script_dir: The companion bundle directory (where project.yml lives).
+        workspace_dir: If provided, relative directory macros are resolved
+            against this directory instead of *script_dir*.  This is used when
+            the Nuke script directory was passed as the workspace so that
+            ``{outputs}`` etc. point next to the ``.nk`` file.
     """
     project_yml = script_dir / "project.yml"
     if not project_yml.exists():
@@ -83,13 +101,15 @@ def _build_macro_map(script_dir: Path) -> dict[str, str]:
     if template is None:
         return {}
 
-    # Resolve relative macros against script_dir so the companion bundle is portable.
+    base_dir = workspace_dir if workspace_dir is not None else script_dir
+
+    # Resolve relative macros against base_dir so the companion bundle is portable.
     # Absolute path_macros (e.g. from a legacy publish) are kept as-is.
     result = {}
     for dir_def in template.directories.values():
         value = dir_def.path_macro
         if value and not Path(value).is_absolute():
-            value = str(script_dir / value)
+            value = str(base_dir / value)
         result[dir_def.name] = value
     return result
 
@@ -150,7 +170,12 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Directory for output files (used as project_file_path for local storage)",
+        help="Override for the {outputs} directory macro (absolute path at runtime)",
+    )
+    parser.add_argument(
+        "--nk-script-dir",
+        default=None,
+        help="Nuke script directory; used as workspace so project directory macros resolve next to the .nk file",
     )
     parser.add_argument(
         "--storage-backend",
@@ -172,7 +197,7 @@ def main() -> None:
         sys.exit(1)
 
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
-    _bootstrap_environment()
+    _bootstrap_environment(nk_script_dir=args.nk_script_dir)
 
     # Download HuggingFace models if a download script was bundled at publish time
     download_script = Path(__file__).parent / "download_models.py"
@@ -185,10 +210,6 @@ def main() -> None:
         if result.returncode != 0:
             print(json.dumps({"error": f"Model download failed: {result.stderr}"}))
             sys.exit(1)
-
-    # Ensure the output directory exists before the workflow writes to it
-    if args.output_dir:
-        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
     try:
         module = _load_workflow_module(str(workflow_file))
@@ -213,7 +234,8 @@ def main() -> None:
         print(json.dumps({"error": f"Workflow execution failed: {e}"}), file=sys.stderr)
         sys.exit(1)
 
-    macro_map = _build_macro_map(Path(__file__).parent)
+    workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
+    macro_map = _build_macro_map(Path(__file__).parent, workspace_dir=workspace_dir)
     if args.output_dir:
         macro_map["outputs"] = args.output_dir
     result = _serialize_output(output, macro_map)

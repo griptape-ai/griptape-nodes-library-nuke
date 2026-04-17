@@ -232,7 +232,6 @@ if not companion or not os.path.isdir(companion):
             _c = os.path.join(_d, _workflow_name)
             if os.path.isdir(_c) and os.path.isfile(os.path.join(_c, "run_button.py")):
                 companion = _c
-                node["_companion_dir"].setValue(companion)
                 break
 
 if not companion or not os.path.isdir(companion):
@@ -241,21 +240,31 @@ if not companion or not os.path.isdir(companion):
         "Re-publish the gizmo or ensure the griptape folder is on Nuke's plugin path."
     )
 
+# Normalize to forward slashes so backslashes don't get mangled by Nuke's
+# TCL string encoding when the .nk file is saved and reloaded.
+companion = companion.replace("\\", "/")
+node["_companion_dir"].setValue(companion)
+
 # -- Resolve workflow file from version subdir --
 
 _selected_version = _config.get("version")
 if _selected_version:
-    workflow_file = os.path.join(companion, _selected_version, _workflow_filename)
+    workflow_file = companion + "/" + _selected_version + "/" + _workflow_filename
 else:
-    workflow_file = os.path.join(companion, _workflow_filename)
+    workflow_file = companion + "/" + _workflow_filename
 
-runner = os.path.join(companion, "run_workflow.py")
+runner = companion + "/run_workflow.py"
 
-# Populate output_dir from the companion if the knob is empty.
+# Resolve output working directory.  The Nuke script directory is the preferred
+# base so outputs live next to the .nk file.  For unsaved scripts we fall back
+# to the companion directory.
+_nk_script_dir = nuke.script_directory()  # noqa: F821
+if _nk_script_dir:
+    _nk_script_dir = _nk_script_dir.replace("\\", "/")
+
 output_dir = node["output_dir"].value()
-if not output_dir:
-    output_dir = os.path.join(companion, "outputs")
-    node["output_dir"].setValue(output_dir)
+if output_dir:
+    output_dir = output_dir.replace("\\", "/")
 
 # -- Re-entrancy guard --
 
@@ -356,9 +365,16 @@ else:
             workflow_file,
             "--json-input",
             flow_input,
-            "--output-dir",
-            output_dir,
         ]
+
+        # Pass the Nuke script directory so the runner resolves project
+        # directory macros (like {outputs}) relative to the .nk file.
+        if _nk_script_dir:
+            cmd.extend(["--nk-script-dir", _nk_script_dir])
+
+        # Pass user-specified output dir override if set in the knob.
+        if output_dir:
+            cmd.extend(["--output-dir", output_dir])
 
         if _QT_AVAILABLE:
             # ------------------------------------------------------------------

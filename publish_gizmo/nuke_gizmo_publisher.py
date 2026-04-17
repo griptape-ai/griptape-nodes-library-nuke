@@ -5,6 +5,17 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from griptape_nodes.common.project_templates.directory import DirectoryDefinition
+from griptape_nodes.common.project_templates.loader import load_project_template_from_yaml
+from griptape_nodes.common.project_templates.situation import (
+    SituationFilePolicy,
+    SituationPolicy,
+    SituationTemplate,
+)
+from griptape_nodes.common.project_templates.validation import (
+    ProjectValidationInfo,
+    ProjectValidationStatus,
+)
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.workflow_events import (
@@ -74,6 +85,10 @@ class NukeGizmoPublisher:
             # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
             self._packager.package_to_folder(companion_base, workflow)
 
+            # Override the bundled project.yml with Nuke-specific output conventions
+            # so outputs land next to the .nk file, not inside the companion bundle.
+            self._customize_project_yml(companion_base)
+
             # Move the workflow file from companion base into the version subdir
             src_workflow = companion_base / workflow_file_path.name
             dest_workflow = version_dir / workflow_file_path.name
@@ -116,6 +131,48 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    # -- Project template customisation --
+
+    @staticmethod
+    def _customize_project_yml(companion_base: Path) -> None:
+        """Override the bundled project.yml with Nuke-specific output conventions.
+
+        * ``outputs`` directory is set to ``griptape_outputs`` (relative) so that
+          outputs resolve next to the ``.nk`` file when a Nuke script directory
+          is passed as the workspace at runtime.
+        * ``save_node_output`` uses a naming convention that includes the
+          workflow name and node name:
+          ``{outputs}/{workflow_name}/{workflow_name}_{node_name}_v{_index:04}.{file_extension}``
+        """
+        project_yml = companion_base / "project.yml"
+        if not project_yml.exists():
+            return
+
+        validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
+        template = load_project_template_from_yaml(
+            project_yml.read_text(encoding="utf-8"), validation_info
+        )
+        if template is None:
+            return
+
+        template.directories["outputs"] = DirectoryDefinition(
+            name="outputs",
+            path_macro="griptape_outputs",
+        )
+
+        template.situations["save_node_output"] = SituationTemplate(
+            name="save_node_output",
+            description="Node generates and saves output (Nuke gizmo)",
+            macro="{outputs}/{workflow_name}/{workflow_name}_{node_name}_v{_index:04}.{file_extension}",
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.CREATE_NEW,
+                create_dirs=True,
+            ),
+            fallback="save_file",
+        )
+
+        project_yml.write_text(template.to_yaml(), encoding="utf-8")
 
     # -- Validation and path helpers --
 
