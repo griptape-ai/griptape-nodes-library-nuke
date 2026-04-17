@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 
-from publish_gizmo.constants import RUN_BUTTON_FILENAME, versioned_gizmo_glob, versioned_node_name
+from publish_gizmo.constants import RUN_BUTTON_FILENAME, versioned_node_name
 from publish_gizmo.gizmo_validator import validate_gizmo_text
 from publish_gizmo.gizmo_writer import GizmoWriter, NukeKnobType
 
@@ -79,10 +79,7 @@ def _label(name: str) -> str:
 class NukeGizmoBuilder:
     """Generates a Nuke .gizmo text file from a Griptape workflow shape.
 
-    Every generated gizmo is versioned (e.g. ``my_workflow_v01``). When
-    ``available_versions`` is provided, a ``griptape_version`` enumeration knob
-    and a ``knobChanged`` swap callback are added so artists can switch between
-    published versions without leaving the properties panel.
+    Every generated gizmo is versioned (e.g. ``my_workflow_v01``).
     """
 
     def __init__(
@@ -116,20 +113,8 @@ class NukeGizmoBuilder:
         gizmo_node_name = versioned_node_name(safe_name, self._current_version or 1)
         w.begin_gizmo(gizmo_node_name)
 
-        if self._available_versions:
-            w.set_knob_changed(self._build_knob_changed_code())
-
         # --- Griptape tab ---
         w.add_tab("griptape_tab", label=_label(self._workflow_name))
-
-        if self._available_versions:
-            version_choices = [f"v{v}" for v in self._available_versions]
-            default_idx = None
-            if self._current_version is not None:
-                current_label = f"v{self._current_version}"
-                if current_label in version_choices:
-                    default_idx = version_choices.index(current_label)
-            w.add_enumeration_knob("griptape_version", "Version", version_choices, default_index=default_idx)
 
         # Input knobs
         if input_params:
@@ -156,6 +141,10 @@ class NukeGizmoBuilder:
         # and can be shared across machines. The bootstrap resolves it at runtime via
         # nuke.pluginPath() (see _build_run_button_bootstrap).
         w.add_invisible_string_knob("_companion_dir")
+
+        # Hidden running-state knob. Set to "1" while a workflow is executing so that
+        # re-entrant button clicks can be detected and rejected.
+        w.add_invisible_string_knob("_gt_running")
 
         w.end_gizmo_header()
 
@@ -257,115 +246,6 @@ class NukeGizmoBuilder:
             w.add_multiline_string_knob(knob_name, label, flags="+DISABLED")
         else:
             w.add_string_knob(knob_name, label, flags="+DISABLED")
-
-    def _build_knob_changed_code(self) -> str:
-        """Build the knobChanged callback embedded in the gizmo.
-
-        Handles two events:
-        - ``showPanel``: resolves the companion dir and refreshes the version
-          dropdown from ``nuke.plugins()`` so newly published versions appear
-          without re-publishing.
-        - ``griptape_version``: swaps the current node for the selected version's
-          gizmo (LiveGroup-style), transferring all connections and knob values.
-        """
-        workflow_name = self._workflow_name
-        safe_name = _safe_knob_name(workflow_name)
-        version_glob = versioned_gizmo_glob(safe_name)
-        return f"""\
-import os as _os, re as _re
-_k = nuke.thisKnob()
-_node = nuke.thisNode()
-
-def _resolve_companion(_node):
-    _companion = _node["_companion_dir"].value()
-    if not _companion or not _os.path.isdir(_companion):
-        for _d in nuke.pluginPath():
-            _c = _os.path.join(_d, "{workflow_name}")
-            if _os.path.isdir(_c) and _os.path.isfile(_os.path.join(_c, "{RUN_BUTTON_FILENAME}")):
-                _companion = _c
-                _node["_companion_dir"].setValue(_companion)
-                break
-    return _companion
-
-if _k and _k.name() == "showPanel":
-    _companion = _resolve_companion(_node)
-    if _companion and _os.path.isdir(_companion):
-        _found = nuke.plugins(nuke.ALL, "{version_glob}")
-        _nums = []
-        for _p in _found:
-            _m = _re.search(r"_v(\\d+)\\.gizmo$", _os.path.basename(_p))
-            if _m:
-                _nums.append(int(_m.group(1)))
-        if _nums:
-            _choices = ["v" + str(n) for n in sorted(_nums)]
-            _vk = _node.knob("griptape_version")
-            if _vk:
-                _cur = _vk.value()
-                _vk.setValues(_choices)
-                if _cur in _choices:
-                    _vk.setValue(_cur)
-
-elif _k and _k.name() == "griptape_version":
-    _new_ver = _node["griptape_version"].value()  # e.g. "v2"
-    _padded = _new_ver[1:].zfill(2)
-    _target = "{safe_name}_v" + _padded
-    if _node.Class() != _target:
-        _name = _node.name()
-        _xpos = _node.xpos()
-        _ypos = _node.ypos()
-        _companion = _resolve_companion(_node)
-        _output_dir = _node["output_dir"].value() if _node.knob("output_dir") else ""
-        _upstream = {{}}
-        for _i in range(_node.inputs()):
-            _inp = _node.input(_i)
-            if _inp:
-                _upstream[_i] = _inp.name()
-        _downstream = []
-        for _n in nuke.allNodes():
-            if _n == _node:
-                continue
-            for _i in range(_n.inputs()):
-                if _n.input(_i) == _node:
-                    _downstream.append((_n.name(), _i))
-        _skip = {{"griptape_version", "run_workflow", "tile_color", "label", "xpos", "ypos", "name"}}
-        _vals = {{}}
-        for _kn in _node.allKnobs():
-            _kn_name = _kn.name()
-            if _kn_name and not _kn_name.startswith("_") and _kn_name not in _skip:
-                try:
-                    _vals[_kn_name] = _kn.value()
-                except Exception:
-                    pass
-        # Free the name before creating the replacement so there is no conflict
-        _node.setName("__gt_swap_pending__")
-        _new = nuke.createNode(_target, inpanel=False)
-        _new.setName(_name)
-        _new.setXpos(_xpos)
-        _new.setYpos(_ypos)
-        if _companion and _new.knob("_companion_dir"):
-            _new["_companion_dir"].setValue(_companion)
-        if _output_dir and _new.knob("output_dir"):
-            _new["output_dir"].setValue(_output_dir)
-        if _new.knob("griptape_version"):
-            _new["griptape_version"].setValue(_new_ver)
-        for _kn_name, _val in _vals.items():
-            if _new.knob(_kn_name):
-                try:
-                    _new[_kn_name].setValue(_val)
-                except Exception:
-                    pass
-        for _i, _inp_name in _upstream.items():
-            _inp = nuke.toNode(_inp_name)
-            if _inp:
-                _new.setInput(_i, _inp)
-        for _dep_name, _dep_i in _downstream:
-            _dep = nuke.toNode(_dep_name)
-            if _dep:
-                _dep.setInput(_dep_i, _new)
-        nuke.show(_new)
-        # Defer deletion — destroying thisNode() inside its own knobChanged is unsafe
-        nuke.executeDeferred(lambda _n=_node: nuke.delete(_n))
-"""
 
     def _build_run_button_bootstrap(
         self,

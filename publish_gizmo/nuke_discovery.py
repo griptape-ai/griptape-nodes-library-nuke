@@ -208,7 +208,10 @@ def versioned_gizmo_paths_for_exe(nuke_exe: str) -> list[str]:
 
 
 def compute_gizmo_install_path_choices(selected_nuke: str | None, root_to_exe: dict[str, str]) -> list[str]:
-    """Return candidate gizmo install directories (excluding 'Custom path…')."""
+    """Return candidate gizmo install directories (excluding 'Custom path…').
+
+    ``~/.nuke`` is always listed first as it is the most common install target.
+    """
     candidates: list[str] = []
     seen_keys: set[str] = set()
 
@@ -220,6 +223,9 @@ def compute_gizmo_install_path_choices(selected_nuke: str | None, root_to_exe: d
             seen_keys.add(key)
             candidates.append(key)
 
+    # ~/.nuke is the standard user plugin directory — list it first.
+    add_path(str(Path.home() / ".nuke"))
+
     for seg in nuke_path_env_segments():
         add_path(seg)
 
@@ -230,23 +236,19 @@ def compute_gizmo_install_path_choices(selected_nuke: str | None, root_to_exe: d
             for p in versioned_gizmo_paths_for_exe(exe):
                 add_path(p)
 
-    add_path(str(Path.home() / ".nuke"))
-
-    if not candidates:
-        add_path(str(Path.home() / ".nuke"))
-
     return candidates
 
 
 def default_gizmo_path(candidates: list[str]) -> str:
-    """Pick the best default gizmo path from a list of candidates (excluding 'Custom path…')."""
+    """Pick the best default gizmo path from a list of candidates (excluding 'Custom path…').
+
+    ``~/.nuke`` is always preferred as the default regardless of what other paths exist.
+    """
     clean = [c for c in candidates if c != GIZMO_INSTALL_CUSTOM]
-    for seg in nuke_path_env_segments():
-        if Path(seg).is_dir():
-            return seg
+    dot_nuke = normalize_path_str(str(Path.home() / ".nuke"))
     for c in clean:
-        if Path(c).is_dir():
+        if normalize_path_str(c) == dot_nuke:
             return c
     if clean:
         return clean[0]
-    return str(Path.home() / ".nuke")
+    return dot_nuke

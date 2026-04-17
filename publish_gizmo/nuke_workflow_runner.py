@@ -142,7 +142,7 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.WARNING)
+    logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser(description="Run a Griptape Nodes workflow from a gizmo.")
     parser.add_argument("--workflow-file", required=True, help="Path to the workflow .py file")
