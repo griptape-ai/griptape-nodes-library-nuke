@@ -183,6 +183,26 @@ def _set_node_running(n, is_running: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# uv binary helpers
+# ---------------------------------------------------------------------------
+
+_GRIPTAPE_UV_INSTALL_DIR = os.path.join(
+    os.path.expanduser("~"), ".local", "share", "griptape_nodes", "bin"
+)
+
+
+def _uv_fallback_paths():
+    """Return candidate paths for the uv binary, in priority order."""
+    _is_win = platform.system() == "Windows"
+    _ext = ".exe" if _is_win else ""
+    return [
+        os.path.join(_GRIPTAPE_UV_INSTALL_DIR, "uv" + _ext),
+        os.path.expanduser("~/.local/bin/uv" + _ext),
+        os.path.expanduser("~/.cargo/bin/uv" + _ext),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Entry point — exec'd from the gizmo's PyScript_Knob
 # ---------------------------------------------------------------------------
 
@@ -196,6 +216,7 @@ _media_input_names: list = _config.get("media_input_names", [])
 _media_output_names: list = _config.get("media_output_names", [])
 _media_input_index_map: dict = _config.get("media_input_index_map", {})
 _media_output_read_map: dict = _config.get("media_output_read_map", {})
+_output_knob_map: dict = _config.get("output_knob_map", {})
 _input_node_prefix: str = _config.get("input_node_prefix", "Input")
 _temp_file_prefix: str = _config.get("temp_file_prefix", "gt_input")
 
@@ -276,23 +297,27 @@ else:
 
     uv = shutil.which("uv")
     if not uv:
-        _fallbacks = [os.path.expanduser("~/.local/bin/uv"), os.path.expanduser("~/.cargo/bin/uv")]
-        if platform.system() == "Windows":
-            _lappdata = os.environ.get("LOCALAPPDATA", "")
-            if _lappdata:
-                _fallbacks.append(os.path.join(_lappdata, "uv", "uv.exe"))
-        for _p in _fallbacks:
+        for _p in _uv_fallback_paths():
             if os.path.isfile(_p):
                 uv = _p
                 break
 
     if not uv:
+        _install_env = os.environ.copy()
+        _install_env["UV_UNMANAGED_INSTALL"] = _GRIPTAPE_UV_INSTALL_DIR
+
         if platform.system() == "Windows":
             _install = subprocess.run(
-                ["powershell", "-Command", "irm https://astral.sh/uv/install.ps1 | iex"],
+                [
+                    "powershell",
+                    "-ExecutionPolicy", "Bypass",
+                    "-Command",
+                    "irm https://astral.sh/uv/install.ps1 | iex",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=120,
+                env=_install_env,
             )
         else:
             _install = subprocess.run(
@@ -300,18 +325,10 @@ else:
                 capture_output=True,
                 text=True,
                 timeout=120,
+                env=_install_env,
             )
-        if _install.returncode == 0:
-            _fallbacks = [os.path.expanduser("~/.local/bin/uv"), os.path.expanduser("~/.cargo/bin/uv")]
-            if platform.system() == "Windows":
-                _lappdata = os.environ.get("LOCALAPPDATA", "")
-                if _lappdata:
-                    _fallbacks.append(os.path.join(_lappdata, "uv", "uv.exe"))
-            for _p in _fallbacks:
-                if os.path.isfile(_p):
-                    uv = _p
-                    break
-        else:
+
+        if _install.returncode != 0:
             msg = (
                 "Failed to install uv automatically.\n"
                 "Install it manually: https://docs.astral.sh/uv/getting-started/installation/\n"
@@ -319,6 +336,11 @@ else:
             )
             nuke.message(msg)  # noqa: F821
             _set_node_error(node, msg)
+        else:
+            for _p in _uv_fallback_paths():
+                if os.path.isfile(_p):
+                    uv = _p
+                    break
 
     # -- Run the workflow --
 
@@ -380,8 +402,9 @@ else:
                     try:
                         output = json.loads(stdout_text.strip())
                         for _k, _v in output.items():
-                            if node.knob(_k):
-                                node[_k].setValue(str(_v))
+                            _knob = _output_knob_map.get(_k, _k)
+                            if node.knob(_knob):
+                                node[_knob].setValue(str(_v))
                         for _mk in _media_output_names:
                             _mv = output.get(_mk, "")
                             if _mv and os.path.isfile(str(_mv)):
@@ -471,8 +494,9 @@ else:
                 try:
                     output = json.loads(result.stdout.strip())
                     for _k, _v in output.items():
-                        if node.knob(_k):
-                            node[_k].setValue(str(_v))
+                        _knob = _output_knob_map.get(_k, _k)
+                        if node.knob(_knob):
+                            node[_knob].setValue(str(_v))
                     for _mk in _media_output_names:
                         _mv = output.get(_mk, "")
                         if _mv and os.path.isfile(str(_mv)):

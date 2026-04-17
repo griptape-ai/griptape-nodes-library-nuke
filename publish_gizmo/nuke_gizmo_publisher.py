@@ -266,14 +266,9 @@ def _refresh_griptape_menu():
     for stem in workflows:
         workflows[stem].sort()
 
-    # Force Nuke to re-read each gizmo file from disk so that updated definitions
-    # take effect for new nuke.createNode() calls.
-    for stem, versions in workflows.items():
-        for _ver, node_name in versions:
-            try:
-                nuke.load(node_name + '.gizmo')
-            except RuntimeError:
-                pass  # already loaded; nuke.load raises RuntimeError in that case
+    # No nuke.load() here — Nuke re-reads .gizmo files from disk each time
+    # nuke.createNode() is called, so updating the menu entries is sufficient.
+    # (nuke.load on a .gizmo file would instantiate a node, which we don't want.)
 
     # Rebuild the Griptape submenu on the Nodes toolbar.
     # Remove the existing entry first so repeated calls don't accumulate duplicates.

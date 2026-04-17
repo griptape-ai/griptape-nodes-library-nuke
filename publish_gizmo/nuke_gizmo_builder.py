@@ -71,6 +71,18 @@ def _safe_knob_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
 
+def _output_knob_name(param_name: str) -> str:
+    """Return the gizmo knob name for an output parameter.
+
+    Output knobs are suffixed with ``_out`` to avoid name collisions when an
+    input parameter shares the same name as an output parameter (e.g. a
+    workflow that takes an ``image`` input and also produces an ``image``
+    output).  Nuke silently skips duplicate knob names, which would leave the
+    Outputs tab empty without this disambiguation.
+    """
+    return _safe_knob_name(param_name) + "_out"
+
+
 def _label(name: str) -> str:
     """Convert a snake_case name to a human-readable label."""
     return name.replace("_", " ").title()
@@ -113,27 +125,11 @@ class NukeGizmoBuilder:
         gizmo_node_name = versioned_node_name(safe_name, self._current_version or 1)
         w.begin_gizmo(gizmo_node_name)
 
-        # --- Griptape tab ---
-        w.add_tab("griptape_tab", label=_label(self._workflow_name))
-
-        # Input knobs
-        if input_params:
-            w.add_divider("_inputs_divider", label="Inputs")
-        for name, info in input_params.items():
-            self._write_input_knob(w, name, info)
-
-        # Output directory picker
-        w.add_divider("_output_divider", label="Outputs")
+        # --- Run tab (leftmost) ---
+        w.add_tab("run_tab", label="Run")
         w.add_string_knob("output_dir", label="Output Directory")
-
-        # Output result knobs (read-only, filled after run)
-        for name, info in output_params.items():
-            self._write_output_knob(w, name, info)
-
-        # Run button — loads run_button.py from the companion directory
-        w.add_divider("_run_divider", label="")
         run_code = self._build_run_button_bootstrap(
-            input_params, start_node_name, media_output_names, media_input_names
+            input_params, list(output_params.keys()), start_node_name, media_output_names, media_input_names
         )
         w.add_pyscript_knob("run_workflow", label="Run Workflow", python_code=run_code)
 
@@ -145,6 +141,16 @@ class NukeGizmoBuilder:
         # Hidden running-state knob. Set to "1" while a workflow is executing so that
         # re-entrant button clicks can be detected and rejected.
         w.add_invisible_string_knob("_gt_running")
+
+        # --- Inputs tab ---
+        w.add_tab("inputs_tab", label="Inputs")
+        for name, info in input_params.items():
+            self._write_input_knob(w, name, info)
+
+        # --- Outputs tab ---
+        w.add_tab("outputs_tab", label="Outputs")
+        for name, info in output_params.items():
+            self._write_output_knob(w, name, info)
 
         w.end_gizmo_header()
 
@@ -236,7 +242,7 @@ class NukeGizmoBuilder:
 
     def _write_output_knob(self, w: GizmoWriter, name: str, info: dict) -> None:
         """Write a read-only knob for a workflow output parameter."""
-        knob_name = _safe_knob_name(name)
+        knob_name = _output_knob_name(name)
         label = info.get("ui_options", {}).get("display_name") or _label(name)
         param_type = info.get("type", "str")
 
@@ -250,6 +256,7 @@ class NukeGizmoBuilder:
     def _build_run_button_bootstrap(
         self,
         input_params: dict[str, dict],
+        output_param_names: list[str],
         start_node_name: str,
         media_output_names: list[str],
         media_input_names: list[str],
@@ -262,6 +269,7 @@ class NukeGizmoBuilder:
         param_names = list(input_params.keys())
         media_input_index_map = {name: idx for idx, name in enumerate(media_input_names)}
         media_output_read_map = {name: _read_node_name(name) for name in media_output_names}
+        output_knob_map = {name: _output_knob_name(name) for name in output_param_names}
 
         config: dict = {
             "workflow_name": workflow_name,
@@ -272,6 +280,7 @@ class NukeGizmoBuilder:
             "media_output_names": media_output_names,
             "media_input_index_map": media_input_index_map,
             "media_output_read_map": media_output_read_map,
+            "output_knob_map": output_knob_map,
             "input_node_prefix": _INPUT_NODE_PREFIX,
             "temp_file_prefix": _TEMP_FILE_PREFIX,
             "version": f"v{self._current_version}",
