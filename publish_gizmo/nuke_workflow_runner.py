@@ -110,7 +110,9 @@ def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dic
         value = dir_def.path_macro
         if value and not Path(value).is_absolute():
             value = str(base_dir / value)
-        result[dir_def.name] = value
+        # Normalize to forward slashes: Nuke/TCL treats backslashes as escape
+        # characters when saving .nk files, which silently mangles Windows paths.
+        result[dir_def.name] = value.replace("\\", "/")
     return result
 
 
@@ -144,10 +146,16 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
             if value is None:
                 result[param_name] = ""
             elif hasattr(value, "url"):
-                # ImageUrlArtifact — strip file:// prefix for usability in Nuke
+                # ImageUrlArtifact — convert file:// URI to a plain path for Nuke.
+                # file:///C:/path (Windows) and file:///unix/path both have three
+                # slashes; stripping only "file://" leaves "/C:/path" on Windows
+                # which is invalid.  Strip the third slash only when followed by a
+                # drive letter (e.g. /C:/) so Unix absolute paths are unchanged.
                 url = str(value.url)
                 if url.startswith("file://"):
-                    url = url[7:]
+                    url = url[7:]  # -> /C:/... on Windows, /unix/... on Unix
+                    if len(url) >= 3 and url[0] == "/" and url[1].isalpha() and url[2] == ":":
+                        url = url[1:]  # -> C:/... on Windows
                 result[param_name] = _resolve_macro_path(url, macro_map)
             elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value

@@ -286,7 +286,7 @@ else:
             _tmp = os.path.join(
                 tempfile.gettempdir(),
                 f"{_temp_file_prefix}_{node.name()}_{_mk}_{int(nuke.frame())}.jpg",  # noqa: F821
-            )
+            ).replace("\\", "/")  # Nuke/TCL treats backslashes as escape chars; forward slashes are safe on all platforms
             node.begin()
             try:
                 _in = nuke.toNode(f"{_input_node_prefix}{_input_idx + 1}")  # noqa: F821
@@ -430,7 +430,10 @@ else:
                                         node.begin()
                                         _r = nuke.toNode(_read_name)  # noqa: F821
                                         if _r:
-                                            _r["file"].setValue(str(_mv))
+                                            # Forward slashes are required: Nuke's TCL
+                                            # layer interprets backslashes as escape
+                                            # sequences when .nk files are saved/reloaded.
+                                            _r["file"].setValue(str(_mv).replace("\\", "/"))
                                             try:
                                                 _r["reload"].execute()
                                             except Exception:
@@ -522,7 +525,7 @@ else:
                                     node.begin()
                                     _r = nuke.toNode(_read_name)  # noqa: F821
                                     if _r:
-                                        _r["file"].setValue(str(_mv))
+                                        _r["file"].setValue(str(_mv).replace("\\", "/"))
                                         try:
                                             _r["reload"].execute()
                                         except Exception:
