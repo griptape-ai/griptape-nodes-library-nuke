@@ -121,8 +121,9 @@ def _resolve_macro_path(value: str, macro_map: dict[str, str]) -> str:
     if "{" not in value:
         return value
 
-    def _replace(match: re.Match) -> str:
-        return macro_map.get(match.group(1), match.group(0))
+    def _replace(match: re.Match[str]) -> str:
+        value = macro_map.get(match.group(1))
+        return value if value is not None else match.group(0)
 
     return re.sub(r"\{([\w-]+)\}", _replace, value)
 
