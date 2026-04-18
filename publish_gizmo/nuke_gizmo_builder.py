@@ -88,6 +88,26 @@ def _label(name: str) -> str:
     return name.replace("_", " ").title()
 
 
+def _build_active_output_knob_changed() -> str:
+    """Return Python code for the gizmo's knobChanged callback.
+
+    When the user changes the ``active_output`` selector, this code updates
+    the internal SwitchOutput node's ``which`` knob so the correct Read node
+    flows to the gizmo's output pipe immediately — no re-run needed.
+    """
+    return """\
+if nuke.thisKnob().name() == "active_output":
+    n = nuke.thisNode()
+    n.begin()
+    try:
+        switch = nuke.toNode("SwitchOutput")
+        if switch:
+            switch["which"].setValue(int(n["active_output"].getValue()))
+    finally:
+        n.end()
+"""
+
+
 class NukeGizmoBuilder:
     """Generates a Nuke .gizmo text file from a Griptape workflow shape.
 
@@ -149,6 +169,14 @@ class NukeGizmoBuilder:
 
         # --- Outputs tab ---
         w.add_tab("outputs_tab", label="Outputs")
+        if len(media_output_names) > 1:
+            choices = [
+                info.get("ui_options", {}).get("display_name") or _label(name)
+                for name, info in output_params.items()
+                if name in media_output_names
+            ]
+            w.add_enumeration_knob("active_output", "Active Output", choices)
+            w.set_knob_changed(_build_active_output_knob_changed())
         for name, info in output_params.items():
             self._write_output_knob(w, name, info)
 
@@ -178,11 +206,22 @@ class NukeGizmoBuilder:
         else:
             w.add_input_node(_input_node_name(0), xpos=0, ypos=ypos)
 
-        if media_output_names:
-            for idx, name in enumerate(media_output_names):
-                xpos = idx * 200
-                w.add_read_node(_read_node_name(name), xpos=xpos, ypos=0)
-                w.add_output_node(_output_node_name(idx), xpos=xpos, ypos=100)
+        if len(media_output_names) > 1:
+            # Write Read nodes in reverse order so that Switch input(0) maps to
+            # the first media output (matching the active_output enum index 0).
+            for idx, name in enumerate(reversed(media_output_names)):
+                w.add_read_node(_read_node_name(name), xpos=idx * 200, ypos=0)
+            center_x = (len(media_output_names) - 1) * 100
+            w.add_switch_node(
+                "SwitchOutput",
+                num_inputs=len(media_output_names),
+                xpos=center_x,
+                ypos=100,
+            )
+            w.add_output_node(_output_node_name(0), xpos=center_x, ypos=200)
+        elif media_output_names:
+            w.add_read_node(_read_node_name(media_output_names[0]), xpos=0, ypos=0)
+            w.add_output_node(_output_node_name(0), xpos=0, ypos=100)
         else:
             w.add_output_node(_output_node_name(0), xpos=0, ypos=100, no_inputs=True)
 

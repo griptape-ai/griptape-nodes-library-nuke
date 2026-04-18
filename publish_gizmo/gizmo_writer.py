@@ -211,6 +211,21 @@ class GizmoWriter:
         self._lines.append(f"  ypos {ypos}")
         self._lines.append(" }")
 
+    def add_switch_node(self, name: str, num_inputs: int, xpos: int, ypos: int, which: int = 0) -> None:
+        """Add a Switch node to the internal graph.
+
+        ``which`` is the initial input index (0-based). The knobChanged
+        callback on the parent gizmo is responsible for updating this at
+        runtime when the user changes the active output selector.
+        """
+        self._lines.append(" Switch {")
+        self._lines.append(f"  inputs {num_inputs}")
+        self._lines.append(f"  which {which}")
+        self._lines.append(f"  name {name}")
+        self._lines.append(f"  xpos {xpos}")
+        self._lines.append(f"  ypos {ypos}")
+        self._lines.append(" }")
+
     # -- Render --
 
     def render(self) -> str:
