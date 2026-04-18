@@ -13,6 +13,7 @@ Usage::
     except GizmoValidationError as exc:
         print(f"Invalid gizmo: {exc}")
 """
+# TODO: Update to use Pydantic Schema, instead of text parser. https://github.com/griptape-ai/griptape-nodes-library-nuke/issues/27
 
 from __future__ import annotations
 
