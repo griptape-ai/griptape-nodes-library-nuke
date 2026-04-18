@@ -220,12 +220,10 @@ def main() -> None:
                 download_env["HF_HUB_CACHE"] = str(default_hf_cache)
         result = subprocess.run(
             [sys.executable, str(download_script)],
-            capture_output=True,
-            text=True,
             env=download_env,
         )
         if result.returncode != 0:
-            print(json.dumps({"error": f"Model download failed: {result.stderr}"}))
+            print(json.dumps({"error": "Model download failed. See log output for details."}))
             sys.exit(1)
 
     try:
