@@ -113,6 +113,7 @@ def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dic
         # Normalize to forward slashes: Nuke/TCL treats backslashes as escape
         # characters when saving .nk files, which silently mangles Windows paths.
         result[dir_def.name] = value.replace("\\", "/")
+    logging.getLogger(__name__).info("[griptape] macro_map: %s", result)
     return result
 
 
@@ -138,11 +139,23 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
     if not output:
         return {}
 
+    _log = logging.getLogger(__name__)
     result: dict[str, str] = {}
     for _node_name, params in output.items():
         if not isinstance(params, dict):
             continue
         for param_name, value in params.items():
+            _log.info(
+                "[griptape] output param %r: type=%s has_url=%s has_value=%s",
+                param_name,
+                type(value).__name__,
+                hasattr(value, "url"),
+                hasattr(value, "value"),
+            )
+            if hasattr(value, "url"):
+                _log.info("[griptape]   .url = %r", value.url)
+            if hasattr(value, "value"):
+                _log.info("[griptape]   .value = %r", getattr(value, "value", None))
             if value is None:
                 result[param_name] = ""
             elif hasattr(value, "url"):
@@ -156,15 +169,21 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
                     url = url[7:]  # -> /C:/... on Windows, /unix/... on Unix
                     if len(url) >= 3 and url[0] == "/" and url[1].isalpha() and url[2] == ":":
                         url = url[1:]  # -> C:/... on Windows
-                result[param_name] = _resolve_macro_path(url, macro_map)
+                resolved = _resolve_macro_path(url, macro_map)
+                _log.info("[griptape]   resolved (url) = %r", resolved)
+                result[param_name] = resolved
             elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value
                 if isinstance(raw, bytes):
                     result[param_name] = f"<binary {len(raw)} bytes>"
                 else:
-                    result[param_name] = _resolve_macro_path(raw, macro_map)
+                    resolved = _resolve_macro_path(raw, macro_map)
+                    _log.info("[griptape]   resolved (value) = %r", resolved)
+                    result[param_name] = resolved
             else:
-                result[param_name] = _resolve_macro_path(str(value), macro_map)
+                resolved = _resolve_macro_path(str(value), macro_map)
+                _log.info("[griptape]   resolved (str) = %r", resolved)
+                result[param_name] = resolved
 
     return result
 
