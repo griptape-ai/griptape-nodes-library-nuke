@@ -49,6 +49,8 @@ line-ending = "auto"
 venvPath = "."
 venv = ".venv"
 include = ["."]
-exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows"]
+# run_button.py is exec'd inside Nuke's Python interpreter where `nuke` and `_config`
+# are injected into the global scope at runtime. It is not a regular importable module.
+exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows", "publish_gizmo/run_button.py"]
 pythonVersion = "3.12"
 reportIncompatibleMethodOverride = false
