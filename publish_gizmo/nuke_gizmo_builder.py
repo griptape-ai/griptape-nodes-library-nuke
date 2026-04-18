@@ -170,7 +170,11 @@ class NukeGizmoBuilder:
         # --- Outputs tab ---
         w.add_tab("outputs_tab", label="Outputs")
         if len(media_output_names) > 1:
-            choices = [info.get("ui_options", {}).get("display_name") or _label(name) for name, info in output_params.items() if name in media_output_names]
+            choices = [
+                info.get("ui_options", {}).get("display_name") or _label(name)
+                for name, info in output_params.items()
+                if name in media_output_names
+            ]
             w.add_enumeration_knob("active_output", "Active Output", choices)
             w.set_knob_changed(_build_active_output_knob_changed())
         for name, info in output_params.items():
