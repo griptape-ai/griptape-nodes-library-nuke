@@ -46,6 +46,7 @@ try:
         QTextEdit,
         QVBoxLayout,
     )
+
     _QT_AVAILABLE = True
 except ImportError:
     try:
@@ -60,6 +61,7 @@ except ImportError:
             QTextEdit,
             QVBoxLayout,
         )
+
         _QT_AVAILABLE = True
     except ImportError:
         _QT_AVAILABLE = False
@@ -70,6 +72,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 if _QT_AVAILABLE:
+
     class _WorkflowProgressDialog(QDialog):
         """Non-modal dialog that streams workflow log output in real-time."""
 
@@ -186,9 +189,7 @@ def _set_node_running(n, is_running: bool) -> None:
 # uv binary helpers
 # ---------------------------------------------------------------------------
 
-_GRIPTAPE_UV_INSTALL_DIR = os.path.join(
-    os.path.expanduser("~"), ".local", "share", "griptape_nodes", "bin"
-)
+_GRIPTAPE_UV_INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "griptape_nodes", "bin")
 
 
 def _uv_fallback_paths():
@@ -259,7 +260,6 @@ runner = companion + "/run_workflow.py"
 # base so outputs live next to the .nk file.  For unsaved scripts we fall back
 # to the companion directory.
 _nk_script_dir = nuke.script_directory()  # noqa: F821
-print(f"[griptape] nuke.script_directory() = {_nk_script_dir!r}")  # noqa: T201
 
 if _nk_script_dir:
     _nk_script_dir = _nk_script_dir.replace("\\", "/")
@@ -288,7 +288,9 @@ else:
             _tmp = os.path.join(
                 tempfile.gettempdir(),
                 f"{_temp_file_prefix}_{node.name()}_{_mk}_{int(nuke.frame())}.jpg",  # noqa: F821
-            ).replace("\\", "/")  # Nuke/TCL treats backslashes as escape chars; forward slashes are safe on all platforms
+            ).replace(
+                "\\", "/"
+            )  # Nuke/TCL treats backslashes as escape chars; forward slashes are safe on all platforms
             node.begin()
             try:
                 _in = nuke.toNode(f"{_input_node_prefix}{_input_idx + 1}")  # noqa: F821
@@ -321,7 +323,8 @@ else:
             _install = subprocess.run(
                 [
                     "powershell",
-                    "-ExecutionPolicy", "Bypass",
+                    "-ExecutionPolicy",
+                    "Bypass",
                     "-Command",
                     "irm https://astral.sh/uv/install.ps1 | iex",
                 ],
@@ -372,7 +375,6 @@ else:
         # Pass the Nuke script directory so the runner resolves project
         # directory macros (like {outputs}) relative to the .nk file.
         if _nk_script_dir:
-            print("Nuke script directory is getting extended.")
             cmd.extend(["--nk-script-dir", _nk_script_dir])
 
         # Pass user-specified output dir override if set in the knob.

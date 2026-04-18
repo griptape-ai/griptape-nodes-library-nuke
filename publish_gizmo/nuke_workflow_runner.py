@@ -53,7 +53,6 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     # that relative directory macros in project.yml (like ``outputs``) resolve
     # next to the .nk file instead of inside the companion bundle.
     workspace_dir = nk_script_dir if nk_script_dir else str(script_dir)
-    logging.getLogger(__name__).info("[griptape] nk_script_dir=%r  workspace_dir=%r", nk_script_dir, workspace_dir)
     os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = workspace_dir
     os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 
@@ -114,7 +113,6 @@ def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dic
         # Normalize to forward slashes: Nuke/TCL treats backslashes as escape
         # characters when saving .nk files, which silently mangles Windows paths.
         result[dir_def.name] = value.replace("\\", "/")
-    logging.getLogger(__name__).info("[griptape] macro_map: %s", result)
     return result
 
 
@@ -140,23 +138,11 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
     if not output:
         return {}
 
-    _log = logging.getLogger(__name__)
     result: dict[str, str] = {}
     for _node_name, params in output.items():
         if not isinstance(params, dict):
             continue
         for param_name, value in params.items():
-            _log.info(
-                "[griptape] output param %r: type=%s has_url=%s has_value=%s",
-                param_name,
-                type(value).__name__,
-                hasattr(value, "url"),
-                hasattr(value, "value"),
-            )
-            if hasattr(value, "url"):
-                _log.info("[griptape]   .url = %r", value.url)
-            if hasattr(value, "value"):
-                _log.info("[griptape]   .value = %r", getattr(value, "value", None))
             if value is None:
                 result[param_name] = ""
             elif hasattr(value, "url"):
@@ -170,21 +156,15 @@ def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[st
                     url = url[7:]  # -> /C:/... on Windows, /unix/... on Unix
                     if len(url) >= 3 and url[0] == "/" and url[1].isalpha() and url[2] == ":":
                         url = url[1:]  # -> C:/... on Windows
-                resolved = _resolve_macro_path(url, macro_map)
-                _log.info("[griptape]   resolved (url) = %r", resolved)
-                result[param_name] = resolved
+                result[param_name] = _resolve_macro_path(url, macro_map)
             elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value
                 if isinstance(raw, bytes):
                     result[param_name] = f"<binary {len(raw)} bytes>"
                 else:
-                    resolved = _resolve_macro_path(raw, macro_map)
-                    _log.info("[griptape]   resolved (value) = %r", resolved)
-                    result[param_name] = resolved
+                    result[param_name] = _resolve_macro_path(raw, macro_map)
             else:
-                resolved = _resolve_macro_path(str(value), macro_map)
-                _log.info("[griptape]   resolved (str) = %r", resolved)
-                result[param_name] = resolved
+                result[param_name] = _resolve_macro_path(str(value), macro_map)
 
     return result
 

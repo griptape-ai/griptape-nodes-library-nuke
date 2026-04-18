@@ -30,7 +30,6 @@ from griptape_nodes.retained_mode.publishing import WorkflowPackager
 from publish_gizmo.constants import (
     GRIPTAPE_DIR_NAME,
     INIT_MARKER,
-    VERSION_RE,
     versioned_gizmo_filename,
 )
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
@@ -155,9 +154,7 @@ class NukeGizmoPublisher:
             return
 
         validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
-        template = load_project_template_from_yaml(
-            project_yml.read_text(encoding="utf-8"), validation_info
-        )
+        template = load_project_template_from_yaml(project_yml.read_text(encoding="utf-8"), validation_info)
         if template is None:
             return
 
