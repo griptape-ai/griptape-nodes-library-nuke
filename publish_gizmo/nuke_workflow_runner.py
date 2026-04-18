@@ -208,13 +208,21 @@ def main() -> None:
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
     _bootstrap_environment(nk_script_dir=args.nk_script_dir)
 
-    # Download HuggingFace models if a download script was bundled at publish time
+    # Download HuggingFace models if a download script was bundled at publish time.
+    # If a local HuggingFace cache already exists on this machine, point the subprocess
+    # at it via HF_HUB_CACHE so that cached models are reused instead of re-downloaded.
     download_script = Path(__file__).parent / "download_models.py"
     if download_script.exists():
+        download_env = os.environ.copy()
+        if "HF_HUB_CACHE" not in download_env and "HF_HOME" not in download_env:
+            default_hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
+            if default_hf_cache.is_dir():
+                download_env["HF_HUB_CACHE"] = str(default_hf_cache)
         result = subprocess.run(
             [sys.executable, str(download_script)],
             capture_output=True,
             text=True,
+            env=download_env,
         )
         if result.returncode != 0:
             print(json.dumps({"error": f"Model download failed: {result.stderr}"}))
