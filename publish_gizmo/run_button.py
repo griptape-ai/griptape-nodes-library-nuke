@@ -259,6 +259,8 @@ runner = companion + "/run_workflow.py"
 # base so outputs live next to the .nk file.  For unsaved scripts we fall back
 # to the companion directory.
 _nk_script_dir = nuke.script_directory()  # noqa: F821
+print(f"[griptape] nuke.script_directory() = {_nk_script_dir!r}")  # noqa: T201
+
 if _nk_script_dir:
     _nk_script_dir = _nk_script_dir.replace("\\", "/")
 
@@ -370,6 +372,7 @@ else:
         # Pass the Nuke script directory so the runner resolves project
         # directory macros (like {outputs}) relative to the .nk file.
         if _nk_script_dir:
+            print("Nuke script directory is getting extended.")
             cmd.extend(["--nk-script-dir", _nk_script_dir])
 
         # Pass user-specified output dir override if set in the knob.

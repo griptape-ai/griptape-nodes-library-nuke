@@ -53,6 +53,7 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     # that relative directory macros in project.yml (like ``outputs``) resolve
     # next to the .nk file instead of inside the companion bundle.
     workspace_dir = nk_script_dir if nk_script_dir else str(script_dir)
+    logging.getLogger(__name__).info("[griptape] nk_script_dir=%r  workspace_dir=%r", nk_script_dir, workspace_dir)
     os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = workspace_dir
     os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 
