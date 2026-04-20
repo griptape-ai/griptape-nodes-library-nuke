@@ -39,8 +39,7 @@ class _GizmoKnob(BaseModel):
     def check_valid_type_id(self) -> _GizmoKnob:
         if self.type_id not in _VALID_KNOB_TYPE_IDS:
             raise ValueError(
-                f"Unknown knob type ID {self.type_id} for knob '{self.name}'. "
-                f"Valid IDs: {sorted(_VALID_KNOB_TYPE_IDS)}"
+                f"Unknown knob type ID {self.type_id} for knob '{self.name}'. Valid IDs: {sorted(_VALID_KNOB_TYPE_IDS)}"
             )
         return self
 
@@ -54,9 +53,7 @@ class _GizmoModel(BaseModel):
         found = {k.name for k in self.knobs}
         missing = _REQUIRED_KNOB_NAMES - found
         if missing:
-            raise ValueError(
-                f"Missing required knobs: {sorted(missing)}. Required: {sorted(_REQUIRED_KNOB_NAMES)}"
-            )
+            raise ValueError(f"Missing required knobs: {sorted(missing)}. Required: {sorted(_REQUIRED_KNOB_NAMES)}")
         return self
 
 
@@ -74,10 +71,12 @@ def validate_gizmo(writer: GizmoWriter) -> None:
         GizmoValidationError: if any check fails.
     """
     try:
-        _GizmoModel.model_validate({
-            "name": writer.gizmo_name,
-            "knobs": [{"type_id": type_id, "name": name} for type_id, name in writer.knobs],
-        })
+        _GizmoModel.model_validate(
+            {
+                "name": writer.gizmo_name,
+                "knobs": [{"type_id": type_id, "name": name} for type_id, name in writer.knobs],
+            }
+        )
     except ValidationError as exc:
         messages = "; ".join(err["msg"] for err in exc.errors())
         raise GizmoValidationError(messages) from exc

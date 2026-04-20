@@ -286,7 +286,11 @@ class NukeGizmoPublisher:
         read_result = GriptapeNodes.handle_request(
             ReadFileRequest(file_path=str(init_path), workspace_only=False, encoding="utf-8")
         )
-        existing = read_result.content if isinstance(read_result, ReadFileResultSuccess) and isinstance(read_result.content, str) else ""
+        existing = (
+            read_result.content
+            if isinstance(read_result, ReadFileResultSuccess) and isinstance(read_result.content, str)
+            else ""
+        )
         if INIT_MARKER in existing:
             return
 

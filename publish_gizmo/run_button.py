@@ -302,7 +302,9 @@ else:
             _tmp = os.path.join(
                 tempfile.gettempdir(),
                 f"{_temp_file_prefix}_{node.name()}_{_mk}.{_ext}",
-            ).replace("\\", "/")  # Nuke/TCL treats backslashes as escape chars; forward slashes are safe on all platforms
+            ).replace(
+                "\\", "/"
+            )  # Nuke/TCL treats backslashes as escape chars; forward slashes are safe on all platforms
             print(f"[Griptape] media input '{_mk}' -> rendering frames {_first}-{_last} to temp file: {_tmp!r}")
             node.begin()
             try:

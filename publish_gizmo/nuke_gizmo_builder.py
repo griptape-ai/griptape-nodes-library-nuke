@@ -31,21 +31,39 @@ _TYPE_TO_NUKE_KNOB: dict[str, tuple[int, str]] = {
 }
 
 # File-path types that use a file browser in Nuke
-_FILE_PATH_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact", "VideoUrlArtifact", "VideoArtifact"}
+_FILE_PATH_TYPES = {
+    "ImageUrlArtifact",
+    "ImageArtifact",
+    "BlobArtifact",
+    "AudioArtifact",
+    "VideoUrlArtifact",
+    "VideoArtifact",
+}
 
 # Types that use a multi-line text field in Nuke
 _MULTILINE_TYPES = {"CsvArtifact", "JsonArtifact"}
 
 # Media types whose outputs should be displayed in an internal Read node in Nuke
-_MEDIA_OUTPUT_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact", "VideoUrlArtifact", "VideoArtifact"}
+_MEDIA_OUTPUT_TYPES = {
+    "ImageUrlArtifact",
+    "ImageArtifact",
+    "BlobArtifact",
+    "AudioArtifact",
+    "VideoUrlArtifact",
+    "VideoArtifact",
+}
 
 # Types that render the full root frame range to a temp video (vs single-frame default)
 _FRAME_RANGE_INPUT_TYPES = {"VideoUrlArtifact", "VideoArtifact"}
 
 # All media input types that get upstream Nuke Input nodes in the gizmo
 _MEDIA_INPUT_TYPES = {
-    "ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact",
-    "VideoUrlArtifact", "VideoArtifact",
+    "ImageUrlArtifact",
+    "ImageArtifact",
+    "BlobArtifact",
+    "AudioArtifact",
+    "VideoUrlArtifact",
+    "VideoArtifact",
 }
 
 # Naming conventions for internal Nuke nodes inside the gizmo
@@ -158,7 +176,12 @@ class NukeGizmoBuilder:
         w.add_tab("run_tab", label="Run")
         w.add_string_knob("output_dir", label="Output Directory")
         run_code = self._build_run_button_bootstrap(
-            input_params, list(output_params.keys()), start_node_name, media_output_names, media_input_names, frame_range_input_names
+            input_params,
+            list(output_params.keys()),
+            start_node_name,
+            media_output_names,
+            media_input_names,
+            frame_range_input_names,
         )
         w.add_pyscript_knob("run_workflow", label="Run Workflow", python_code=run_code)
 
