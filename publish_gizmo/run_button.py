@@ -340,7 +340,7 @@ else:
     if not uv:
         _install_env = os.environ.copy()
         _install_env["UV_UNMANAGED_INSTALL"] = _GRIPTAPE_UV_INSTALL_DIR
-        msg = "Installing UV and building your gizmo python environment...\nThis will take a few minutes the first gizmo run, but will be faster on subsequent gizmo runs."
+        msg = "Installing UV..."
         _pre_dialog_logs.append(msg)
 
         if platform.system() == "Windows":
@@ -379,6 +379,12 @@ else:
                 if os.path.isfile(_p):
                     uv = _p
                     break
+
+    if not os.path.isdir(os.path.join(companion, ".venv")):
+        _pre_dialog_logs.append(
+            "Building your gizmo python environment...\n"
+            "This will take a few minutes the first gizmo run, but will be faster on subsequent gizmo runs."
+        )
 
     # -- Run the workflow --
 
