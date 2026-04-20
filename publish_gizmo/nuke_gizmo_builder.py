@@ -4,7 +4,7 @@ import os
 import re
 
 from publish_gizmo.constants import RUN_BUTTON_FILENAME, versioned_node_name
-from publish_gizmo.gizmo_validator import validate_gizmo_text
+from publish_gizmo.gizmo_validator import validate_gizmo
 from publish_gizmo.gizmo_writer import GizmoWriter, NukeKnobType
 
 # Parameter types that are control-flow connections, not user data knobs
@@ -19,6 +19,8 @@ _TYPE_TO_NUKE_KNOB: dict[str, tuple[int, str]] = {
     "ImageArtifact": (NukeKnobType.FILE, "File_Knob"),
     "BlobArtifact": (NukeKnobType.FILE, "File_Knob"),
     "AudioArtifact": (NukeKnobType.FILE, "File_Knob"),
+    "VideoUrlArtifact": (NukeKnobType.FILE, "File_Knob"),
+    "VideoArtifact": (NukeKnobType.FILE, "File_Knob"),
     "TextArtifact": (NukeKnobType.MULTILINE_STRING, "String_Knob"),
     "str": (NukeKnobType.MULTILINE_STRING, "String_Knob"),
     "float": (NukeKnobType.DOUBLE, "Double_Knob"),
@@ -29,16 +31,22 @@ _TYPE_TO_NUKE_KNOB: dict[str, tuple[int, str]] = {
 }
 
 # File-path types that use a file browser in Nuke
-_FILE_PATH_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact"}
+_FILE_PATH_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact", "VideoUrlArtifact", "VideoArtifact"}
 
 # Types that use a multi-line text field in Nuke
 _MULTILINE_TYPES = {"CsvArtifact", "JsonArtifact"}
 
 # Media types whose outputs should be displayed in an internal Read node in Nuke
-_MEDIA_OUTPUT_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact"}
+_MEDIA_OUTPUT_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact", "VideoUrlArtifact", "VideoArtifact"}
 
-# Media input types that support upstream Nuke node connections (render-to-temp)
-_MEDIA_INPUT_TYPES = {"ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact"}
+# Types that render the full root frame range to a temp video (vs single-frame default)
+_FRAME_RANGE_INPUT_TYPES = {"VideoUrlArtifact", "VideoArtifact"}
+
+# All media input types that get upstream Nuke Input nodes in the gizmo
+_MEDIA_INPUT_TYPES = {
+    "ImageUrlArtifact", "ImageArtifact", "BlobArtifact", "AudioArtifact",
+    "VideoUrlArtifact", "VideoArtifact",
+}
 
 # Naming conventions for internal Nuke nodes inside the gizmo
 _READ_NODE_PREFIX = "GEN_READ"
@@ -138,6 +146,7 @@ class NukeGizmoBuilder:
 
         media_output_names = [n for n, i in output_params.items() if i.get("type") in _MEDIA_OUTPUT_TYPES]
         media_input_names = [n for n, i in input_params.items() if i.get("type") in _MEDIA_INPUT_TYPES]
+        frame_range_input_names = [n for n, i in input_params.items() if i.get("type") in _FRAME_RANGE_INPUT_TYPES]
 
         w = GizmoWriter()
 
@@ -149,7 +158,7 @@ class NukeGizmoBuilder:
         w.add_tab("run_tab", label="Run")
         w.add_string_knob("output_dir", label="Output Directory")
         run_code = self._build_run_button_bootstrap(
-            input_params, list(output_params.keys()), start_node_name, media_output_names, media_input_names
+            input_params, list(output_params.keys()), start_node_name, media_output_names, media_input_names, frame_range_input_names
         )
         w.add_pyscript_knob("run_workflow", label="Run Workflow", python_code=run_code)
 
@@ -187,9 +196,8 @@ class NukeGizmoBuilder:
         self._write_internal_graph(w, media_input_names, media_output_names)
         w.end_group()
 
-        gizmo_text = w.render()
-        validate_gizmo_text(gizmo_text)
-        return gizmo_text
+        validate_gizmo(w)
+        return w.render()
 
     def _write_internal_graph(
         self,
@@ -299,6 +307,7 @@ class NukeGizmoBuilder:
         start_node_name: str,
         media_output_names: list[str],
         media_input_names: list[str],
+        frame_range_input_names: list[str],
     ) -> str:
         """Build a short bootstrap that loads run_button.py from the companion dir."""
         workflow_filename = os.path.basename(self._workflow_file)
@@ -316,6 +325,7 @@ class NukeGizmoBuilder:
             "start_node_name": start_node_name,
             "param_names": param_names,
             "media_input_names": media_input_names,
+            "frame_range_input_names": frame_range_input_names,
             "media_output_names": media_output_names,
             "media_input_index_map": media_input_index_map,
             "media_output_read_map": media_output_read_map,
