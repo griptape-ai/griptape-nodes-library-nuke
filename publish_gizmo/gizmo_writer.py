@@ -69,11 +69,22 @@ class GizmoWriter:
 
     def __init__(self) -> None:
         self._lines: list[str] = []
+        self._gizmo_name: str = ""
+        self._knobs: list[tuple[int, str]] = []
+
+    @property
+    def gizmo_name(self) -> str:
+        return self._gizmo_name
+
+    @property
+    def knobs(self) -> list[tuple[int, str]]:
+        return list(self._knobs)
 
     # -- Gizmo header / footer --
 
     def begin_gizmo(self, name: str, tile_color: str = "0xff9900ff") -> None:
         """Open the top-level ``Gizmo { ... }`` block."""
+        self._gizmo_name = name
         self._lines.append("Gizmo {")
         self._lines.append(f" name {name}")
         self._lines.append(f" tile_color {tile_color}")
@@ -101,10 +112,12 @@ class GizmoWriter:
 
     def add_tab(self, knob_name: str, label: str) -> None:
         """Add a tab knob (creates a new properties panel tab)."""
+        self._knobs.append((NukeKnobType.TAB, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.TAB} {knob_name} l "{label}"}}')
 
     def add_divider(self, knob_name: str, label: str, flags: str = "+STARTLINE") -> None:
         """Add a horizontal divider / section label."""
+        self._knobs.append((NukeKnobType.DIVIDER, knob_name))
         if flags:
             self._lines.append(f' addUserKnob {{{NukeKnobType.DIVIDER} {knob_name} l "{label}" {flags}}}')
         else:
@@ -114,6 +127,7 @@ class GizmoWriter:
 
     def add_string_knob(self, knob_name: str, label: str, default: str | None = None, flags: str = "") -> None:
         """Add a single-line string knob."""
+        self._knobs.append((NukeKnobType.STRING, knob_name))
         flag_suffix = f" {flags}" if flags else ""
         self._lines.append(f' addUserKnob {{{NukeKnobType.STRING} {knob_name} l "{label}"{flag_suffix}}}')
         if default is not None:
@@ -121,6 +135,7 @@ class GizmoWriter:
 
     def add_file_knob(self, knob_name: str, label: str, default: str | None = None, flags: str = "") -> None:
         """Add a file-browser knob."""
+        self._knobs.append((NukeKnobType.FILE, knob_name))
         flag_suffix = f" {flags}" if flags else ""
         self._lines.append(f' addUserKnob {{{NukeKnobType.FILE} {knob_name} l "{label}"{flag_suffix}}}')
         if default is not None:
@@ -128,18 +143,21 @@ class GizmoWriter:
 
     def add_bool_knob(self, knob_name: str, label: str, default: bool | None = None) -> None:
         """Add a checkbox (boolean) knob."""
+        self._knobs.append((NukeKnobType.BOOL, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.BOOL} {knob_name} l "{label}"}}')
         if default is not None:
             self._lines.append(f" {knob_name} {'1' if default else '0'}")
 
     def add_int_knob(self, knob_name: str, label: str, default: int | None = None) -> None:
         """Add an integer knob."""
+        self._knobs.append((NukeKnobType.INT, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.INT} {knob_name} l "{label}"}}')
         if default is not None:
             self._lines.append(f" {knob_name} {default}")
 
     def add_double_knob(self, knob_name: str, label: str, default: float | None = None) -> None:
         """Add a double-precision float knob."""
+        self._knobs.append((NukeKnobType.DOUBLE, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.DOUBLE} {knob_name} l "{label}"}}')
         if default is not None:
             self._lines.append(f" {knob_name} {default}")
@@ -148,6 +166,7 @@ class GizmoWriter:
         self, knob_name: str, label: str, default: str | None = None, flags: str = ""
     ) -> None:
         """Add a multi-line text knob."""
+        self._knobs.append((NukeKnobType.MULTILINE_STRING, knob_name))
         flag_suffix = f" {flags}" if flags else ""
         self._lines.append(f' addUserKnob {{{NukeKnobType.MULTILINE_STRING} {knob_name} l "{label}"{flag_suffix}}}')
         if default is not None:
@@ -155,6 +174,7 @@ class GizmoWriter:
 
     def add_enumeration_knob(self, knob_name: str, label: str, choices: list, default_index: int | None = None) -> None:
         """Add a dropdown enumeration knob."""
+        self._knobs.append((NukeKnobType.ENUMERATION, knob_name))
         choices_str = " ".join(f'"{c}"' if " " in str(c) else str(c) for c in choices)
         self._lines.append(f' addUserKnob {{{NukeKnobType.ENUMERATION} {knob_name} l "{label}" M {{{choices_str}}}}}')
         if default_index is not None:
@@ -165,6 +185,7 @@ class GizmoWriter:
 
         ``python_code`` is plain Python; this method handles TCL escaping.
         """
+        self._knobs.append((NukeKnobType.PYSCRIPT, knob_name))
         escaped = _tcl_escape(python_code)
         flag_suffix = f" {flags}" if flags else ""
         self._lines.append(
@@ -173,6 +194,7 @@ class GizmoWriter:
 
     def add_invisible_string_knob(self, knob_name: str, value: str | None = None) -> None:
         """Add a hidden string knob. Omit ``value`` to leave it unset in the file."""
+        self._knobs.append((NukeKnobType.STRING, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.STRING} {knob_name} l "" +INVISIBLE}}')
         if value is not None:
             self._lines.append(f" {knob_name} {value}")

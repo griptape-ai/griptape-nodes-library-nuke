@@ -18,6 +18,12 @@ from griptape_nodes.common.project_templates.validation import (
 )
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
+from griptape_nodes.retained_mode.events.os_events import (
+    ReadFileRequest,
+    ReadFileResultSuccess,
+    WriteFileRequest,
+    WriteFileResultSuccess,
+)
 from griptape_nodes.retained_mode.events.workflow_events import (
     PublishWorkflowResultFailure,
     PublishWorkflowResultSuccess,
@@ -112,7 +118,12 @@ class NukeGizmoPublisher:
                 current_version=version,
             )
             gizmo_path = griptape_dir / versioned_gizmo_filename(workflow_stem, version)
-            gizmo_path.write_text(builder.generate(), encoding="utf-8")
+            write_result = GriptapeNodes.handle_request(
+                WriteFileRequest(file_path=str(gizmo_path), content=builder.generate(), encoding="utf-8")
+            )
+            if not isinstance(write_result, WriteFileResultSuccess):
+                msg = f"Failed to write gizmo to '{gizmo_path}'."
+                raise TypeError(msg)
             logger.info("Gizmo written to: %s", gizmo_path)
 
             # One-time plugin path setup + regenerate menu
@@ -150,11 +161,16 @@ class NukeGizmoPublisher:
           ``{outputs}/<workflow_name>/{node_name?:_}{file_name_base}_v{_index?:04}.{file_extension}``
         """
         project_yml = companion_base / "project.yml"
-        if not project_yml.exists():
+        read_result = GriptapeNodes.handle_request(
+            ReadFileRequest(file_path=str(project_yml), workspace_only=False, encoding="utf-8")
+        )
+        if not isinstance(read_result, ReadFileResultSuccess):
+            return
+        if not isinstance(read_result.content, str):
             return
 
         validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
-        template = load_project_template_from_yaml(project_yml.read_text(encoding="utf-8"), validation_info)
+        template = load_project_template_from_yaml(read_result.content, validation_info)
         if template is None:
             return
 
@@ -175,7 +191,11 @@ class NukeGizmoPublisher:
             fallback="save_file",
         )
 
-        project_yml.write_text(template.to_yaml(), encoding="utf-8")
+        write_result = GriptapeNodes.handle_request(
+            WriteFileRequest(file_path=str(project_yml), content=template.to_yaml(), encoding="utf-8")
+        )
+        if not isinstance(write_result, WriteFileResultSuccess):
+            logger.warning("Could not write customized project.yml to '%s'.", project_yml)
 
     # -- Validation and path helpers --
 
@@ -263,7 +283,14 @@ class NukeGizmoPublisher:
         publishes are no-ops and the user's own init.py content is preserved.
         """
         init_path = install_dir / "init.py"
-        existing = init_path.read_text(encoding="utf-8") if init_path.exists() else ""
+        read_result = GriptapeNodes.handle_request(
+            ReadFileRequest(file_path=str(init_path), workspace_only=False, encoding="utf-8")
+        )
+        existing = (
+            read_result.content
+            if isinstance(read_result, ReadFileResultSuccess) and isinstance(read_result.content, str)
+            else ""
+        )
         if INIT_MARKER in existing:
             return
 
@@ -272,7 +299,13 @@ class NukeGizmoPublisher:
             f"_nuke.pluginAddPath(_os.path.join(_os.path.dirname(__file__), '{GRIPTAPE_DIR_NAME}'))"
         )
         updated = (existing.rstrip("\n") + "\n\n" + line + "\n") if existing.strip() else line + "\n"
-        init_path.write_text(updated, encoding="utf-8")
+        write_result = GriptapeNodes.handle_request(
+            WriteFileRequest(file_path=str(init_path), content=updated, encoding="utf-8")
+        )
+        if not isinstance(write_result, WriteFileResultSuccess):
+            msg = f"Failed to write init.py at '{init_path}'."
+            logger.error(msg)
+            raise TypeError(msg)
         logger.info("init.py updated at: %s", init_path)
 
     def _regenerate_menu_py(self, griptape_dir: Path) -> None:
@@ -360,5 +393,12 @@ nuke.menu('Nuke').addMenu('Griptape').addCommand('Refresh Griptape Gizmos', _ref
 # Populate the Nodes toolbar on startup.
 _refresh_griptape_menu()
 """
-        (griptape_dir / "menu.py").write_text(menu_code, encoding="utf-8")
-        logger.info("menu.py regenerated at: %s", griptape_dir / "menu.py")
+        menu_py_path = griptape_dir / "menu.py"
+        write_result = GriptapeNodes.handle_request(
+            WriteFileRequest(file_path=str(menu_py_path), content=menu_code, encoding="utf-8")
+        )
+        if not isinstance(write_result, WriteFileResultSuccess):
+            msg = f"Failed to write menu.py at '{menu_py_path}'."
+            logger.error(msg)
+            raise TypeError(msg)
+        logger.info("menu.py regenerated at: %s", menu_py_path)

@@ -214,6 +214,7 @@ _workflow_filename: str = _config.get("workflow_filename", "")
 _start_node_name: str = _config.get("start_node_name", "")
 _param_names: list = _config.get("param_names", [])
 _media_input_names: list = _config.get("media_input_names", [])
+_frame_range_input_names: list = _config.get("frame_range_input_names", [])
 _media_output_names: list = _config.get("media_output_names", [])
 _media_input_index_map: dict = _config.get("media_input_index_map", {})
 _media_output_read_map: dict = _config.get("media_output_read_map", {})
@@ -279,34 +280,53 @@ else:
     for _k in _param_names:
         if node.knob(_k):
             inputs[_k] = node[_k].value()
+            print(f"[Griptape] knob '{_k}' -> type={type(inputs[_k]).__name__!r} value={inputs[_k]!r}")
+        else:
+            print(f"[Griptape] knob '{_k}' -> NOT FOUND on node")
 
     # -- Render media inputs from upstream Nuke connections to temp files --
 
     for _mk in _media_input_names:
         _input_idx = _media_input_index_map[_mk]
+        print(f"[Griptape] media input '{_mk}' -> checking Nuke input index {_input_idx}")
         if node.input(_input_idx) is not None:
+            _is_frame_range = _mk in _frame_range_input_names
+            _ext = "mov" if _is_frame_range else "jpg"
+            _file_type = "mov" if _is_frame_range else "jpg"
+            if _is_frame_range:
+                _upstream_range = node.input(_input_idx).frameRange()  # noqa: F821
+                _first = _upstream_range.first()
+                _last = _upstream_range.last()
+            else:
+                _first = _last = int(nuke.frame())  # noqa: F821
             _tmp = os.path.join(
                 tempfile.gettempdir(),
-                f"{_temp_file_prefix}_{node.name()}_{_mk}_{int(nuke.frame())}.jpg",  # noqa: F821
+                f"{_temp_file_prefix}_{node.name()}_{_mk}.{_ext}",
             ).replace(
                 "\\", "/"
             )  # Nuke/TCL treats backslashes as escape chars; forward slashes are safe on all platforms
+            print(f"[Griptape] media input '{_mk}' -> rendering frames {_first}-{_last} to temp file: {_tmp!r}")
             node.begin()
             try:
                 _in = nuke.toNode(f"{_input_node_prefix}{_input_idx + 1}")  # noqa: F821
                 _w = nuke.nodes.Write(name="_GT_TMP_WRITE")  # noqa: F821
                 _w["file"].setValue(_tmp)
-                _w["file_type"].setValue("jpg")
+                _w["file_type"].setValue(_file_type)
                 _w.setInput(0, _in)
-                nuke.execute(_w, int(nuke.frame()), int(nuke.frame()))  # noqa: F821
+                nuke.execute(_w, _first, _last)  # noqa: F821
                 nuke.delete(_w)  # noqa: F821
+                print(f"[Griptape] media input '{_mk}' -> temp file written: {_tmp!r}")
             finally:
                 node.end()
             inputs[_mk] = _tmp
+        else:
+            print(f"[Griptape] media input '{_mk}' -> no upstream Nuke connection on input {_input_idx}, skipping")
 
     # -- Locate uv, installing it if absent --
 
+    print(f"[Griptape] final inputs dict before serialization: {inputs!r}")
     flow_input = json.dumps({_start_node_name: inputs})
+    print(f"[Griptape] flow_input JSON: {flow_input!r}")
 
     uv = shutil.which("uv")
     if not uv:
@@ -315,9 +335,13 @@ else:
                 uv = _p
                 break
 
+    _pre_dialog_logs: list = []
+
     if not uv:
         _install_env = os.environ.copy()
         _install_env["UV_UNMANAGED_INSTALL"] = _GRIPTAPE_UV_INSTALL_DIR
+        msg = "Installing UV..."
+        _pre_dialog_logs.append(msg)
 
         if platform.system() == "Windows":
             _install = subprocess.run(
@@ -356,6 +380,12 @@ else:
                     uv = _p
                     break
 
+    if not os.path.isdir(os.path.join(companion, ".venv")):
+        _pre_dialog_logs.append(
+            "Building your gizmo python environment...\n"
+            "This will take a few minutes the first gizmo run, but will be faster on subsequent gizmo runs."
+        )
+
     # -- Run the workflow --
 
     if uv:
@@ -389,9 +419,13 @@ else:
             _dialog = _WorkflowProgressDialog(title=f"Griptape: {_workflow_filename}")
             _dialog.show()
 
+            for _pre_log in _pre_dialog_logs:
+                _dialog.append_log(_pre_log)
+
             _process_ref = [None]  # mutable container so cancel callback can reach it
             _log_lock = threading.Lock()
             _pending_log_lines: list = []
+            _all_stderr_lines: list = []
 
             def _cancel_process():
                 p = _process_ref[0]
@@ -408,6 +442,7 @@ else:
                         return
                     batch = "".join(_pending_log_lines)
                     _pending_log_lines.clear()
+                _all_stderr_lines.append(batch)
                 _dialog.append_log(batch)
 
             def _on_result(success, stdout_text, _stderr_text):
@@ -454,7 +489,7 @@ else:
                         _dialog.append_log("\n--- ERROR ---\n" + error_message)
                         _dialog.set_finished(False)
                 else:
-                    _set_node_error(node, "Workflow failed. See the log dialog for details.")
+                    _set_node_error(node, "Workflow failed.\n" + (_stderr_text or "No log output available."))
                     _dialog.set_finished(False)
 
             def _worker():
@@ -504,7 +539,7 @@ else:
 
                 nuke.executeInMainThread(  # noqa: F821
                     _on_result,
-                    args=(p.returncode == 0, "".join(stdout_lines), ""),
+                    args=(p.returncode == 0, "".join(stdout_lines), "".join(_all_stderr_lines)),
                 )
 
             threading.Thread(target=_worker, daemon=True).start()
