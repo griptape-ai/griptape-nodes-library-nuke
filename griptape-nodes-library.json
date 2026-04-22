@@ -6,7 +6,7 @@
         "author": "Griptape",
         "description": "Library for Nuke nodes",
         "library_version": "0.2.0",
-        "engine_version": "0.73.0",
+        "engine_version": "0.81.0",
         "tags": [
             "Griptape",
             "AI",
@@ -27,7 +27,6 @@
         }
     ],
     "nodes": [
-
         {
             "class_name": "NukeStartFlow",
             "file_path": "nuke_nodes/nuke_start_flow.py",
@@ -51,6 +50,5 @@
     ],
     "workflows": [
         "workflows/templates/image_edit_nano_banana.py"
-      ]
-    
+    ]
 }
