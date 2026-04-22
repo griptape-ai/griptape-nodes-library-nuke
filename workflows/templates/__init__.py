@@ -1,1 +1,1 @@
-"""Workflow Templates for the Griptape Nodes Library package."""
+"""Workflow Templates for the Griptape Nodes Nuke Library package."""

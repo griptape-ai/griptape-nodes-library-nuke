@@ -1,83 +1,89 @@
 # Griptape Nodes: Foundry Nuke Library
 
-Welcome to the Griptape Nodes Foundry Nuke Library.
-This library contains nodes, templates, and publishing capabilities for working with [Foundry Nuke](https://www.foundry.com/products/nuke-family)
+A Griptape Nodes library for building workflows that run inside [Foundry Nuke](https://www.foundry.com/products/nuke-family). It provides flow-control nodes for authoring Nuke-targeted workflows and a publisher that packages a workflow as a versioned `.gizmo` you can drop into a Nuke script.
 
-### Key Configuration Features
+## Features
 
-Copy [.env.example](.env.example) to `.env` and replace the environment variables with the ones you want to use.
+- **Nuke flow-control nodes** under the `Foundry Nuke` category:
+  - `NukeStartFlow` – entry point for a Nuke-targeted workflow.
+  - `NukeEndFlow` – terminal node; exposes `was_successful` and `result_details`.
+- **Gizmo publisher** (`publish_gizmo/`): packages a workflow into a versioned `.gizmo` alongside a runner script and installs it into a Nuke plugin directory (default: `~/.nuke`).
+- **Auto-discovery** of Nuke installations on macOS, Windows, and Linux, plus `NUKE_PATH` segment detection for picking an install target.
+- **Griptape menu integration**: publishing writes a `menu.py` that adds a `Griptape` submenu to Nuke's Nodes toolbar and a `Refresh Griptape Gizmos` command on the main menu bar. Multiple published versions of the same workflow are grouped under a per-workflow submenu.
+- **Nuke-aware output paths**: the bundled `project.yml` is rewritten so workflow outputs land next to the `.nk` file (under `griptape_outputs/<workflow_name>/...`).
 
+## Configuration
 
-### Install the Library
+Copy [.env.example](.env.example) to `.env` and set `NUKE_PATH` if you want extra plugin directories surfaced as install targets in the publish dialog. `~/.nuke` is always listed and is the default.
 
-1. **Download the library files** to your Griptape Nodes libraries directory:
+## Install the Library
+
+1. **Clone the repository** into your Griptape Nodes workspace:
 
    ```bash
-   # Navigate to your Griptape Nodes libraries directory
-   cd `gtn config show workspace_directory`
-
-   # Clone or download your library
-   git clone https://github.com/your-username/your-library-name.git
+   cd "$(gtn config show workspace_directory)"
+   git clone https://github.com/griptape-ai/griptape-nodes-library-nuke.git
    ```
 
-2. **Add the library** in the Griptape Nodes Editor:
+2. **Register the library** in the Griptape Nodes editor:
 
-   - Open the Settings menu and navigate to the _Libraries_ settings
-   - Click on _+ Add Library_ at the bottom of the settings panel
-   - Enter the path to the library JSON file: **your Griptape Nodes Workspace directory**`/your-library-name/griptape-nodes-library.json`
-   - You can check your workspace directory with `gtn config show workspace_directory`
-   - Close the Settings Panel
-   - Click on _Refresh Libraries_
+   - Open *Settings > Libraries*.
+   - Click *+ Add Library* and enter the path to [griptape-nodes-library.json](griptape-nodes-library.json) inside the cloned directory.
+   - Close the settings panel and click *Refresh Libraries*.
 
-3. **Verify installation** by checking that your custom nodes appear in the Griptape Nodes interface in your defined category.
+3. **Verify** that `Foundry Nuke` appears as a node category and that `Nuke Start Flow` / `Nuke End Flow` are available.
 
-## 🎯 Example Usage
+## Publishing a Workflow as a Nuke Gizmo
 
-### Here is an example flow that you could make with the provided nodes:
+1. Build a workflow whose top-level flow starts with a `NukeStartFlow` node and ends with a `NukeEndFlow` node.
+2. Trigger *Publish Workflow*. In the dialog, pick:
+   - A **Nuke install** (auto-detected) to resolve plugin path candidates.
+   - A **gizmo install path** – either `~/.nuke`, a path from `NUKE_PATH`, a Nuke-install plugins directory, or a custom path.
+   - An **update mode** to pick between creating a new version and overwriting the current one.
+3. The publisher writes, under the chosen install directory:
 
-## 🔍 Troubleshooting
+   ```
+   <install_dir>/
+     init.py                     # appends pluginAddPath for the griptape dir
+     griptape/
+       menu.py                   # Griptape menu + refresh command
+       <workflow>_v<N>.gizmo     # versioned gizmo
+       <workflow>/
+         v<N>/<workflow>.py      # workflow file for version N
+         run_workflow.py         # runner executed inside Nuke
+         run_button.py           # gizmo "Run" knob handler
+         project.yml             # Nuke-specific output conventions
+         ...                     # libraries, config, .env, pyproject.toml
+   ```
 
-### Common Issues
+4. Inside Nuke, use the `Griptape` menu on the Nodes toolbar to create the gizmo, or run `Griptape > Refresh Griptape Gizmos` from the main menu bar after publishing to pick up new versions without restarting Nuke.
 
-#### Library Not Appearing
+## Repository Layout
 
-- Verify the JSON file path is correct
-- Check that the JSON syntax is valid (no trailing commas, proper quotes)
-- Ensure the library was refreshed after adding
+- [nuke_nodes/](nuke_nodes/) – `NukeStartFlow`, `NukeEndFlow`, and the advanced library entry point that registers the publish handler.
+- [publish_gizmo/](publish_gizmo/) – gizmo publisher, builder, validator, writer, Nuke install discovery, publish options, workflow runner, and gizmo run-button script.
+- [workflows/templates/](workflows/templates/) – workflow templates shipped with the library.
+- [griptape-nodes-library.json](griptape-nodes-library.json) – library manifest (nodes, category, metadata, bundled workflows).
+- [Makefile](Makefile) – version bumping, dependency sync, lint/format/type checks.
 
-#### Node Import Errors
+## Development
 
-- Check that all required dependencies are listed in the JSON
-- Verify Python file paths are correct relative to the JSON file
-- Ensure class names match exactly between Python files and JSON
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and the release process. Quick reference:
 
-#### Missing API Keys
+```bash
+make install        # install all dependencies via uv
+make check          # format, lint, types, JSON validation
+make fix            # auto-fix formatting and lint issues
+```
 
-- Configure secrets in Settings > API Keys & Secrets
-- Use the exact key names specified in `secrets_to_register`
-- Restart Griptape Nodes after adding new secrets
+## Additional Resources
 
-## 📚 Additional Resources
-
-### Documentation
-
-- [Griptape Nodes Documentation](https://github.com/griptape-ai/griptape-nodes)
+- [Griptape Nodes](https://github.com/griptape-ai/griptape-nodes)
 - [Griptape Framework](https://github.com/griptape-ai/griptape)
-- [Node Development Examples](example_nodes_template/)
-
-### Community
-
-- [Griptape Discord](https://discord.gg/griptape)
-- [GitHub Discussions](https://github.com/griptape-ai/griptape-nodes/discussions)
-
-### Example Libraries
-
 - [Griptape Nodes Directory](https://github.com/griptape-ai/griptape-nodes-directory)
+- [Griptape Discord](https://discord.gg/griptape)
+- [Foundry Nuke plugin/gizmo path docs](https://learn.foundry.com/nuke/content/comp_environment/configuring_nuke/loading_gizmos_plugins_scripts.html)
 
-## 📄 License
+## License
 
-This template is provided under the Apache License 2.0. Your custom library can use any license you choose.
-
----
-
-Happy building! 🚀
+Apache License 2.0. See [LICENSE](LICENSE).
