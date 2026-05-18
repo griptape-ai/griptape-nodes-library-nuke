@@ -374,6 +374,6 @@ if not _companion or not _os.path.isdir(_companion):
     nuke.message("Griptape: cannot find companion directory for '{safe_name}'. Make sure the griptape folder is on Nuke's plugin path.")
 else:
     _btn_path = _os.path.join(_companion, "{RUN_BUTTON_FILENAME}")
-    with open(_btn_path) as _f:
+    with open(_btn_path, encoding="utf-8") as _f:
         exec(compile(_f.read(), _btn_path, "exec"), dict(globals(), **{{"__file__": _btn_path, "_config": {config_repr}}}))
 """
