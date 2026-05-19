@@ -1,0 +1,990 @@
+{
+  "schema": "griptape-nuke-annotations/1.0",
+  "script": "constant_write.nk",
+  "script_hash": "sha256:143fc3780734f73031f39d77f5df563bfdb2953cd6c9530a42e75855883d1fde",
+  "annotations": [
+    {
+      "node": "ConstantOutput",
+      "gt_role": "output",
+      "gt_name": "constantoutput",
+      "gt_type": "ImageArtifact",
+      "gt_label": "constantoutput"
+    },
+    {
+      "node": "Bg",
+      "gt_expose": [
+        {
+          "knob": "Bg.color"
+        }
+      ]
+    }
+  ],
+  "knob_schema": {
+    "nuke_version": "unknown",
+    "script_hash": "sha256:143fc3780734f73031f39d77f5df563bfdb2953cd6c9530a42e75855883d1fde",
+    "nodes": {
+      "ConstantOutput": {
+        "class": "Write",
+        "knobs": {
+          "channels": {
+            "label": "",
+            "type": "ChannelMask_Knob",
+            "value": "rgb",
+            "default": null,
+            "is_default": null
+          },
+          "layer": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "file": {
+            "label": "",
+            "type": "File_Knob",
+            "value": "/tmp/placeholder.png",
+            "default": null,
+            "is_default": null
+          },
+          "proxy": {
+            "label": "",
+            "type": "File_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "frame_mode": {
+            "label": "frame",
+            "type": "Enumeration_Knob",
+            "value": "expression",
+            "default": 0.0,
+            "is_default": null
+          },
+          "frame": {
+            "label": "",
+            "type": "String_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "views": {
+            "label": "",
+            "type": "MultiView_Knob",
+            "value": "main",
+            "default": null,
+            "is_default": null
+          },
+          "file_type": {
+            "label": "file type",
+            "type": "Enumeration_Knob",
+            "value": "png",
+            "default": 0.0,
+            "is_default": null
+          },
+          "datatype": {
+            "label": "data type",
+            "type": "Enumeration_Knob",
+            "value": "8 bit",
+            "default": 0.0,
+            "is_default": null
+          },
+          "linear": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "premultiplied": {
+            "label": "",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "apply through alpha": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "raw": {
+            "label": "raw data",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "transformType": {
+            "label": "transform type",
+            "type": "Enumeration_Knob",
+            "value": "colorspace",
+            "default": 0.0,
+            "is_default": null
+          },
+          "colorspace": {
+            "label": "output transform",
+            "type": "Enumeration_Knob",
+            "value": "default",
+            "default": 0.0,
+            "is_default": null
+          },
+          "ocioDisplay": {
+            "label": "display",
+            "type": "Link_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "ocioView": {
+            "label": "view",
+            "type": "Link_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "create_directories": {
+            "label": "create directories",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "render_order": {
+            "label": "render order",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "Render": {
+            "label": "",
+            "type": "PyScript_Knob",
+            "value": "nukescripts.render_panel((nuke.thisNode(),), False)",
+            "default": null,
+            "is_default": null
+          },
+          "first": {
+            "label": "frame range",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "last": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "use_limit": {
+            "label": "limit to range",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "reading": {
+            "label": "read file",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "checkHashOnRead": {
+            "label": "check file matches input",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 1.0,
+            "is_default": null
+          },
+          "on_error": {
+            "label": "missing frames",
+            "type": "Enumeration_Knob",
+            "value": "error",
+            "default": 0.0,
+            "is_default": null
+          },
+          "version": {
+            "label": "INVISIBLE",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "reload": {
+            "label": "Reload",
+            "type": "Script_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "executing": {
+            "label": "",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "read_all_lines": {
+            "label": "read all lines",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "in_colorspace": {
+            "label": "input",
+            "type": "Enumeration_Knob",
+            "value": "scene_linear",
+            "default": 0.0,
+            "is_default": null
+          },
+          "out_colorspace": {
+            "label": "output",
+            "type": "Enumeration_Knob",
+            "value": "scene_linear",
+            "default": 0.0,
+            "is_default": null
+          },
+          "reverse_transform": {
+            "label": "reverse transform",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "swap": {
+            "label": "swap input/output",
+            "type": "Script_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key1": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value1": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key2": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value2": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key3": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value3": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key4": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value4": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "ocioColorspace": {
+            "label": "input",
+            "type": "Enumeration_Knob",
+            "value": "scene_linear",
+            "default": 0.0,
+            "is_default": null
+          },
+          "display": {
+            "label": "display device",
+            "type": "Enumeration_Knob",
+            "value": "default",
+            "default": 0.0,
+            "is_default": null
+          },
+          "view": {
+            "label": "view transform",
+            "type": "Enumeration_Knob",
+            "value": "sRGB",
+            "default": 0.0,
+            "is_default": null
+          },
+          "invert": {
+            "label": "invert direction",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "saturation": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "gain": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "gamma": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "channel_selector": {
+            "label": "channel view",
+            "type": "Enumeration_Knob",
+            "value": "RGB",
+            "default": 0.0,
+            "is_default": null
+          },
+          "ocioLayer": {
+            "label": "layer",
+            "type": "ChannelMask_Knob",
+            "value": "all",
+            "default": null,
+            "is_default": null
+          },
+          "allowGPUAcceleration": {
+            "label": "",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "key1_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value1_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key2_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value2_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key3_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value3_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "key4_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "value4_Display": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "beforeRender": {
+            "label": "Before Render",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "beforeFrameRender": {
+            "label": "Before Each Frame",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "afterFrameRender": {
+            "label": "After Each Frame",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "afterRender": {
+            "label": "After Render",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "renderProgress": {
+            "label": "Render Progress",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "name": {
+            "label": "",
+            "type": "String_Knob",
+            "value": "ConstantOutput",
+            "default": null,
+            "is_default": null
+          },
+          "help": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "onCreate": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "onDestroy": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "knobChanged": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "updateUI": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "autolabel": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "panel": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "tile_color": {
+            "label": "Color",
+            "type": "ColorChip_Knob",
+            "value": 0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "gl_color": {
+            "label": "Handles",
+            "type": "ColorChip_Knob",
+            "value": 0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "label": {
+            "label": "Label",
+            "type": "Multiline_Eval_String_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "note_font": {
+            "label": "Font",
+            "type": "Font_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "note_font_size": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 11.0,
+            "default": 11.0,
+            "is_default": null
+          },
+          "note_font_color": {
+            "label": "Color",
+            "type": "ColorChip_Knob",
+            "value": 0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "selected": {
+            "label": "",
+            "type": "Boolean_Knob",
+            "value": true,
+            "default": 0.0,
+            "is_default": null
+          },
+          "xpos": {
+            "label": "INVISIBLE",
+            "type": "Array_Knob",
+            "value": -2147483648.0,
+            "default": -2147483648.0,
+            "is_default": null
+          },
+          "ypos": {
+            "label": "INVISIBLE",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "icon": {
+            "label": "INVISIBLE",
+            "type": "File_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "indicators": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "hide_input": {
+            "label": "Hide Input",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "rootNodeUpdated": {
+            "label": "root node has been updated",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "cached": {
+            "label": "Cached",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "disable": {
+            "label": "Disable",
+            "type": "Disable_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "dope_sheet": {
+            "label": "Dope Sheet",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "bookmark": {
+            "label": "Bookmark",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "postage_stamp": {
+            "label": "Postage Stamp",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "postage_stamp_frame": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "lifetimeStart": {
+            "label": "Lifetime Range",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "lifetimeEnd": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "useLifetime": {
+            "label": "Use Lifetime",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "User": {
+            "label": "",
+            "type": "Tab_Knob",
+            "value": true,
+            "default": null,
+            "is_default": null
+          },
+          "gt_role": {
+            "label": "Griptape Role",
+            "type": "EvalString_Knob",
+            "value": "output",
+            "default": null,
+            "is_default": null
+          },
+          "gt_name": {
+            "label": "Griptape Name",
+            "type": "EvalString_Knob",
+            "value": "result",
+            "default": null,
+            "is_default": null
+          },
+          "gt_type": {
+            "label": "Griptape Type",
+            "type": "EvalString_Knob",
+            "value": "ImageArtifact",
+            "default": null,
+            "is_default": null
+          }
+        }
+      },
+      "Bg": {
+        "class": "Constant",
+        "knobs": {
+          "channels": {
+            "label": "",
+            "type": "Channel_Knob",
+            "value": "rgb",
+            "default": null,
+            "is_default": null
+          },
+          "color": {
+            "label": "",
+            "type": "AColor_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "color_panelDropped": {
+            "label": "panel dropped state",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "format": {
+            "label": "",
+            "type": "Format_Knob",
+            "value": "<Format object at 0x7d2abe6db5d0>",
+            "default": null,
+            "is_default": null
+          },
+          "full_format": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "proxy_format": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "first": {
+            "label": "frame range",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "last": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "name": {
+            "label": "",
+            "type": "String_Knob",
+            "value": "Bg",
+            "default": null,
+            "is_default": null
+          },
+          "help": {
+            "label": "",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "onCreate": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "onDestroy": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "knobChanged": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "updateUI": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "autolabel": {
+            "label": "",
+            "type": "PythonKnob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "panel": {
+            "label": "",
+            "type": "Obsolete_Knob",
+            "value": null,
+            "default": null,
+            "is_default": null
+          },
+          "tile_color": {
+            "label": "Color",
+            "type": "ColorChip_Knob",
+            "value": 0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "gl_color": {
+            "label": "Handles",
+            "type": "ColorChip_Knob",
+            "value": 0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "label": {
+            "label": "Label",
+            "type": "Multiline_Eval_String_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "note_font": {
+            "label": "Font",
+            "type": "Font_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "note_font_size": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 11.0,
+            "default": 11.0,
+            "is_default": null
+          },
+          "note_font_color": {
+            "label": "Color",
+            "type": "ColorChip_Knob",
+            "value": 0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "selected": {
+            "label": "",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "xpos": {
+            "label": "INVISIBLE",
+            "type": "Array_Knob",
+            "value": -2147483648.0,
+            "default": -2147483648.0,
+            "is_default": null
+          },
+          "ypos": {
+            "label": "INVISIBLE",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "icon": {
+            "label": "INVISIBLE",
+            "type": "File_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "indicators": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "rootNodeUpdated": {
+            "label": "root node has been updated",
+            "type": "EvalString_Knob",
+            "value": "",
+            "default": null,
+            "is_default": null
+          },
+          "cached": {
+            "label": "Cached",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "disable": {
+            "label": "Disable",
+            "type": "Disable_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "dope_sheet": {
+            "label": "Dope Sheet",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "bookmark": {
+            "label": "Bookmark",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          },
+          "postage_stamp": {
+            "label": "Postage Stamp",
+            "type": "Boolean_Knob",
+            "value": true,
+            "default": 1.0,
+            "is_default": null
+          },
+          "postage_stamp_frame": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 1.0,
+            "default": 1.0,
+            "is_default": null
+          },
+          "lifetimeStart": {
+            "label": "Lifetime Range",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "lifetimeEnd": {
+            "label": "",
+            "type": "Array_Knob",
+            "value": 0.0,
+            "default": 0.0,
+            "is_default": null
+          },
+          "useLifetime": {
+            "label": "Use Lifetime",
+            "type": "Boolean_Knob",
+            "value": false,
+            "default": 0.0,
+            "is_default": null
+          }
+        }
+      }
+    }
+  }
+}

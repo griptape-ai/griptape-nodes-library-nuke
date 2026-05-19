@@ -1,18 +1,20 @@
 [project]
-name = "example_nodes_template"
+name = "griptape-nodes-library-nuke"
 version = "0.1.0"
-description = "Template for Users to create Custom Libraries and Nodes"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+description = "Griptape Nodes library for Foundry Nuke integration"
+authors = [{ name = "Dan Hutchinson", email = "dan.hutchinson@foundry.com" }]
 readme = "README.md"
 requires-python = "~=3.12.0"
-dependencies = ["griptape-nodes>=0.81.0"]
+dependencies = [
+    "griptape-nodes>=0.81.0",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["example_nodes_template", "nuke_nodes"]
+packages = ["nuke_nodes", "execution", "script_parser", "nuke_runner"]
 
 [dependency-groups]
 dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest"]
@@ -48,6 +50,6 @@ venv = ".venv"
 include = ["."]
 # run_button.py is exec'd inside Nuke's Python interpreter where `nuke` and `_config`
 # are injected into the global scope at runtime. It is not a regular importable module.
-exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows", "publish_gizmo/run_button.py"]
+exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows", "publish_gizmo/run_button.py", "scripts/generate_test_fixtures.py", "nuke_runner/runner.py", "nuke_runner/baker.py", "nuke_runner/introspect.py", "nuke_runner/exporter.py"]
 pythonVersion = "3.12"
 reportIncompatibleMethodOverride = false

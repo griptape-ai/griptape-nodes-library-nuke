@@ -1,0 +1,23 @@
+#! /home/hutch/sw/Foundry/Nuke16.0v4/libnuke-16.0.4.so -nx
+version 16.0 v4
+Root {
+ inputs 0
+ gsv  {
+  __default__ {
+  } 
+}
+ colorManagement Nuke
+ workingSpaceLUT 0
+ monitorLut sRGB
+ monitorOutLUT 2
+ int8Lut 0
+ int16Lut 0
+ logLut 0
+ floatLut 0
+}
+Blur {
+ inputs 0
+ size 5
+ name Blur1
+ selected true
+}
