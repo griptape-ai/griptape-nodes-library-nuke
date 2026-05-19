@@ -28,8 +28,8 @@ class TestGriptapeTypeForKnob:
     def test_color_knob_maps_to_str(self) -> None:
         assert griptape_type_for_knob("Color_Knob") == "str"
 
-    def test_acolor_knob_alias_maps_to_str(self) -> None:
-        assert griptape_type_for_knob("AColor_Knob") == "str"
+    def test_acolor_knob_maps_to_float(self) -> None:
+        assert griptape_type_for_knob("AColor_Knob") == "float"
 
     def test_xy_knob_maps_to_str(self) -> None:
         assert griptape_type_for_knob("XY_Knob") == "str"

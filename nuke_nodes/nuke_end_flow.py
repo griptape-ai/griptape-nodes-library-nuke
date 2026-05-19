@@ -11,8 +11,8 @@ class NukeEndFlow(EndNode):
     ) -> None:
         if metadata is None:
             metadata = {}
-        super().__init__(name, metadata)
         metadata["showaddparameter"] = True
+        super().__init__(name, metadata)
 
     def process(self) -> None:
         super().process()
