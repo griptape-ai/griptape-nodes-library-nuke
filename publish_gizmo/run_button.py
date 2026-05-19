@@ -501,7 +501,6 @@ else:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    encoding="utf-8",
                     bufsize=1,
                     cwd=companion,
                 )
@@ -549,7 +548,7 @@ else:
             # ------------------------------------------------------------------
             # Fallback: blocking path when Qt is not available
             # ------------------------------------------------------------------
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", cwd=companion, timeout=600)
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=companion, timeout=600)
             if result.returncode == 0:
                 try:
                     output = json.loads(result.stdout.strip())

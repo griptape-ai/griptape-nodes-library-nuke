@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from griptape_nodes.node_library.advanced_node_library import AdvancedNodeLibrary
@@ -12,7 +14,6 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 from publish_gizmo.nuke_publish_options import get_nuke_publish_options
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("griptape_nodes")
 
 

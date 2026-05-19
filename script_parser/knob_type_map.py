@@ -13,7 +13,7 @@ _MAP: dict[str, str] = {
     "Enumeration_Knob": "str",
     "File_Knob": "str",
     "Color_Knob": "str",
-    "AColor_Knob": "str",  # RGBA colour knob alias (Nuke 16 fixtures)
+    "AColor_Knob": "float",  # RGBA — setValue(float) sets the master value for all channels
     "XY_Knob": "str",
     "Array_Knob": "float",  # generic numeric (gain, gamma, saturation, …)
 }
