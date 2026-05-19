@@ -1,0 +1,40 @@
+#! /home/hutch/sw/Foundry/Nuke16.0v4/libnuke-16.0.4.so -nx
+#write_info ConstantOutput file:"/tmp/placeholder.png" format:"640 480 1" chans:":rgba.red:rgba.green:rgba.blue:" framerange:"1 100" fps:"0" colorspace:"default" datatype:"8 bit" transfer:"unknown" views:"main" colorManagement:"Nuke"
+version 16.0 v4
+Root {
+ inputs 0
+ gsv  {
+  __default__ {
+  } 
+}
+ colorManagement Nuke
+ workingSpaceLUT 0
+ monitorLut sRGB
+ monitorOutLUT 2
+ int8Lut 0
+ int16Lut 0
+ logLut 0
+ floatLut 0
+}
+Constant {
+ inputs 0
+ channels rgb
+ name Bg
+}
+Write {
+ file /tmp/placeholder.png
+ file_type png
+ checkHashOnRead false
+ ocioColorspace scene_linear
+ display default
+ view sRGB
+ name ConstantOutput
+ selected true
+ addUserKnob {20 User}
+ addUserKnob {1 gt_role l "Griptape Role"}
+ gt_role output
+ addUserKnob {1 gt_name l "Griptape Name"}
+ gt_name result
+ addUserKnob {1 gt_type l "Griptape Type"}
+ gt_type ImageArtifact
+}
