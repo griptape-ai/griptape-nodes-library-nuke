@@ -106,6 +106,28 @@ class TestRefreshDynamicPorts:
         # No dynamic ports should be registered
         assert node._dynamic_param_names == []
 
+    def test_input_ports_use_annotation_types(self, tmp_path: Path) -> None:
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "typed_inputs.nk"
+        nk_file.write_text("")
+        sidecar_file = tmp_path / "typed_inputs.gt.json"
+        sidecar_file.write_text("{}")
+        annotations = [
+            GriptapeAnnotation(node_name="Read1", role="input", gt_name="image", gt_type="ImageArtifact"),
+            GriptapeAnnotation(node_name="ReadGeo1", role="input", gt_name="mesh", gt_type="ThreeDUrlArtifact"),
+            GriptapeAnnotation(node_name="Text1", role="input", gt_name="label", gt_type="str"),
+        ]
+
+        node = _make_node()
+        with patch("nuke_nodes.nuke_script_node.read_sidecar", return_value=(annotations, [], False)):
+            node._refresh_dynamic_ports(str(nk_file))
+
+        created_params = {call.args[0].name: call.args[0] for call in node.add_parameter.call_args_list}
+        assert created_params["image"].input_types == ["str", "ImageArtifact", "ImageUrlArtifact", "BlobArtifact"]
+        assert created_params["mesh"].input_types == ["ThreeDUrlArtifact"]
+        assert created_params["label"].input_types == ["str"]
+
 
 class TestEnsureAnnotations:
     def test_noop_when_annotations_already_loaded(self) -> None:

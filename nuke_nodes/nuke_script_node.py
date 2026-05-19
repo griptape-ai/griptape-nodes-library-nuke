@@ -44,6 +44,21 @@ _TEMP_SUFFIX: dict[str, str] = {
     "GLTFUrlArtifact": ".glb",
 }
 
+_IMAGE_INPUT_TYPES = ["str", "ImageArtifact", "ImageUrlArtifact", "BlobArtifact"]
+_INPUT_TYPES_BY_GT_TYPE: dict[str, list[str]] = {
+    "ImageArtifact": _IMAGE_INPUT_TYPES,
+    "ImageUrlArtifact": _IMAGE_INPUT_TYPES,
+    "BlobArtifact": ["str", "BlobArtifact"],
+    "ThreeDUrlArtifact": ["ThreeDUrlArtifact"],
+    "GLTFUrlArtifact": ["GLTFUrlArtifact", "ThreeDUrlArtifact"],
+}
+
+
+def _input_types_for_annotation(gt_type: str) -> list[str]:
+    """Return canvas input types for an annotated Nuke input port."""
+    resolved_type = gt_type or "str"
+    return _INPUT_TYPES_BY_GT_TYPE.get(resolved_type, [resolved_type])
+
 
 def _path_to_artifact(gt_type: str, path: str) -> Any:
     """Convert a runner output file path to the appropriate Griptape artifact."""
@@ -433,7 +448,7 @@ class NukeScriptNode(SuccessFailureNode):
             param = Parameter(
                 name=ann.gt_name,
                 type=ann.gt_type or "str",
-                input_types=["str", "ImageArtifact", "ImageUrlArtifact", "BlobArtifact"],
+                input_types=_input_types_for_annotation(ann.gt_type),
                 default_value="",
                 display_name=ann.gt_label or ann.gt_name,
                 tooltip=f"Input path for Nuke node {ann.node_name!r}",
