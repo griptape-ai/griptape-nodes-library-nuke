@@ -327,7 +327,21 @@ class NukeGizmoPublisher:
 import nuke
 import os
 
+# Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13-15).
+try:
+    from PySide6.QtCore import QFileSystemWatcher
+    _QT_AVAILABLE = True
+except ImportError:
+    try:
+        from PySide2.QtCore import QFileSystemWatcher
+        _QT_AVAILABLE = True
+    except ImportError:
+        _QT_AVAILABLE = False
+
 _GRIPTAPE_DIR = os.path.dirname(__file__)
+
+# Module-level reference keeps the watcher alive (Python GC would drop a local).
+_GRIPTAPE_WATCHER = None
 
 
 def _refresh_griptape_menu():
@@ -336,10 +350,13 @@ def _refresh_griptape_menu():
     Call this after publishing a new or updated gizmo to make it available
     without restarting Nuke.
     \"\"\"
-    # Ensure the griptape dir stays on the plugin path (nuke.pluginAddPath is idempotent).
+    # Remove then re-add the path to force Nuke to re-walk the directory.
+    # pluginAddPath is idempotent on an already-registered path, so without
+    # the remove Nuke skips the walk and nuke.plugins() misses newly written files.
+    nuke.pluginRemovePath(_GRIPTAPE_DIR)
     nuke.pluginAddPath(_GRIPTAPE_DIR)
 
-    # Use nuke.plugins() to discover all versioned gizmos across registered plugin paths.
+    # Use nuke.ALL so Nuke walks all plugin_path() directories (not just loaded plugins).
     gizmo_paths = nuke.plugins(nuke.ALL, '*_v*.gizmo')
 
     # Collect ALL versions per stem (not just the highest).
@@ -358,10 +375,6 @@ def _refresh_griptape_menu():
 
     for stem in workflows:
         workflows[stem].sort()
-
-    # No nuke.load() here — Nuke re-reads .gizmo files from disk each time
-    # nuke.createNode() is called, so updating the menu entries is sufficient.
-    # (nuke.load on a .gizmo file would instantiate a node, which we don't want.)
 
     # Rebuild the Griptape submenu on the Nodes toolbar.
     # Remove the existing entry first so repeated calls don't accumulate duplicates.
@@ -392,6 +405,12 @@ nuke.menu('Nuke').addMenu('Griptape').addCommand('Refresh Griptape Gizmos', _ref
 
 # Populate the Nodes toolbar on startup.
 _refresh_griptape_menu()
+
+# Watch the griptape directory for new/removed gizmos and auto-refresh the menu.
+# Skipped silently when Qt is unavailable (e.g. nuke -t headless).
+if _QT_AVAILABLE:
+    _GRIPTAPE_WATCHER = QFileSystemWatcher([_GRIPTAPE_DIR])
+    _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _refresh_griptape_menu())
 """
         menu_py_path = griptape_dir / "menu.py"
         write_result = GriptapeNodes.handle_request(
