@@ -121,7 +121,7 @@ class DirectSubprocessProvider:
         _, stderr_output = process.communicate()
         return_code = process.returncode
         status = JobStatus.SUCCEEDED if return_code == 0 else JobStatus.FAILED
-        outputs: dict[str, str] = {}
+        outputs: dict[str, str | list[str]] = {}
         out_manifest_path = self._output_manifest_paths.get(handle, None)
         if out_manifest_path and os.path.exists(out_manifest_path):
             with open(out_manifest_path, encoding="utf-8") as f:

@@ -7,7 +7,7 @@ A Griptape Nodes library for building workflows that run inside [Foundry Nuke](h
 - **Nuke flow-control nodes** under the `Foundry Nuke` category:
   - `NukeStartFlow` – entry point for a Nuke-targeted workflow.
   - `NukeEndFlow` – terminal node; exposes `was_successful` and `result_details`.
-- **NukeScriptNode** – runs a `.nk` script headlessly via `nuke -t`, surfaces annotated Read/Write nodes as typed input/output ports on the canvas, and supports per-knob value overrides.
+- **NukeScriptNode** – runs a `.nk` script headlessly via `nuke -t`, surfaces annotated Read/Write nodes as typed input/output ports on the canvas, and supports per-knob value overrides. Inputs accept images, video, and raw file paths; outputs can be images, image sequences, video, or 3D geometry.
 - **Griptape Annotator** – a dockable panel that runs inside the Nuke GUI for tagging I/O nodes and promoting knobs to the Griptape interface.
 - **Gizmo publisher** (`publish_gizmo/`): packages a workflow into a versioned `.gizmo` alongside a runner script and installs it into a Nuke plugin directory (default: `~/.nuke`).
 - **Auto-discovery** of Nuke installations on macOS, Windows, and Linux, plus `NUKE_PATH` segment detection for picking an install target.
@@ -37,7 +37,7 @@ Copy [.env.example](.env.example) to `.env` and set `NUKE_PATH` if you want extr
 
 ## NukeScriptNode
 
-`NukeScriptNode` lets you drive an existing Nuke script from Griptape. Point it at a `.nk` file, annotate which nodes are inputs and outputs using the Griptape Annotator panel, and the node grows typed ports matching those annotations. At run time it invokes Nuke headlessly (`nuke -t`) and returns rendered output files as `ImageUrlArtifact` values.
+`NukeScriptNode` lets you drive an existing Nuke script from Griptape. Point it at a `.nk` file, annotate which nodes are inputs and outputs using the Griptape Annotator panel, and the node grows typed ports matching those annotations. At run time it invokes Nuke headlessly (`nuke -t`) and returns rendered output files as typed Griptape artifacts.
 
 ### Quick start
 
@@ -56,9 +56,20 @@ Annotations are stored in a `<script>.gt.json` file next to the `.nk`. The Annot
 
 Knobs promoted via the Annotator panel's **Expose** tab appear as Griptape parameters grouped under their node name. Leave a field empty to use the value already in the script; set it to override before the render.
 
+### Inputs
+
+Read nodes annotated as inputs accept `str` (file path), `ImageArtifact`, `ImageUrlArtifact`, `VideoUrlArtifact`, or `BlobArtifact` values. URL-based artifacts are downloaded to a temporary file before the render.
+
 ### Outputs
 
-Write nodes annotated as outputs surface as `ImageUrlArtifact` ports in the **Outputs** group after the node runs.
+Write nodes annotated as outputs surface in the **Outputs** group after the node runs. The artifact type depends on the annotation:
+
+| Annotation type        | Griptape output                                           |
+|------------------------|-----------------------------------------------------------|
+| `ImageArtifact` / `ImageUrlArtifact` | `ImageUrlArtifact` (single rendered frame)  |
+| `VideoUrlArtifact`     | `VideoUrlArtifact` (rendered video file, e.g. `.mp4`)     |
+| `ImageSequenceArtifact`| `ListArtifact` of `ImageUrlArtifact` — one per rendered frame |
+| `ThreeDUrlArtifact` / `GLTFUrlArtifact` | `ThreeDUrlArtifact` (`.obj` or `.glb`)   |
 
 ### Advanced parameters
 
