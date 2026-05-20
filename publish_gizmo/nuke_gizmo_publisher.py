@@ -351,9 +351,11 @@ def _refresh_griptape_menu():
     without restarting Nuke.
     \"\"\"
     # Remove then re-add the path to force Nuke to re-walk the directory.
-    # pluginAddPath is idempotent on an already-registered path, so without
-    # the remove Nuke skips the walk and nuke.plugins() misses newly written files.
-    nuke.pluginRemovePath(_GRIPTAPE_DIR)
+    # pluginAddPath is idempotent on an already-registered path; the remove
+    # invalidates the cached walk so nuke.plugins() sees newly written files.
+    # pluginRemovePath is undocumented — guard against versions that lack it.
+    if hasattr(nuke, 'pluginRemovePath'):
+        nuke.pluginRemovePath(_GRIPTAPE_DIR)
     nuke.pluginAddPath(_GRIPTAPE_DIR)
 
     # Use nuke.ALL so Nuke walks all plugin_path() directories (not just loaded plugins).

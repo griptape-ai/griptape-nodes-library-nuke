@@ -25,16 +25,19 @@ def _extract_menu_code() -> str:
 
 
 def test_menu_code_forces_plugin_path_rescan() -> None:
-    """Must remove then re-add the plugin path before calling nuke.plugins().
+    """Must guard pluginRemovePath (undocumented) then re-add before nuke.plugins().
 
     pluginAddPath is idempotent on an already-registered path — without the remove,
     Nuke skips the directory walk and nuke.plugins() misses newly written gizmos.
+    pluginRemovePath must be guarded with hasattr to avoid crashing on Nuke versions
+    that don't expose it.
     """
     code = _extract_menu_code()
+    assert "hasattr(nuke, 'pluginRemovePath')" in code
     assert "nuke.pluginRemovePath(" in code
     assert "nuke.pluginAddPath(" in code
     assert "nuke.plugins(" in code
-    assert code.index("nuke.pluginRemovePath(") < code.index("nuke.pluginAddPath(")
+    assert code.index("hasattr(nuke, 'pluginRemovePath')") < code.index("nuke.pluginRemovePath(")
 
 
 def test_menu_code_contains_file_system_watcher() -> None:
