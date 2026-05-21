@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,8 +18,12 @@ from griptape_nodes.common.project_templates.validation import (
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.os_events import (
+    CopyFileRequest,
+    CopyFileResultSuccess,
     ReadFileRequest,
     ReadFileResultSuccess,
+    RenameFileRequest,
+    RenameFileResultSuccess,
     WriteFileRequest,
     WriteFileResultSuccess,
 )
@@ -98,12 +101,25 @@ class NukeGizmoPublisher:
             src_workflow = companion_base / workflow_file_path.name
             dest_workflow = version_dir / workflow_file_path.name
             if src_workflow.exists():
-                shutil.move(str(src_workflow), str(dest_workflow))
+                self._move_file(src_workflow, dest_workflow)
 
             # Copy the runner and button scripts (shared, overwrite on each publish)
             self._packager.emit_progress(5.0, "Writing runner script...")
-            shutil.copy2(Path(__file__).parent / "nuke_workflow_runner.py", companion_base / "run_workflow.py")
-            shutil.copy2(Path(__file__).parent / "run_button.py", companion_base / "run_button.py")
+            self._copy_file(
+                Path(__file__).parent / "nuke_workflow_runner.py",
+                companion_base / "run_workflow.py",
+                overwrite=True,
+            )
+            self._copy_file(
+                Path(__file__).parent / "run_button.py",
+                companion_base / "run_button.py",
+                overwrite=True,
+            )
+            self._copy_file(
+                Path(__file__).parent / "register_libraries_script.py",
+                companion_base / "register_libraries_script.py",
+                overwrite=True,
+            )
 
             available_versions = self._collect_versions(companion_base)
 
@@ -141,6 +157,38 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    # -- File copy helpers --
+
+    @classmethod
+    def _copy_file(cls, source_path: str | Path, destination_path: str | Path, *, overwrite: bool = False) -> None:
+        """Copies a file from source to destination using OS events for cross-platform compatibility."""
+        copy_file_result = GriptapeNodes.handle_request(
+            CopyFileRequest(
+                source_path=str(source_path),
+                destination_path=str(destination_path),
+                overwrite=overwrite,
+            )
+        )
+        if not isinstance(copy_file_result, CopyFileResultSuccess):
+            details = f"Failed to copy file from '{source_path}' to '{destination_path}'."
+            logger.error(details)
+            raise TypeError(details)
+
+    @classmethod
+    def _move_file(cls, source_path: str | Path, destination_path: str | Path) -> None:
+        """Moves a file from source to destination using OS events for cross-platform compatibility."""
+        rename_result = GriptapeNodes.handle_request(
+            RenameFileRequest(
+                old_path=str(source_path),
+                new_path=str(destination_path),
+                workspace_only=False,
+            )
+        )
+        if not isinstance(rename_result, RenameFileResultSuccess):
+            details = f"Failed to move file from '{source_path}' to '{destination_path}'."
+            logger.error(details)
+            raise TypeError(details)
 
     # -- Project template customisation --
 
