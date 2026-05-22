@@ -42,11 +42,16 @@ if _companion_dir not in sys.path:
     sys.path.insert(0, _companion_dir)
 
 try:
+    from output_protocol import OUTPUT_SENTINEL_BEGIN
     from output_protocol import extract_payload as _extract_runner_output
+
+    _SENTINEL = OUTPUT_SENTINEL_BEGIN
 except ImportError:
     # Fallback for older companion bundles that pre-date output_protocol.py.
     def _extract_runner_output(stdout_text: str) -> dict:  # type: ignore[misc]
         return json.loads(stdout_text.strip())
+
+    _SENTINEL = ""
 
 
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).
@@ -536,6 +541,10 @@ else:
                 def _read_stdout():
                     for line in iter(p.stdout.readline, ""):
                         stdout_lines.append(line)
+                        if _SENTINEL and _SENTINEL in line:
+                            continue
+                        with _log_lock:
+                            _pending_log_lines.append(line)
 
                 def _read_stderr():
                     for line in iter(p.stderr.readline, ""):
