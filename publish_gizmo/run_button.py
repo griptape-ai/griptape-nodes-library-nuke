@@ -33,6 +33,14 @@ import tempfile
 import threading
 import time
 
+try:
+    from output_protocol import extract_payload as _extract_runner_output
+except ImportError:
+    # Fallback for older companion bundles that pre-date output_protocol.py.
+    def _extract_runner_output(stdout_text: str) -> dict:  # type: ignore[misc]
+        return json.loads(stdout_text.strip())
+
+
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).
 try:
     from PySide6.QtCore import Qt
@@ -456,7 +464,7 @@ else:
 
                 if success:
                     try:
-                        output = json.loads(stdout_text.strip())
+                        output = _extract_runner_output(stdout_text)
                         for _k, _v in output.items():
                             _knob = _output_knob_map.get(_k, _k)
                             if node.knob(_knob):
@@ -484,7 +492,14 @@ else:
                         _clear_node_error(node)
                         _dialog.set_finished(True)
                     except Exception as _e:
-                        error_message = "Error parsing output: " + str(_e) + "\n" + stdout_text[:300]
+                        error_message = (
+                            "Error parsing output: "
+                            + str(_e)
+                            + "\nstdout head: "
+                            + stdout_text[:300]
+                            + "\nstdout tail: "
+                            + stdout_text[-300:]
+                        )
                         _set_node_error(node, error_message)
                         _dialog.append_log("\n--- ERROR ---\n" + error_message)
                         _dialog.set_finished(False)
@@ -551,7 +566,7 @@ else:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=companion, timeout=600)
             if result.returncode == 0:
                 try:
-                    output = json.loads(result.stdout.strip())
+                    output = _extract_runner_output(result.stdout)
                     for _k, _v in output.items():
                         _knob = _output_knob_map.get(_k, _k)
                         if node.knob(_knob):
@@ -576,7 +591,14 @@ else:
                     _clear_node_error(node)
                     nuke.message("Workflow completed!")  # noqa: F821
                 except Exception as _e:
-                    error_message = "Error parsing output: " + str(_e) + "\n" + result.stdout[:300]
+                    error_message = (
+                        "Error parsing output: "
+                        + str(_e)
+                        + "\nstdout head: "
+                        + result.stdout[:300]
+                        + "\nstdout tail: "
+                        + result.stdout[-300:]
+                    )
                     nuke.message(error_message)  # noqa: F821
                     _set_node_error(node, error_message)
             else:

@@ -104,6 +104,7 @@ class NukeGizmoPublisher:
             self._packager.emit_progress(5.0, "Writing runner script...")
             shutil.copy2(Path(__file__).parent / "nuke_workflow_runner.py", companion_base / "run_workflow.py")
             shutil.copy2(Path(__file__).parent / "run_button.py", companion_base / "run_button.py")
+            shutil.copy2(Path(__file__).parent / "output_protocol.py", companion_base / "output_protocol.py")
 
             available_versions = self._collect_versions(companion_base)
 
