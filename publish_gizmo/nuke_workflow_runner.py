@@ -209,6 +209,19 @@ def main() -> None:
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
     _bootstrap_environment(nk_script_dir=args.nk_script_dir)
 
+    # Eagerly register the bundled libraries before the workflow module loads.
+    # The workflow uses name-based RegisterLibraryFromFileRequest, which only
+    # succeeds if the library is already known to the engine — and the
+    # libraries_to_register entries in griptape_nodes_config.json are not
+    # always picked up on a fresh user machine.
+    try:
+        from register_libraries_script import register_bundled_libraries
+
+        register_bundled_libraries()
+    except Exception as e:
+        print(json.dumps({"error": f"Failed to register bundled libraries: {e}"}))
+        sys.exit(1)
+
     # Download HuggingFace models if a download script was bundled at publish time.
     # If a local HuggingFace cache already exists on this machine, point the subprocess
     # at it via HF_HUB_CACHE so that cached models are reused instead of re-downloaded.
