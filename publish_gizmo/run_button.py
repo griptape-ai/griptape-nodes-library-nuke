@@ -29,9 +29,17 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
+
+# run_button.py is exec'd (not imported) by the gizmo bootstrap, so __file__'s
+# directory is not added to sys.path automatically. Insert it so that
+# output_protocol (a sibling in the companion bundle) can be imported.
+_companion_dir = os.path.dirname(os.path.abspath(__file__))
+if _companion_dir not in sys.path:
+    sys.path.insert(0, _companion_dir)
 
 try:
     from output_protocol import extract_payload as _extract_runner_output
