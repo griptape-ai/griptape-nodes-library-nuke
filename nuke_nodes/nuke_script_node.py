@@ -19,6 +19,7 @@ from griptape_nodes.exe_types.core_types import NodeMessageResult, Parameter, Pa
 from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_types.parameter_button import ParameterButton
 from griptape_nodes.exe_types.param_types.parameter_string import ParameterString
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.project_events import GetPathForMacroRequest, GetPathForMacroResultSuccess
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.button import Button, ButtonDetailsMessagePayload
@@ -54,7 +55,7 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
             raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
         suffix = pathlib.Path(path).suffix.lower() or ".obj"
         if suffix in {".glb", ".gltf"}:
-            file_bytes = pathlib.Path(path).read_bytes()
+            file_bytes = File(path).read_bytes()
             serve_suffix = suffix
         else:
             try:
@@ -64,7 +65,7 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
                 file_bytes = scene.export(file_type="glb")  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue]
                 serve_suffix = ".glb"
             except Exception:
-                file_bytes = pathlib.Path(path).read_bytes()
+                file_bytes = File(path).read_bytes()
                 serve_suffix = suffix
         url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{serve_suffix}")
         try:
@@ -77,7 +78,7 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
     if gt_type == "VideoUrlArtifact":
         if not isinstance(path, str):
             raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
-        file_bytes = pathlib.Path(path).read_bytes()
+        file_bytes = File(path).read_bytes()
         suffix = pathlib.Path(path).suffix or ".mp4"
         url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{suffix}")
         try:
@@ -94,7 +95,7 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
 
             items = []
             for fp in path:
-                frame_bytes = pathlib.Path(fp).read_bytes()
+                frame_bytes = File(fp).read_bytes()
                 frame_suffix = pathlib.Path(fp).suffix or ".png"
                 frame_url = GriptapeNodes.StaticFilesManager().save_static_file(
                     frame_bytes, f"{uuid.uuid4()}{frame_suffix}"
@@ -106,7 +107,7 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
             return path
     if not isinstance(path, str):
         raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
-    file_bytes = pathlib.Path(path).read_bytes()
+    file_bytes = File(path).read_bytes()
     suffix = pathlib.Path(path).suffix or ".png"
     url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{suffix}")
     try:

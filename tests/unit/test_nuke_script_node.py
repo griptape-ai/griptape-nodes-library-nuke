@@ -31,9 +31,13 @@ class TestPathToArtifact:
 
         mock_mgr = _mock_static_files_manager("http://static/clip.mp4")
 
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x00" * 16
+
         with (
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gt,
             patch("nuke_nodes.nuke_script_node.uuid") as mock_uuid,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
         ):
             mock_gt.StaticFilesManager.return_value = mock_mgr
             mock_uuid.uuid4.return_value = "test-uuid"
@@ -53,9 +57,13 @@ class TestPathToArtifact:
         mock_mgr = MagicMock()
         mock_mgr.save_static_file.side_effect = ["http://s/f1.png", "http://s/f2.png"]
 
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
         with (
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gt,
             patch("nuke_nodes.nuke_script_node.uuid") as mock_uuid,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
         ):
             mock_gt.StaticFilesManager.return_value = mock_mgr
             mock_uuid.uuid4.side_effect = ["uuid1", "uuid2"]
@@ -86,9 +94,13 @@ class TestPathToArtifact:
 
         mock_mgr = _mock_static_files_manager("http://static/out.png")
 
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
         with (
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gt,
             patch("nuke_nodes.nuke_script_node.uuid") as mock_uuid,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
         ):
             mock_gt.StaticFilesManager.return_value = mock_mgr
             mock_uuid.uuid4.return_value = "test-uuid"
@@ -388,9 +400,13 @@ class TestProcess:
             outputs={"result": str(out_file)},
         )
 
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
             instance = MockProvider.return_value
