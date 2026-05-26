@@ -121,9 +121,7 @@ class NukeGizmoPublisher:
                 overwrite=True,
             )
             self._copy_file(
-                Path(__file__).parent / "output_protocol.py", 
-                companion_base / "output_protocol.py",
-                overwrite=True
+                Path(__file__).parent / "output_protocol.py", companion_base / "output_protocol.py", overwrite=True
             )
 
             available_versions = self._collect_versions(companion_base)
