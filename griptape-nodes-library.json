@@ -1,79 +1,79 @@
 {
-  "name": "Nuke Nodes Library",
-  "library_schema_version": "0.7.0",
-  "advanced_library_path": "nuke_nodes/nuke_library_advanced.py",
-  "metadata": {
-    "author": "Griptape",
-    "description": "Library for Nuke nodes",
-    "library_version": "make[1]: Entering directory '/home/runner/work/griptape-nodes-library-nuke/griptape-nodes-library-nuke'.1.0",
-    "engine_version": "0.81.0",
-    "tags": [
-      "Griptape",
-      "AI",
-      "Nuke"
+    "name": "Nuke Nodes Library",
+    "library_schema_version": "0.7.0",
+    "advanced_library_path": "nuke_nodes/nuke_library_advanced.py",
+    "metadata": {
+        "author": "Griptape",
+        "description": "Library for Nuke nodes",
+        "library_version": "0.2.0",
+        "engine_version": "0.81.0",
+        "tags": [
+            "Griptape",
+            "AI",
+            "Nuke"
+        ],
+        "dependencies": {
+            "pip_dependencies": [
+                "trimesh>=4.12.2"
+            ]
+        }
+    },
+    "categories": [
+        {
+            "FoundryNuke": {
+                "color": "border-yellow-500",
+                "title": "Foundry Nuke",
+                "description": "Nodes for Nuke",
+                "icon": "logos/nuke.png"
+            }
+        }
     ],
-    "dependencies": {
-      "pip_dependencies": [
-        "trimesh>=4.12.2"
-      ]
-    }
-  },
-  "categories": [
-    {
-      "FoundryNuke": {
-        "color": "border-yellow-500",
-        "title": "Foundry Nuke",
-        "description": "Nodes for Nuke",
-        "icon": "logos/nuke.png"
-      }
-    }
-  ],
-  "nodes": [
-    {
-      "class_name": "NukeStartFlow",
-      "file_path": "nuke_nodes/nuke_start_flow.py",
-      "metadata": {
-        "category": "FoundryNuke",
-        "description": "Start flow for Nuke",
-        "display_name": "Nuke Start Flow",
-        "icon": "logos/nuke.png"
-      }
-    },
-    {
-      "class_name": "NukeEndFlow",
-      "file_path": "nuke_nodes/nuke_end_flow.py",
-      "metadata": {
-        "category": "FoundryNuke",
-        "description": "End flow for Nuke",
-        "display_name": "Nuke End Flow",
-        "icon": "logos/nuke.png"
-      }
-    },
-    {
-      "class_name": "NukeScriptNode",
-      "file_path": "nuke_nodes/nuke_script_node.py",
-      "metadata": {
-        "category": "FoundryNuke",
-        "description": "Run a Nuke .nk script headlessly with annotated I/O ports",
-        "display_name": "Nuke Script",
-        "icon": "logos/nuke.png"
-      }
-    }
-  ],
-  "workflows": [
-    "workflows/templates/image_edit_nano_banana.py"
-  ],
-  "settings": [
-    {
-      "category": "nuke",
-      "description": "Nuke installation settings — configure the default executable, plugin paths, and environment variables for all NukeScriptNode instances",
-      "contents": {
-        "executable": "",
-        "nuke_path": [],
-        "env": {},
-        "annotator_nuke_version": 16,
-        "installations": {}
-      }
-    }
-  ]
+    "nodes": [
+        {
+            "class_name": "NukeStartFlow",
+            "file_path": "nuke_nodes/nuke_start_flow.py",
+            "metadata": {
+                "category": "FoundryNuke",
+                "description": "Start flow for Nuke",
+                "display_name": "Nuke Start Flow",
+                "icon": "logos/nuke.png"
+            }
+        },
+        {
+            "class_name": "NukeEndFlow",
+            "file_path": "nuke_nodes/nuke_end_flow.py",
+            "metadata": {
+                "category": "FoundryNuke",
+                "description": "End flow for Nuke",
+                "display_name": "Nuke End Flow",
+                "icon": "logos/nuke.png"
+            }
+        },
+        {
+            "class_name": "NukeScriptNode",
+            "file_path": "nuke_nodes/nuke_script_node.py",
+            "metadata": {
+                "category": "FoundryNuke",
+                "description": "Run a Nuke .nk script headlessly with annotated I/O ports",
+                "display_name": "Nuke Script",
+                "icon": "logos/nuke.png"
+            }
+        }
+    ],
+    "workflows": [
+        "workflows/templates/image_edit_nano_banana.py"
+    ],
+    "settings": [
+        {
+            "category": "nuke",
+            "description": "Nuke installation settings \u2014 configure the default executable, plugin paths, and environment variables for all NukeScriptNode instances",
+            "contents": {
+                "executable": "",
+                "nuke_path": [],
+                "env": {},
+                "annotator_nuke_version": 16,
+                "installations": {}
+            }
+        }
+    ]
 }
