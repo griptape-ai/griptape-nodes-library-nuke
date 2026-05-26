@@ -18,10 +18,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # ---------------------------------------------------------------------------
 
 
-def _mock_static_files_manager(url: str = "http://static/file") -> MagicMock:
-    mgr = MagicMock()
-    mgr.save_static_file.return_value = url
-    return mgr
+def _mock_project_file_destination(location: str = "http://static/file") -> MagicMock:
+    mock_saved = MagicMock()
+    mock_saved.location = location
+    mock_dest_instance = MagicMock()
+    mock_dest_instance.write_bytes.return_value = mock_saved
+    mock_dest_cls = MagicMock()
+    mock_dest_cls.from_situation.return_value = mock_dest_instance
+    return mock_dest_cls
 
 
 class TestPathToArtifact:
@@ -29,18 +33,14 @@ class TestPathToArtifact:
         video_file = tmp_path / "clip.mp4"
         video_file.write_bytes(b"\x00" * 16)
 
-        mock_mgr = _mock_static_files_manager("http://static/clip.mp4")
-
+        mock_dest_cls = _mock_project_file_destination("http://static/clip.mp4")
         mock_file = MagicMock()
         mock_file.read_bytes.return_value = b"\x00" * 16
 
         with (
-            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gt,
-            patch("nuke_nodes.nuke_script_node.uuid") as mock_uuid,
             patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
-            mock_gt.StaticFilesManager.return_value = mock_mgr
-            mock_uuid.uuid4.return_value = "test-uuid"
             result = _path_to_artifact("VideoUrlArtifact", str(video_file))
 
         from griptape.artifacts import VideoUrlArtifact
@@ -54,19 +54,22 @@ class TestPathToArtifact:
         f1.write_bytes(b"\x89PNG")
         f2.write_bytes(b"\x89PNG")
 
-        mock_mgr = MagicMock()
-        mock_mgr.save_static_file.side_effect = ["http://s/f1.png", "http://s/f2.png"]
+        saved1, saved2 = MagicMock(), MagicMock()
+        saved1.location = "http://s/f1.png"
+        saved2.location = "http://s/f2.png"
+        dest1, dest2 = MagicMock(), MagicMock()
+        dest1.write_bytes.return_value = saved1
+        dest2.write_bytes.return_value = saved2
+        mock_dest_cls = MagicMock()
+        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
 
         mock_file = MagicMock()
         mock_file.read_bytes.return_value = b"\x89PNG"
 
         with (
-            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gt,
-            patch("nuke_nodes.nuke_script_node.uuid") as mock_uuid,
             patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
-            mock_gt.StaticFilesManager.return_value = mock_mgr
-            mock_uuid.uuid4.side_effect = ["uuid1", "uuid2"]
             result = _path_to_artifact("ImageSequenceArtifact", [str(f1), str(f2)])
 
         from griptape.artifacts import ImageUrlArtifact, ListArtifact
@@ -92,18 +95,14 @@ class TestPathToArtifact:
         img_file = tmp_path / "out.png"
         img_file.write_bytes(b"\x89PNG")
 
-        mock_mgr = _mock_static_files_manager("http://static/out.png")
-
+        mock_dest_cls = _mock_project_file_destination("http://static/out.png")
         mock_file = MagicMock()
         mock_file.read_bytes.return_value = b"\x89PNG"
 
         with (
-            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gt,
-            patch("nuke_nodes.nuke_script_node.uuid") as mock_uuid,
             patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
-            mock_gt.StaticFilesManager.return_value = mock_mgr
-            mock_uuid.uuid4.return_value = "test-uuid"
             result = _path_to_artifact("ImageArtifact", str(img_file))
 
         from griptape.artifacts import ImageUrlArtifact
@@ -400,6 +399,7 @@ class TestProcess:
             outputs={"result": str(out_file)},
         )
 
+        mock_dest_cls = _mock_project_file_destination("http://static/out.png")
         mock_file = MagicMock()
         mock_file.read_bytes.return_value = b"\x89PNG"
 
@@ -407,6 +407,7 @@ class TestProcess:
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
             patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
             instance = MockProvider.return_value
@@ -497,15 +498,24 @@ class TestProcess:
             outputs={"frames": [str(f1), str(f2)]},
         )
 
-        mock_mgr = MagicMock()
-        mock_mgr.save_static_file.side_effect = ["http://s/f1.png", "http://s/f2.png"]
+        saved1, saved2 = MagicMock(), MagicMock()
+        saved1.location = "http://s/f1.png"
+        saved2.location = "http://s/f2.png"
+        dest1, dest2 = MagicMock(), MagicMock()
+        dest1.write_bytes.return_value = saved1
+        dest2.write_bytes.return_value = saved2
+        mock_dest_cls = MagicMock()
+        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
 
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
-            MockGT.StaticFilesManager.return_value = mock_mgr
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-seq"
             instance.result.return_value = fake_result

@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
-import uuid
 from typing import Any
 
 from griptape_nodes.common.macro_parser import ParsedMacro
@@ -20,6 +19,7 @@ from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_types.parameter_button import ParameterButton
 from griptape_nodes.exe_types.param_types.parameter_string import ParameterString
 from griptape_nodes.files.file import File
+from griptape_nodes.files.project_file import ProjectFileDestination
 from griptape_nodes.retained_mode.events.project_events import GetPathForMacroRequest, GetPathForMacroResultSuccess
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.button import Button, ButtonDetailsMessagePayload
@@ -67,26 +67,30 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
             except Exception:
                 file_bytes = File(path).read_bytes()
                 serve_suffix = suffix
-        url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{serve_suffix}")
+        saved = ProjectFileDestination.from_situation(
+            filename=f"model{serve_suffix}", situation="save_node_output"
+        ).write_bytes(file_bytes)
         try:
             from griptape_nodes_library.three_d.three_d_artifact import (  # pyright: ignore[reportMissingImports]
                 ThreeDUrlArtifact,  # noqa: PLC0415
             )
         except ImportError:
-            return url
-        return ThreeDUrlArtifact(value=url)
+            return saved.location
+        return ThreeDUrlArtifact(value=saved.location)
     if gt_type == "VideoUrlArtifact":
         if not isinstance(path, str):
             raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
         file_bytes = File(path).read_bytes()
         suffix = pathlib.Path(path).suffix or ".mp4"
-        url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{suffix}")
+        saved = ProjectFileDestination.from_situation(
+            filename=f"video{suffix}", situation="save_node_output"
+        ).write_bytes(file_bytes)
         try:
             from griptape.artifacts import VideoUrlArtifact  # noqa: PLC0415
 
-            return VideoUrlArtifact(value=url)
+            return VideoUrlArtifact(value=saved.location)
         except ImportError:
-            return url
+            return saved.location
     if gt_type == "ImageSequenceArtifact":
         if not isinstance(path, list):
             raise TypeError(f"Expected list[str] for ImageSequenceArtifact, got {type(path).__name__!r}: {path!r}")
@@ -95,13 +99,11 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
 
             items = []
             for fp in path:
-                frame_bytes = File(fp).read_bytes()
                 frame_suffix = pathlib.Path(fp).suffix or ".png"
-                frame_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                    frame_bytes, f"{uuid.uuid4()}{frame_suffix}"
-                )
-                del frame_bytes
-                items.append(ImageUrlArtifact(value=frame_url))
+                frame_saved = ProjectFileDestination.from_situation(
+                    filename=f"frame{frame_suffix}", situation="save_node_output"
+                ).write_bytes(File(fp).read_bytes())
+                items.append(ImageUrlArtifact(value=frame_saved.location))
             return ListArtifact(items)
         except ImportError:
             return path
@@ -109,13 +111,15 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
         raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
     file_bytes = File(path).read_bytes()
     suffix = pathlib.Path(path).suffix or ".png"
-    url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{suffix}")
+    saved = ProjectFileDestination.from_situation(filename=f"image{suffix}", situation="save_node_output").write_bytes(
+        file_bytes
+    )
     try:
         from griptape.artifacts import ImageUrlArtifact  # noqa: PLC0415
 
-        return ImageUrlArtifact(value=url)
+        return ImageUrlArtifact(value=saved.location)
     except ImportError:
-        return url
+        return saved.location
 
 
 def _coerce_knob_value(v: Any) -> float | int | str:
