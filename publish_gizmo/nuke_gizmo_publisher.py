@@ -413,6 +413,51 @@ _refresh_griptape_menu()
 if _QT_AVAILABLE:
     _GRIPTAPE_WATCHER = QFileSystemWatcher([_GRIPTAPE_DIR])
     _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _refresh_griptape_menu())
+
+    def _griptape_is_remote_mount(path):
+        \"\"\"Return True when path is likely on a network/remote filesystem.\"\"\"
+        import sys
+        try:
+            if sys.platform == 'darwin':
+                # /Volumes/<name> on a different device than / means a separate mount.
+                if os.path.normpath(path).startswith('/Volumes/'):
+                    return os.stat(path).st_dev != os.stat('/').st_dev
+            elif sys.platform == 'win32':
+                # UNC paths (\\\\server\\share\\...) are network by definition.
+                return os.path.normpath(path).startswith('\\\\\\\\')
+            else:
+                # Linux/other: check /proc/self/mountinfo for the fs type.
+                _REMOTE_FS = {'nfs', 'nfs4', 'cifs', 'smb', 'smbfs', 'fuse.sshfs'}
+                norm = os.path.normpath(path)
+                best_mp = ''
+                best_fs = ''
+                with open('/proc/self/mountinfo') as _f:
+                    for _line in _f:
+                        _parts = _line.split()
+                        # Field 4 is the mount point; field after ' - ' is fs type.
+                        _mp = _parts[4]
+                        try:
+                            _dash = _parts.index('-')
+                            _fs = _parts[_dash + 1]
+                        except (ValueError, IndexError):
+                            continue
+                        if (norm == _mp or norm.startswith(_mp.rstrip('/') + '/')) and len(_mp) > len(best_mp):
+                            best_mp = _mp
+                            best_fs = _fs
+                return best_fs.lower() in _REMOTE_FS
+        except Exception:
+            return False
+
+    if _griptape_is_remote_mount(_GRIPTAPE_DIR):
+        _msg = (
+            '[Griptape] Install dir appears to be on a network mount: ' + _GRIPTAPE_DIR + '\\n'
+            '[Griptape] QFileSystemWatcher may not deliver change events on remote filesystems.\\n'
+            '[Griptape] Use Nuke menu > Griptape > Refresh Griptape Gizmos after publishing.'
+        )
+        try:
+            nuke.tprint(_msg)
+        except Exception:
+            print(_msg)
 """
         menu_py_path = griptape_dir / "menu.py"
         write_result = GriptapeNodes.handle_request(

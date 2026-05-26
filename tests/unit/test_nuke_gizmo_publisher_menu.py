@@ -63,3 +63,18 @@ def test_menu_code_skips_watcher_when_qt_unavailable() -> None:
     watcher_idx = code.index("_GRIPTAPE_WATCHER = QFileSystemWatcher")
     guard_idx = code.rindex("if _QT_AVAILABLE", 0, watcher_idx)
     assert guard_idx < watcher_idx
+
+
+def test_menu_code_warns_on_remote_mount() -> None:
+    """Must include remote-mount heuristic and print warning inside the Qt guard block.
+
+    QFileSystemWatcher silently fails on NFS/SMB mounts (kernel limitation), so
+    we warn at startup when the install dir looks like a network path.
+    """
+    code = _extract_menu_code()
+    assert "_griptape_is_remote_mount" in code
+    assert "Refresh Griptape Gizmos" in code
+    assert "network mount" in code
+    # Helper and warning must be inside the if _QT_AVAILABLE block (headless safe).
+    qt_guard_idx = code.rindex("if _QT_AVAILABLE")
+    assert code.index("_griptape_is_remote_mount") > qt_guard_idx
