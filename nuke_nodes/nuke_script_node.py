@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
-import uuid
 from typing import Any
 
 from griptape_nodes.common.macro_parser import ParsedMacro
@@ -19,6 +18,8 @@ from griptape_nodes.exe_types.core_types import NodeMessageResult, Parameter, Pa
 from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_types.parameter_button import ParameterButton
 from griptape_nodes.exe_types.param_types.parameter_string import ParameterString
+from griptape_nodes.files.file import File
+from griptape_nodes.files.project_file import ProjectFileDestination
 from griptape_nodes.retained_mode.events.project_events import GetPathForMacroRequest, GetPathForMacroResultSuccess
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.button import Button, ButtonDetailsMessagePayload
@@ -39,18 +40,22 @@ _RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", 
 _BAKE_RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "baker.py"))
 
 # Temp file suffix per gt_type — used when creating output placeholders before Nuke runs.
+# ImageSequenceArtifact is handled separately (mkdtemp + pattern path) and not listed here.
 _TEMP_SUFFIX: dict[str, str] = {
     "ThreeDUrlArtifact": ".obj",
     "GLTFUrlArtifact": ".glb",
+    "VideoUrlArtifact": ".mp4",
 }
 
 
-def _path_to_artifact(gt_type: str, path: str) -> Any:
-    """Convert a runner output file path to the appropriate Griptape artifact."""
+def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
+    """Convert a runner output file path (or list of paths) to the appropriate Griptape artifact."""
     if gt_type in {"ThreeDUrlArtifact", "GLTFUrlArtifact"}:
+        if not isinstance(path, str):
+            raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
         suffix = pathlib.Path(path).suffix.lower() or ".obj"
         if suffix in {".glb", ".gltf"}:
-            file_bytes = pathlib.Path(path).read_bytes()
+            file_bytes = File(path).read_bytes()
             serve_suffix = suffix
         else:
             try:
@@ -60,25 +65,61 @@ def _path_to_artifact(gt_type: str, path: str) -> Any:
                 file_bytes = scene.export(file_type="glb")  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue]
                 serve_suffix = ".glb"
             except Exception:
-                file_bytes = pathlib.Path(path).read_bytes()
+                file_bytes = File(path).read_bytes()
                 serve_suffix = suffix
-        url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{serve_suffix}")
+        saved = ProjectFileDestination.from_situation(
+            filename=f"model{serve_suffix}", situation="save_node_output"
+        ).write_bytes(file_bytes)
         try:
             from griptape_nodes_library.three_d.three_d_artifact import (  # pyright: ignore[reportMissingImports]
                 ThreeDUrlArtifact,  # noqa: PLC0415
             )
         except ImportError:
-            return url
-        return ThreeDUrlArtifact(value=url)
-    file_bytes = pathlib.Path(path).read_bytes()
+            return saved.location
+        return ThreeDUrlArtifact(value=saved.location)
+    if gt_type == "VideoUrlArtifact":
+        if not isinstance(path, str):
+            raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
+        file_bytes = File(path).read_bytes()
+        suffix = pathlib.Path(path).suffix or ".mp4"
+        saved = ProjectFileDestination.from_situation(
+            filename=f"video{suffix}", situation="save_node_output"
+        ).write_bytes(file_bytes)
+        try:
+            from griptape.artifacts import VideoUrlArtifact  # noqa: PLC0415
+
+            return VideoUrlArtifact(value=saved.location)
+        except ImportError:
+            return saved.location
+    if gt_type == "ImageSequenceArtifact":
+        if not isinstance(path, list):
+            raise TypeError(f"Expected list[str] for ImageSequenceArtifact, got {type(path).__name__!r}: {path!r}")
+        try:
+            from griptape.artifacts import ImageUrlArtifact, ListArtifact  # noqa: PLC0415
+
+            items = []
+            for fp in path:
+                frame_suffix = pathlib.Path(fp).suffix or ".png"
+                frame_saved = ProjectFileDestination.from_situation(
+                    filename=f"frame{frame_suffix}", situation="save_node_output"
+                ).write_bytes(File(fp).read_bytes())
+                items.append(ImageUrlArtifact(value=frame_saved.location))
+            return ListArtifact(items)
+        except ImportError:
+            return path
+    if not isinstance(path, str):
+        raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
+    file_bytes = File(path).read_bytes()
     suffix = pathlib.Path(path).suffix or ".png"
-    url = GriptapeNodes.StaticFilesManager().save_static_file(file_bytes, f"{uuid.uuid4()}{suffix}")
+    saved = ProjectFileDestination.from_situation(filename=f"image{suffix}", situation="save_node_output").write_bytes(
+        file_bytes
+    )
     try:
         from griptape.artifacts import ImageUrlArtifact  # noqa: PLC0415
 
-        return ImageUrlArtifact(value=url)
+        return ImageUrlArtifact(value=saved.location)
     except ImportError:
-        return url
+        return saved.location
 
 
 def _coerce_knob_value(v: Any) -> float | int | str:
@@ -433,7 +474,7 @@ class NukeScriptNode(SuccessFailureNode):
             param = Parameter(
                 name=ann.gt_name,
                 type=ann.gt_type or "str",
-                input_types=["str", "ImageArtifact", "ImageUrlArtifact", "BlobArtifact"],
+                input_types=["str", "ImageArtifact", "ImageUrlArtifact", "BlobArtifact", "VideoUrlArtifact"],
                 default_value="",
                 display_name=ann.gt_label or ann.gt_name,
                 tooltip=f"Input path for Nuke node {ann.node_name!r}",
@@ -479,6 +520,18 @@ class NukeScriptNode(SuccessFailureNode):
                         user_defined=True,
                         parent_element_name="Outputs",
                     )
+            elif ann.gt_type == "ImageSequenceArtifact":
+                param = Parameter(
+                    name=ann.gt_name,
+                    type="list",
+                    default_value="",
+                    display_name=ann.gt_label or ann.gt_name,
+                    tooltip=f"Image sequence output from Nuke node {ann.node_name!r}",
+                    allow_input=False,
+                    allow_property=False,
+                    user_defined=True,
+                    parent_element_name="Outputs",
+                )
             else:
                 param = Parameter(
                     name=ann.gt_name,
@@ -563,10 +616,17 @@ class NukeScriptNode(SuccessFailureNode):
         """Resolve a parameter value to a local file path Nuke can read."""
         if isinstance(value, str):
             return value
+        try:
+            from griptape.artifacts import VideoUrlArtifact  # noqa: PLC0415
+
+            _video_type: type = VideoUrlArtifact
+        except ImportError:
+            _video_type = type(None)
         val = getattr(value, "value", None)
         if isinstance(val, str):
             if val.startswith(("http://", "https://")):
-                suffix = os.path.splitext(val.split("?")[0])[-1] or ".png"
+                detected = os.path.splitext(val.split("?")[0])[-1]
+                suffix = detected or (".mp4" if isinstance(value, _video_type) else ".png")
                 tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
                 try:
                     with urllib.request.urlopen(val, timeout=30) as response:  # noqa: S310
@@ -730,12 +790,22 @@ class NukeScriptNode(SuccessFailureNode):
         inputs: dict[str, ManifestInput] = {}
         outputs: dict[str, ManifestOutput] = {}
         output_tmp_paths: list[str] = []
+        output_tmp_dirs: list[str] = []
 
         for ann in self._annotations:
             if ann.role == "input":
                 inputs[ann.gt_name] = ManifestInput(
                     path=self._artifact_to_path(self.get_parameter_value(ann.gt_name) or ""),
                     node=ann.node_name,
+                )
+            elif ann.gt_type == "ImageSequenceArtifact":
+                tmpdir = tempfile.mkdtemp(prefix="griptape_nuke_seq_")
+                output_tmp_dirs.append(tmpdir)
+                seq_path = os.path.join(tmpdir, "frame.%04d.png").replace("\\", "/")
+                outputs[ann.gt_name] = ManifestOutput(
+                    path=seq_path,
+                    node=ann.node_name,
+                    type="ImageSequenceArtifact",
                 )
             else:
                 suffix = _TEMP_SUFFIX.get(ann.gt_type or "", ".png")
@@ -788,3 +858,6 @@ class NukeScriptNode(SuccessFailureNode):
             for p in output_tmp_paths:
                 with contextlib.suppress(OSError):
                     os.unlink(p)
+            for d in output_tmp_dirs:
+                with contextlib.suppress(OSError):
+                    shutil.rmtree(d)

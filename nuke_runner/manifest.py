@@ -18,13 +18,16 @@ class ManifestInput:
 
 @dataclass
 class ManifestOutput:
-    path: str
+    path: str | list[str]
     node: str
     format: str = "png"
     type: str = "ImageArtifact"
 
     def __post_init__(self) -> None:
-        self.path = self.path.replace("\\", "/")
+        if isinstance(self.path, list):
+            self.path = [p.replace("\\", "/") for p in self.path]
+        else:
+            self.path = self.path.replace("\\", "/")
 
 
 @dataclass

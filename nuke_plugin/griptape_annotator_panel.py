@@ -32,8 +32,11 @@ _PANEL_TITLE = "Griptape Annotator"
 _TILE_COLOR_ROLE = 0x5FAD4EFF
 _TILE_COLOR_EXPOSE = 0x9B59B6FF
 
+# Artifact types available when marking a node as an input.
+_INPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact"]
+
 # Artifact types available when marking a node as an output.
-_OUTPUT_ARTIFACT_TYPES = ["ImageArtifact", "ThreeDUrlArtifact"]
+_OUTPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "ImageSequenceArtifact", "ThreeDUrlArtifact"]
 
 # Knobs that are never useful to expose — purely internal Nuke state
 _INTERNAL_KNOBS = frozenset(
@@ -558,7 +561,16 @@ class GriptapeAnnotatorWidget(QtWidgets.QWidget):
             if not ok:
                 return
         else:
-            gt_type = "ImageArtifact"
+            gt_type, ok = QtWidgets.QInputDialog.getItem(
+                self,
+                "Input Artifact Type",
+                f"Select the Griptape artifact type for {node_name!r}:",
+                _INPUT_ARTIFACT_TYPES,
+                0,
+                False,
+            )
+            if not ok:
+                return
 
         self._annotations = [a for a in self._annotations if a["node"] != node_name]
         self._annotations.append(
@@ -707,7 +719,14 @@ def _gt_mark_node(role: str) -> None:
             return
         gt_type = _OUTPUT_ARTIFACT_TYPES[choice]
     else:
-        gt_type = "ImageArtifact"
+        choice = nuke.choice(
+            "Select the Griptape artifact type:",
+            "Input Type",
+            _INPUT_ARTIFACT_TYPES,
+        )
+        if choice is None:
+            return
+        gt_type = _INPUT_ARTIFACT_TYPES[choice]
 
     data = _read_sidecar(sidecar_path)
     annotations = [a for a in data.get("annotations", []) if a.get("node") != node.name()]

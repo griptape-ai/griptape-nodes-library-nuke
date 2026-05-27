@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nuke_nodes.nuke_script_node import _coerce_knob_value
+from nuke_nodes.nuke_script_node import _coerce_knob_value, _path_to_artifact
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -16,6 +16,136 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # ---------------------------------------------------------------------------
 # Module-level pure functions
 # ---------------------------------------------------------------------------
+
+
+def _mock_project_file_destination(location: str = "http://static/file") -> MagicMock:
+    mock_saved = MagicMock()
+    mock_saved.location = location
+    mock_dest_instance = MagicMock()
+    mock_dest_instance.write_bytes.return_value = mock_saved
+    mock_dest_cls = MagicMock()
+    mock_dest_cls.from_situation.return_value = mock_dest_instance
+    return mock_dest_cls
+
+
+class TestPathToArtifact:
+    def test_video_url_artifact_returns_video_url_artifact(self, tmp_path: Path) -> None:
+        video_file = tmp_path / "clip.mp4"
+        video_file.write_bytes(b"\x00" * 16)
+
+        mock_dest_cls = _mock_project_file_destination("http://static/clip.mp4")
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x00" * 16
+
+        with (
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+        ):
+            result = _path_to_artifact("VideoUrlArtifact", str(video_file))
+
+        from griptape.artifacts import VideoUrlArtifact
+
+        assert isinstance(result, VideoUrlArtifact)
+        assert result.value == "http://static/clip.mp4"
+
+    def test_image_sequence_artifact_returns_list_artifact(self, tmp_path: Path) -> None:
+        f1 = tmp_path / "frame.0001.png"
+        f2 = tmp_path / "frame.0002.png"
+        f1.write_bytes(b"\x89PNG")
+        f2.write_bytes(b"\x89PNG")
+
+        saved1, saved2 = MagicMock(), MagicMock()
+        saved1.location = "http://s/f1.png"
+        saved2.location = "http://s/f2.png"
+        dest1, dest2 = MagicMock(), MagicMock()
+        dest1.write_bytes.return_value = saved1
+        dest2.write_bytes.return_value = saved2
+        mock_dest_cls = MagicMock()
+        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
+
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+        ):
+            result = _path_to_artifact("ImageSequenceArtifact", [str(f1), str(f2)])
+
+        from griptape.artifacts import ImageUrlArtifact, ListArtifact
+
+        assert isinstance(result, ListArtifact)
+        assert len(result.value) == 2
+        assert all(isinstance(item, ImageUrlArtifact) for item in result.value)
+
+    def test_image_sequence_artifact_empty_list_returns_empty_list_artifact(self) -> None:
+        with patch("nuke_nodes.nuke_script_node.GriptapeNodes"):
+            result = _path_to_artifact("ImageSequenceArtifact", [])
+
+        from griptape.artifacts import ListArtifact
+
+        assert isinstance(result, ListArtifact)
+        assert len(result.value) == 0
+
+    def test_image_sequence_artifact_raises_type_error_for_str_path(self) -> None:
+        with pytest.raises(TypeError, match="ImageSequenceArtifact"):
+            _path_to_artifact("ImageSequenceArtifact", "/tmp/frame.%04d.png")
+
+    def test_image_artifact_unchanged(self, tmp_path: Path) -> None:
+        img_file = tmp_path / "out.png"
+        img_file.write_bytes(b"\x89PNG")
+
+        mock_dest_cls = _mock_project_file_destination("http://static/out.png")
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+        ):
+            result = _path_to_artifact("ImageArtifact", str(img_file))
+
+        from griptape.artifacts import ImageUrlArtifact
+
+        assert isinstance(result, ImageUrlArtifact)
+
+
+class TestArtifactToPath:
+    def test_video_url_artifact_http_downloads_to_mp4_temp(self, tmp_path: Path) -> None:
+        node = _make_node()
+
+        try:
+            from griptape.artifacts import VideoUrlArtifact
+
+            artifact = VideoUrlArtifact(value="http://example.com/clip.mp4")
+        except ImportError:
+            pytest.skip("griptape not installed")
+
+        fake_response = MagicMock()
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        fake_response.read.return_value = b"\x00" * 8
+
+        with patch("nuke_nodes.nuke_script_node.urllib.request.urlopen", return_value=fake_response) as mock_open:
+            result = node._artifact_to_path(artifact)
+
+        mock_open.assert_called_once()
+        assert result.endswith(".mp4")
+        # Clean up temp file
+        Path(result).unlink(missing_ok=True)
+
+    def test_video_url_artifact_local_path_returned_unchanged(self) -> None:
+        node = _make_node()
+
+        try:
+            from griptape.artifacts import VideoUrlArtifact
+
+            artifact = VideoUrlArtifact(value="/local/clip.mp4")
+        except ImportError:
+            pytest.skip("griptape not installed")
+
+        result = node._artifact_to_path(artifact)
+        assert result == "/local/clip.mp4"
 
 
 class TestCoerceKnobValue:
@@ -269,9 +399,15 @@ class TestProcess:
             outputs={"result": str(out_file)},
         )
 
+        mock_dest_cls = _mock_project_file_destination("http://static/out.png")
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
             instance = MockProvider.return_value
@@ -325,6 +461,72 @@ class TestProcess:
         assert call_kwargs["was_successful"] is False
         assert "1" in call_kwargs["result_details"]
         node._handle_failure_exception.assert_called_once()
+
+    def test_sequence_output_produces_list_artifact(self, tmp_path: Path) -> None:
+        from execution.provider import JobResult, JobStatus
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        # Create fake frame files
+        f1 = tmp_path / "frame.0001.png"
+        f2 = tmp_path / "frame.0002.png"
+        f1.write_bytes(b"\x89PNG")
+        f2.write_bytes(b"\x89PNG")
+
+        node = _make_node()
+        node._annotations = [
+            GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="ImageSequenceArtifact")
+        ]
+        node._expose_knobs = []
+
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "frame_start": 1001,
+                "frame_end": 1002,
+            }.get(name)
+        )
+
+        fake_result = JobResult(
+            handle="handle-seq",
+            status=JobStatus.SUCCEEDED,
+            return_code=0,
+            log=[],
+            outputs={"frames": [str(f1), str(f2)]},
+        )
+
+        saved1, saved2 = MagicMock(), MagicMock()
+        saved1.location = "http://s/f1.png"
+        saved2.location = "http://s/f2.png"
+        dest1, dest2 = MagicMock(), MagicMock()
+        dest1.write_bytes.return_value = saved1
+        dest2.write_bytes.return_value = saved2
+        mock_dest_cls = MagicMock()
+        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"\x89PNG"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            instance = MockProvider.return_value
+            instance.submit.return_value = "handle-seq"
+            instance.result.return_value = fake_result
+
+            node.process()
+
+        from griptape.artifacts import ListArtifact
+
+        output_val = node.parameter_output_values.__setitem__.call_args[0][1]
+        assert isinstance(output_val, ListArtifact)
+        assert len(output_val.value) == 2
 
     def test_applies_zero_float_knob_override(self, tmp_path: Path) -> None:
         from execution.provider import JobResult, JobStatus
