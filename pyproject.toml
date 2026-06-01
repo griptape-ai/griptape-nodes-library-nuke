@@ -48,6 +48,8 @@ line-ending = "auto"
 venvPath = "."
 venv = ".venv"
 include = ["."]
+# publish_gizmo/ is not an installable package but output_protocol is imported from tests.
+extraPaths = ["publish_gizmo"]
 # run_button.py is exec'd inside Nuke's Python interpreter where `nuke` and `_config`
 # are injected into the global scope at runtime. It is not a regular importable module.
 exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows", "publish_gizmo/run_button.py", "scripts/generate_test_fixtures.py", "nuke_runner/runner.py", "nuke_runner/baker.py", "nuke_runner/introspect.py", "nuke_runner/exporter.py"]

@@ -5,7 +5,7 @@
     "metadata": {
         "author": "Griptape",
         "description": "Library for Nuke nodes",
-        "library_version": "0.2.0",
+        "library_version": "0.3.0",
         "engine_version": "0.81.0",
         "tags": [
             "Griptape",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,8 +18,12 @@ from griptape_nodes.common.project_templates.validation import (
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.os_events import (
+    CopyFileRequest,
+    CopyFileResultSuccess,
     ReadFileRequest,
     ReadFileResultSuccess,
+    RenameFileRequest,
+    RenameFileResultSuccess,
     WriteFileRequest,
     WriteFileResultSuccess,
 )
@@ -98,12 +101,28 @@ class NukeGizmoPublisher:
             src_workflow = companion_base / workflow_file_path.name
             dest_workflow = version_dir / workflow_file_path.name
             if src_workflow.exists():
-                shutil.move(str(src_workflow), str(dest_workflow))
+                self._move_file(src_workflow, dest_workflow)
 
             # Copy the runner and button scripts (shared, overwrite on each publish)
             self._packager.emit_progress(5.0, "Writing runner script...")
-            shutil.copy2(Path(__file__).parent / "nuke_workflow_runner.py", companion_base / "run_workflow.py")
-            shutil.copy2(Path(__file__).parent / "run_button.py", companion_base / "run_button.py")
+            self._copy_file(
+                Path(__file__).parent / "nuke_workflow_runner.py",
+                companion_base / "run_workflow.py",
+                overwrite=True,
+            )
+            self._copy_file(
+                Path(__file__).parent / "run_button.py",
+                companion_base / "run_button.py",
+                overwrite=True,
+            )
+            self._copy_file(
+                Path(__file__).parent / "register_libraries_script.py",
+                companion_base / "register_libraries_script.py",
+                overwrite=True,
+            )
+            self._copy_file(
+                Path(__file__).parent / "output_protocol.py", companion_base / "output_protocol.py", overwrite=True
+            )
 
             available_versions = self._collect_versions(companion_base)
 
@@ -141,6 +160,38 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    # -- File copy helpers --
+
+    @classmethod
+    def _copy_file(cls, source_path: str | Path, destination_path: str | Path, *, overwrite: bool = False) -> None:
+        """Copies a file from source to destination using OS events for cross-platform compatibility."""
+        copy_file_result = GriptapeNodes.handle_request(
+            CopyFileRequest(
+                source_path=str(source_path),
+                destination_path=str(destination_path),
+                overwrite=overwrite,
+            )
+        )
+        if not isinstance(copy_file_result, CopyFileResultSuccess):
+            details = f"Failed to copy file from '{source_path}' to '{destination_path}'."
+            logger.error(details)
+            raise TypeError(details)
+
+    @classmethod
+    def _move_file(cls, source_path: str | Path, destination_path: str | Path) -> None:
+        """Moves a file from source to destination using OS events for cross-platform compatibility."""
+        rename_result = GriptapeNodes.handle_request(
+            RenameFileRequest(
+                old_path=str(source_path),
+                new_path=str(destination_path),
+                workspace_only=False,
+            )
+        )
+        if not isinstance(rename_result, RenameFileResultSuccess):
+            details = f"Failed to move file from '{source_path}' to '{destination_path}'."
+            logger.error(details)
+            raise TypeError(details)
 
     # -- Project template customisation --
 
@@ -327,7 +378,21 @@ class NukeGizmoPublisher:
 import nuke
 import os
 
+# Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13-15).
+try:
+    from PySide6.QtCore import QFileSystemWatcher
+    _QT_AVAILABLE = True
+except ImportError:
+    try:
+        from PySide2.QtCore import QFileSystemWatcher
+        _QT_AVAILABLE = True
+    except ImportError:
+        _QT_AVAILABLE = False
+
 _GRIPTAPE_DIR = os.path.dirname(__file__)
+
+# Module-level reference keeps the watcher alive (Python GC would drop a local).
+_GRIPTAPE_WATCHER = None
 
 
 def _refresh_griptape_menu():
@@ -336,10 +401,15 @@ def _refresh_griptape_menu():
     Call this after publishing a new or updated gizmo to make it available
     without restarting Nuke.
     \"\"\"
-    # Ensure the griptape dir stays on the plugin path (nuke.pluginAddPath is idempotent).
+    # Remove then re-add the path to force Nuke to re-walk the directory.
+    # pluginAddPath is idempotent on an already-registered path; the remove
+    # invalidates the cached walk so nuke.plugins() sees newly written files.
+    # pluginRemovePath is undocumented — guard against versions that lack it.
+    if hasattr(nuke, 'pluginRemovePath'):
+        nuke.pluginRemovePath(_GRIPTAPE_DIR)
     nuke.pluginAddPath(_GRIPTAPE_DIR)
 
-    # Use nuke.plugins() to discover all versioned gizmos across registered plugin paths.
+    # Use nuke.ALL so Nuke walks all plugin_path() directories (not just loaded plugins).
     gizmo_paths = nuke.plugins(nuke.ALL, '*_v*.gizmo')
 
     # Collect ALL versions per stem (not just the highest).
@@ -358,10 +428,6 @@ def _refresh_griptape_menu():
 
     for stem in workflows:
         workflows[stem].sort()
-
-    # No nuke.load() here — Nuke re-reads .gizmo files from disk each time
-    # nuke.createNode() is called, so updating the menu entries is sufficient.
-    # (nuke.load on a .gizmo file would instantiate a node, which we don't want.)
 
     # Rebuild the Griptape submenu on the Nodes toolbar.
     # Remove the existing entry first so repeated calls don't accumulate duplicates.
@@ -392,6 +458,57 @@ nuke.menu('Nuke').addMenu('Griptape').addCommand('Refresh Griptape Gizmos', _ref
 
 # Populate the Nodes toolbar on startup.
 _refresh_griptape_menu()
+
+# Watch the griptape directory for new/removed gizmos and auto-refresh the menu.
+# Skipped silently when Qt is unavailable (e.g. nuke -t headless).
+if _QT_AVAILABLE:
+    _GRIPTAPE_WATCHER = QFileSystemWatcher([_GRIPTAPE_DIR])
+    _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _refresh_griptape_menu())
+
+    def _griptape_is_remote_mount(path):
+        \"\"\"Return True when path is likely on a network/remote filesystem.\"\"\"
+        import sys
+        try:
+            if sys.platform == 'darwin':
+                # /Volumes/<name> on a different device than / means a separate mount.
+                if os.path.normpath(path).startswith('/Volumes/'):
+                    return os.stat(path).st_dev != os.stat('/').st_dev
+            elif sys.platform == 'win32':
+                # UNC paths (\\\\server\\share\\...) are network by definition.
+                return os.path.normpath(path).startswith('\\\\\\\\')
+            else:
+                # Linux/other: check /proc/self/mountinfo for the fs type.
+                _REMOTE_FS = {'nfs', 'nfs4', 'cifs', 'smb', 'smbfs', 'fuse.sshfs'}
+                norm = os.path.normpath(path)
+                best_mp = ''
+                best_fs = ''
+                with open('/proc/self/mountinfo') as _f:
+                    for _line in _f:
+                        _parts = _line.split()
+                        # Field 4 is the mount point; field after ' - ' is fs type.
+                        _mp = _parts[4]
+                        try:
+                            _dash = _parts.index('-')
+                            _fs = _parts[_dash + 1]
+                        except (ValueError, IndexError):
+                            continue
+                        if (norm == _mp or norm.startswith(_mp.rstrip('/') + '/')) and len(_mp) > len(best_mp):
+                            best_mp = _mp
+                            best_fs = _fs
+                return best_fs.lower() in _REMOTE_FS
+        except Exception:
+            return False
+
+    if _griptape_is_remote_mount(_GRIPTAPE_DIR):
+        _msg = (
+            '[Griptape] Install dir appears to be on a network mount: ' + _GRIPTAPE_DIR + '\\n'
+            '[Griptape] QFileSystemWatcher may not deliver change events on remote filesystems.\\n'
+            '[Griptape] Use Nuke menu > Griptape > Refresh Griptape Gizmos after publishing.'
+        )
+        try:
+            nuke.tprint(_msg)
+        except Exception:
+            print(_msg)
 """
         menu_py_path = griptape_dir / "menu.py"
         write_result = GriptapeNodes.handle_request(

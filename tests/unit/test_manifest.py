@@ -99,3 +99,38 @@ def test_bake_output_path_defaults_empty() -> None:
     assert m.bake_output_path == ""
     restored = JobManifest.from_json(m.to_json())
     assert restored.bake_output_path == ""
+
+
+def test_manifest_output_path_accepts_list() -> None:
+    output = ManifestOutput(path=["/tmp/f.0001.exr", "/tmp/f.0002.exr"], node="Write1", type="ImageSequenceArtifact")
+    assert isinstance(output.path, list)
+    assert output.path == ["/tmp/f.0001.exr", "/tmp/f.0002.exr"]
+
+
+def test_manifest_output_list_path_round_trips_json() -> None:
+    m = JobManifest(
+        script="/tmp/test.nk",
+        outputs={
+            "frames": ManifestOutput(
+                path=["/tmp/f.0001.exr", "/tmp/f.0002.exr"],
+                node="Write1",
+                type="ImageSequenceArtifact",
+            )
+        },
+    )
+    restored = JobManifest.from_json(m.to_json())
+    assert restored.outputs["frames"].path == ["/tmp/f.0001.exr", "/tmp/f.0002.exr"]
+
+
+def test_manifest_output_list_path_normalises_backslashes() -> None:
+    output = ManifestOutput(
+        path=["C:\\tmp\\f.0001.exr", "C:\\tmp\\f.0002.exr"],
+        node="Write1",
+        type="ImageSequenceArtifact",
+    )
+    assert output.path == ["C:/tmp/f.0001.exr", "C:/tmp/f.0002.exr"]
+
+
+def test_manifest_output_str_path_normalisation_unchanged() -> None:
+    output = ManifestOutput(path="C:\\tmp\\out.png", node="WriteNode")
+    assert output.path == "C:/tmp/out.png"

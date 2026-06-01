@@ -31,6 +31,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from griptape_nodes.common.project_templates import load_project_template_from_yaml
 from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
+from output_protocol import emit_payload
 
 
 def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
@@ -196,17 +197,30 @@ def main() -> None:
 
     workflow_file = Path(args.workflow_file)
     if not workflow_file.is_file():
-        print(json.dumps({"error": f"Workflow file not found: {workflow_file}"}))
+        emit_payload({"error": f"Workflow file not found: {workflow_file}"})
         sys.exit(1)
 
     try:
         flow_input = json.loads(args.json_input)
     except json.JSONDecodeError as e:
-        print(json.dumps({"error": f"Invalid --json-input: {e}"}))
+        emit_payload({"error": f"Invalid --json-input: {e}"})
         sys.exit(1)
 
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
     _bootstrap_environment(nk_script_dir=args.nk_script_dir)
+
+    # Eagerly register the bundled libraries before the workflow module loads.
+    # The workflow uses name-based RegisterLibraryFromFileRequest, which only
+    # succeeds if the library is already known to the engine — and the
+    # libraries_to_register entries in griptape_nodes_config.json are not
+    # always picked up on a fresh user machine.
+    try:
+        from register_libraries_script import register_bundled_libraries
+
+        register_bundled_libraries()
+    except Exception as e:
+        print(json.dumps({"error": f"Failed to register bundled libraries: {e}"}))
+        sys.exit(1)
 
     # Download HuggingFace models if a download script was bundled at publish time.
     # If a local HuggingFace cache already exists on this machine, point the subprocess
@@ -223,17 +237,17 @@ def main() -> None:
             env=download_env,
         )
         if result.returncode != 0:
-            print(json.dumps({"error": "Model download failed. See log output for details."}))
+            emit_payload({"error": "Model download failed. See log output for details."})
             sys.exit(1)
 
     try:
         module = _load_workflow_module(str(workflow_file))
     except Exception as e:
-        print(json.dumps({"error": f"Failed to load workflow: {e}"}))
+        emit_payload({"error": f"Failed to load workflow: {e}"})
         sys.exit(1)
 
     if not hasattr(module, "execute_workflow"):
-        print(json.dumps({"error": "Workflow module has no execute_workflow() function"}))
+        emit_payload({"error": "Workflow module has no execute_workflow() function"})
         sys.exit(1)
 
     script_dir = Path(__file__).parent
@@ -246,7 +260,7 @@ def main() -> None:
             project_file_path=str(project_file) if project_file.exists() else None,
         )
     except Exception as e:
-        print(json.dumps({"error": f"Workflow execution failed: {e}"}), file=sys.stderr)
+        emit_payload({"error": f"Workflow execution failed: {e}"})
         sys.exit(1)
 
     workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
@@ -254,7 +268,7 @@ def main() -> None:
     if args.output_dir:
         macro_map["outputs"] = args.output_dir
     result = _serialize_output(output, macro_map)
-    print(json.dumps(result))
+    emit_payload(result)
 
 
 if __name__ == "__main__":
