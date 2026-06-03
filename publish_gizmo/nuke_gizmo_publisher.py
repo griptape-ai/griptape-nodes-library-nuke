@@ -482,7 +482,7 @@ if _QT_AVAILABLE:
                 norm = os.path.normpath(path)
                 best_mp = ''
                 best_fs = ''
-                with open('/proc/self/mountinfo') as _f:
+                with open('/proc/self/mountinfo', encoding='utf-8') as _f:
                     for _line in _f:
                         _parts = _line.split()
                         # Field 4 is the mount point; field after ' - ' is fs type.
