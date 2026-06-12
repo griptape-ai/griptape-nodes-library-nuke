@@ -65,6 +65,32 @@ def test_menu_code_skips_watcher_when_qt_unavailable() -> None:
     assert guard_idx < watcher_idx
 
 
+def test_menu_code_never_removes_entire_griptape_menu() -> None:
+    """Wiping Nodes > Griptape deletes third-party items (e.g. Nuke's built-in
+    Griptape workflow node) — refresh must only touch entries it added (issue #69)."""
+    code = _extract_menu_code()
+    assert "nodes_toolbar.removeItem('Griptape')" not in code
+    assert 'nodes_toolbar.removeItem("Griptape")' not in code
+
+
+def test_menu_code_tracks_and_removes_only_own_menu_items() -> None:
+    """Refresh must record added labels and remove only tracked items before re-populating."""
+    code = _extract_menu_code()
+    assert "_GRIPTAPE_MENU_ITEMS = []" in code
+    assert "griptape_nodes.removeItem(" in code
+    assert "_GRIPTAPE_MENU_ITEMS.append(" in code
+    # Tracked-item removal must precede re-population.
+    assert code.index("griptape_nodes.removeItem(") < code.index("griptape_nodes.addCommand(")
+
+
+def test_menu_code_reuses_existing_griptape_menu() -> None:
+    """addMenu returns the existing menu when present — get-or-create, never recreate."""
+    code = _extract_menu_code()
+    assert "nodes_toolbar.addMenu('Griptape')" in code
+    # addMenu (get-or-create) must come before any removeItem on the submenu.
+    assert code.index("nodes_toolbar.addMenu('Griptape')") < code.index("griptape_nodes.removeItem(")
+
+
 def test_menu_code_warns_on_remote_mount() -> None:
     """Must include remote-mount heuristic and print warning inside the Qt guard block.
 
