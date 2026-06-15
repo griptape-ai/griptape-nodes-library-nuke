@@ -256,7 +256,6 @@ def main() -> None:
     try:
         output = module.execute_workflow(
             input=flow_input,
-            storage_backend=args.storage_backend,
             project_file_path=str(project_file) if project_file.exists() else None,
         )
     except Exception as e:
