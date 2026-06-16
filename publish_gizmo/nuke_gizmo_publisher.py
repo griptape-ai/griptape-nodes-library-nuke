@@ -97,11 +97,14 @@ class NukeGizmoPublisher:
             # so outputs land next to the .nk file, not inside the companion bundle.
             self._customize_project_yml(companion_base)
 
-            # Move the workflow file from companion base into the version subdir
+            # Move the workflow file from companion base into the version subdir.
+            # Use copy+delete instead of rename so re-publishing over an existing
+            # version (where dest already exists) succeeds without error.
             src_workflow = companion_base / workflow_file_path.name
             dest_workflow = version_dir / workflow_file_path.name
             if src_workflow.exists():
-                self._move_file(src_workflow, dest_workflow)
+                self._copy_file(src_workflow, dest_workflow, overwrite=True)
+                src_workflow.unlink()
 
             # Copy the runner and button scripts (shared, overwrite on each publish)
             self._packager.emit_progress(5.0, "Writing runner script...")
