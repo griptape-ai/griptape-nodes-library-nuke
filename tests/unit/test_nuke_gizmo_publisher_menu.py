@@ -48,6 +48,35 @@ def test_menu_code_contains_file_system_watcher() -> None:
     assert "directoryChanged" in code
 
 
+def test_menu_code_debounces_refresh_through_single_shot_timer() -> None:
+    """directoryChanged must restart a single-shot QTimer, not call refresh directly.
+
+    A publish writes several files into the watched directory in quick succession.
+    Calling _refresh_griptape_menu on every event drives Nuke's non-reentrant
+    plugin/menu APIs repeatedly while writes are in flight, which crashes the host
+    (issue #78). Coalescing into one deferred refresh runs it once, after the
+    writes settle.
+    """
+    code = _extract_menu_code()
+    assert "QTimer" in code
+    assert "setSingleShot(True)" in code
+    # The watcher must hand off to the timer, never invoke the refresh inline.
+    assert "directoryChanged.connect(lambda _path: _GRIPTAPE_REFRESH_TIMER.start())" in code
+    assert "directoryChanged.connect(lambda _path: _refresh_griptape_menu())" not in code
+
+
+def test_menu_code_guards_against_reentrant_refresh() -> None:
+    """Refresh must bail out when one is already running (issue #78).
+
+    nuke.plugins()/menu mutation can spin the Qt event loop, delivering a nested
+    directoryChanged mid-refresh; mutating the structures an outer refresh is
+    still iterating is what corrupts Nuke's state and crashes the host.
+    """
+    code = _extract_menu_code()
+    assert "_GRIPTAPE_REFRESHING" in code
+    assert "if _GRIPTAPE_REFRESHING:" in code
+
+
 def test_menu_code_has_pyside6_pyside2_fallback() -> None:
     """Must attempt PySide6 import first, fall back to PySide2."""
     code = _extract_menu_code()

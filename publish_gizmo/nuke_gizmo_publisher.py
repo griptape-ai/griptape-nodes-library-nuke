@@ -387,19 +387,25 @@ import os
 
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13-15).
 try:
-    from PySide6.QtCore import QFileSystemWatcher
+    from PySide6.QtCore import QFileSystemWatcher, QTimer
     _QT_AVAILABLE = True
 except ImportError:
     try:
-        from PySide2.QtCore import QFileSystemWatcher
+        from PySide2.QtCore import QFileSystemWatcher, QTimer
         _QT_AVAILABLE = True
     except ImportError:
         _QT_AVAILABLE = False
 
 _GRIPTAPE_DIR = os.path.dirname(__file__)
 
-# Module-level reference keeps the watcher alive (Python GC would drop a local).
+# Module-level references keep the watcher and debounce timer alive (Python GC
+# would otherwise drop locals). _GRIPTAPE_REFRESHING guards against re-entrant
+# refreshes: nuke.plugins()/menu mutation are not reentrant, and a nested
+# directoryChanged delivered while a refresh is walking the plugin path or
+# rebuilding the menu corrupts Nuke's internal state and crashes the host.
 _GRIPTAPE_WATCHER = None
+_GRIPTAPE_REFRESH_TIMER = None
+_GRIPTAPE_REFRESHING = False
 
 # Labels of items THIS script added to Nodes > Griptape. The menu is shared --
 # other plugins (e.g. Nuke's built-in Griptape workflow node) may add items --
@@ -486,8 +492,38 @@ _refresh_griptape_menu()
 # Watch the griptape directory for new/removed gizmos and auto-refresh the menu.
 # Skipped silently when Qt is unavailable (e.g. nuke -t headless).
 if _QT_AVAILABLE:
+    def _griptape_safe_refresh():
+        # Re-entrancy guard. A single publish writes several files into this
+        # directory in quick succession, and rebuilding the menu / walking the
+        # plugin path can spin the Qt event loop, delivering another
+        # directoryChanged mid-refresh. Mutating Nuke's plugin and menu
+        # structures while an outer refresh is still iterating them is what
+        # crashes the host, so drop any call that arrives while one is running.
+        global _GRIPTAPE_REFRESHING
+        if _GRIPTAPE_REFRESHING:
+            return
+        _GRIPTAPE_REFRESHING = True
+        try:
+            _refresh_griptape_menu()
+        except Exception as _exc:
+            try:
+                nuke.tprint('[Griptape] Menu refresh failed: ' + str(_exc))
+            except Exception:
+                pass
+        finally:
+            _GRIPTAPE_REFRESHING = False
+
+    # Coalesce the burst of filesystem events from a single publish into one
+    # refresh that runs only after the writes settle. Each directoryChanged
+    # restarts the single-shot timer, so the refresh fires once the directory
+    # has been quiet for the interval. The timer always fires on the main thread.
+    _GRIPTAPE_REFRESH_TIMER = QTimer()
+    _GRIPTAPE_REFRESH_TIMER.setSingleShot(True)
+    _GRIPTAPE_REFRESH_TIMER.setInterval(1000)
+    _GRIPTAPE_REFRESH_TIMER.timeout.connect(_griptape_safe_refresh)
+
     _GRIPTAPE_WATCHER = QFileSystemWatcher([_GRIPTAPE_DIR])
-    _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _refresh_griptape_menu())
+    _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _GRIPTAPE_REFRESH_TIMER.start())
 
     def _griptape_is_remote_mount(path):
         \"\"\"Return True when path is likely on a network/remote filesystem.\"\"\"
