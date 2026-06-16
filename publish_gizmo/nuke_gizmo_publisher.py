@@ -398,14 +398,10 @@ except ImportError:
 
 _GRIPTAPE_DIR = os.path.dirname(__file__)
 
-# Module-level references keep the watcher and debounce timer alive (Python GC
-# would otherwise drop locals). _GRIPTAPE_REFRESHING guards against re-entrant
-# refreshes: nuke.plugins()/menu mutation are not reentrant, and a nested
-# directoryChanged delivered while a refresh is walking the plugin path or
-# rebuilding the menu corrupts Nuke's internal state and crashes the host.
+# Module-level references keep the watcher and its debounce timer alive
+# (Python GC would otherwise drop locals).
 _GRIPTAPE_WATCHER = None
-_GRIPTAPE_REFRESH_TIMER = None
-_GRIPTAPE_REFRESHING = False
+_GRIPTAPE_NOTIFY_TIMER = None
 
 # Labels of items THIS script added to Nodes > Griptape. The menu is shared --
 # other plugins (e.g. Nuke's built-in Griptape workflow node) may add items --
@@ -489,41 +485,39 @@ nuke.menu('Nuke').addMenu('Griptape').addCommand('Refresh Griptape Gizmos', _ref
 # Populate the Nodes toolbar on startup.
 _refresh_griptape_menu()
 
-# Watch the griptape directory for new/removed gizmos and auto-refresh the menu.
+# Watch the griptape directory for new/removed gizmos.
+#
+# This watcher must NOT call into Nuke. directoryChanged is delivered from
+# QFileSystemWatcher's engine thread and fires repeatedly while a publish writes
+# several files into this directory. Driving Nuke's plugin/menu C++ APIs
+# (pluginAddPath, nuke.plugins(), menu mutation) from that asynchronous,
+# repeatedly-fired callback corrupts Nuke's internal state and crashes the host
+# (issue #78). So the watcher only prints a one-time hint; the actual rescan
+# happens on the user-initiated "Refresh Griptape Gizmos" command, when Nuke is
+# idle and the writes are complete.
 # Skipped silently when Qt is unavailable (e.g. nuke -t headless).
 if _QT_AVAILABLE:
-    def _griptape_safe_refresh():
-        # Re-entrancy guard. A single publish writes several files into this
-        # directory in quick succession, and rebuilding the menu / walking the
-        # plugin path can spin the Qt event loop, delivering another
-        # directoryChanged mid-refresh. Mutating Nuke's plugin and menu
-        # structures while an outer refresh is still iterating them is what
-        # crashes the host, so drop any call that arrives while one is running.
-        global _GRIPTAPE_REFRESHING
-        if _GRIPTAPE_REFRESHING:
-            return
-        _GRIPTAPE_REFRESHING = True
+    def _griptape_notify_changed():
+        _msg = (
+            '[Griptape] Gizmo directory changed. Use Nuke menu > '
+            'Griptape > Refresh Griptape Gizmos to load new or updated gizmos.'
+        )
         try:
-            _refresh_griptape_menu()
-        except Exception as _exc:
-            try:
-                nuke.tprint('[Griptape] Menu refresh failed: ' + str(_exc))
-            except Exception:
-                pass
-        finally:
-            _GRIPTAPE_REFRESHING = False
+            nuke.tprint(_msg)
+        except Exception:
+            print(_msg)
 
     # Coalesce the burst of filesystem events from a single publish into one
-    # refresh that runs only after the writes settle. Each directoryChanged
-    # restarts the single-shot timer, so the refresh fires once the directory
-    # has been quiet for the interval. The timer always fires on the main thread.
-    _GRIPTAPE_REFRESH_TIMER = QTimer()
-    _GRIPTAPE_REFRESH_TIMER.setSingleShot(True)
-    _GRIPTAPE_REFRESH_TIMER.setInterval(1000)
-    _GRIPTAPE_REFRESH_TIMER.timeout.connect(_griptape_safe_refresh)
+    # notification. Each directoryChanged restarts the single-shot timer, so the
+    # hint prints once after the directory has been quiet for the interval, and
+    # never while the publish is mid-write. The timer fires on the main thread.
+    _GRIPTAPE_NOTIFY_TIMER = QTimer()
+    _GRIPTAPE_NOTIFY_TIMER.setSingleShot(True)
+    _GRIPTAPE_NOTIFY_TIMER.setInterval(1000)
+    _GRIPTAPE_NOTIFY_TIMER.timeout.connect(_griptape_notify_changed)
 
     _GRIPTAPE_WATCHER = QFileSystemWatcher([_GRIPTAPE_DIR])
-    _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _GRIPTAPE_REFRESH_TIMER.start())
+    _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _GRIPTAPE_NOTIFY_TIMER.start())
 
     def _griptape_is_remote_mount(path):
         \"\"\"Return True when path is likely on a network/remote filesystem.\"\"\"

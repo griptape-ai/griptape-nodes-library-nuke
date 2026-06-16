@@ -48,33 +48,31 @@ def test_menu_code_contains_file_system_watcher() -> None:
     assert "directoryChanged" in code
 
 
-def test_menu_code_debounces_refresh_through_single_shot_timer() -> None:
-    """directoryChanged must restart a single-shot QTimer, not call refresh directly.
+def test_menu_code_watcher_never_calls_nuke_automatically() -> None:
+    """The watcher must not auto-invoke the refresh (issue #78).
 
-    A publish writes several files into the watched directory in quick succession.
-    Calling _refresh_griptape_menu on every event drives Nuke's non-reentrant
-    plugin/menu APIs repeatedly while writes are in flight, which crashes the host
-    (issue #78). Coalescing into one deferred refresh runs it once, after the
-    writes settle.
+    directoryChanged is delivered from QFileSystemWatcher's engine thread and
+    fires repeatedly while a publish writes several files into the watched dir.
+    Driving Nuke's plugin/menu C++ APIs from that asynchronous callback corrupts
+    Nuke's internal state and crashes the host. The watcher must only notify; the
+    rescan happens on the user-initiated command, when Nuke is idle.
     """
+    code = _extract_menu_code()
+    # The watcher hands off to a debounce timer, never to the refresh.
+    assert "directoryChanged.connect(lambda _path: _GRIPTAPE_NOTIFY_TIMER.start())" in code
+    assert "directoryChanged.connect(lambda _path: _refresh_griptape_menu())" not in code
+    assert "directoryChanged.connect(lambda _path: _GRIPTAPE_REFRESH_TIMER.start())" not in code
+    # _refresh_griptape_menu is only called at startup and from the manual command.
+    assert "addCommand('Refresh Griptape Gizmos', _refresh_griptape_menu)" in code
+
+
+def test_menu_code_debounces_watcher_notification() -> None:
+    """directoryChanged must coalesce through a single-shot QTimer so the hint
+    prints once per publish, after the writes settle, not once per file."""
     code = _extract_menu_code()
     assert "QTimer" in code
     assert "setSingleShot(True)" in code
-    # The watcher must hand off to the timer, never invoke the refresh inline.
-    assert "directoryChanged.connect(lambda _path: _GRIPTAPE_REFRESH_TIMER.start())" in code
-    assert "directoryChanged.connect(lambda _path: _refresh_griptape_menu())" not in code
-
-
-def test_menu_code_guards_against_reentrant_refresh() -> None:
-    """Refresh must bail out when one is already running (issue #78).
-
-    nuke.plugins()/menu mutation can spin the Qt event loop, delivering a nested
-    directoryChanged mid-refresh; mutating the structures an outer refresh is
-    still iterating is what corrupts Nuke's state and crashes the host.
-    """
-    code = _extract_menu_code()
-    assert "_GRIPTAPE_REFRESHING" in code
-    assert "if _GRIPTAPE_REFRESHING:" in code
+    assert "_GRIPTAPE_NOTIFY_TIMER" in code
 
 
 def test_menu_code_has_pyside6_pyside2_fallback() -> None:
