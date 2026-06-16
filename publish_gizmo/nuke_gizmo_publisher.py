@@ -403,20 +403,23 @@ _GRIPTAPE_DIR = os.path.dirname(__file__)
 _GRIPTAPE_WATCHER = None
 _GRIPTAPE_NOTIFY_TIMER = None
 
-# Labels of items THIS script added to Nodes > Griptape. The menu is shared --
-# other plugins (e.g. Nuke's built-in Griptape workflow node) may add items --
-# so a refresh must only remove entries we created, never the whole menu.
-_GRIPTAPE_MENU_ITEMS = []
+# Node names (e.g. "my_workflow_v02") THIS script has already added to
+# Nodes > Griptape. The menu is shared with other plugins (e.g. Nuke's built-in
+# Griptape workflow node) and removing items from it crashes the host
+# (issue #78), so the refresh is strictly add-only and uses this set to avoid
+# re-adding entries it already created.
+_GRIPTAPE_ADDED = set()
 
 
 def _refresh_griptape_menu():
-    \"\"\"Rescan the griptape directory and rebuild the Griptape node-creation menu.
+    \"\"\"Rescan the griptape directory and add any new gizmos to the Griptape menu.
 
     Call this after publishing a new or updated gizmo to make it available
     without restarting Nuke.
 
-    Only entries added by this script are removed and re-added; items other
-    plugins placed in the Griptape menu are left untouched.
+    Add-only: removing items from the shared Nodes > Griptape menu crashes the
+    host (issue #78), so this only adds entries it has not added before. A gizmo
+    deleted from disk lingers in the menu until the next Nuke restart.
     \"\"\"
     # Remove then re-add the path to force Nuke to re-walk the directory.
     # pluginAddPath is idempotent on an already-registered path; the remove
@@ -447,35 +450,26 @@ def _refresh_griptape_menu():
         workflows[stem].sort()
 
     # Get-or-create the Griptape submenu on the Nodes toolbar. addMenu()
-    # returns the existing menu when one with this name already exists, so
-    # items added by other plugins (e.g. Nuke's built-in Griptape workflow
-    # node) are preserved. Never remove the menu itself.
+    # returns the existing menu when one with this name already exists, so the
+    # menu is never recreated and items other plugins added are preserved.
     nodes_toolbar = nuke.menu('Nodes')
     griptape_nodes = nodes_toolbar.addMenu('Griptape')
 
-    # Remove only the entries added by a previous refresh so repeated calls
-    # don't accumulate duplicates and deleted gizmos disappear from the menu.
-    global _GRIPTAPE_MENU_ITEMS
-    for _item_name in _GRIPTAPE_MENU_ITEMS:
-        try:
-            griptape_nodes.removeItem(_item_name)
-        except Exception:
-            pass
-    _GRIPTAPE_MENU_ITEMS = []
-
+    # Add-only. Removing items from this shared menu crashes the host
+    # (issue #78), so we never remove. Each workflow gets its own submenu (get-or-create) and
+    # each version is added once, tracked by node name in _GRIPTAPE_ADDED so
+    # repeated refreshes never duplicate or re-touch an existing entry. New
+    # gizmos/versions appear on refresh; deleted ones linger until restart.
+    global _GRIPTAPE_ADDED
     for stem in sorted(workflows):
+        new_versions = [(ver, nn) for ver, nn in workflows[stem] if nn not in _GRIPTAPE_ADDED]
+        if not new_versions:
+            continue
         label = stem.replace('_', ' ').title()
-        versions = workflows[stem]
-        if len(versions) == 1:
-            # Only one version — flat entry, no submenu.
-            node_name = versions[0][1]
-            griptape_nodes.addCommand(label, "nuke.createNode('{}')".format(node_name))
-        else:
-            # Multiple versions — nest them under a per-workflow submenu.
-            workflow_submenu = griptape_nodes.addMenu(label)
-            for ver, node_name in versions:
-                workflow_submenu.addCommand('v{}'.format(ver), "nuke.createNode('{}')".format(node_name))
-        _GRIPTAPE_MENU_ITEMS.append(label)
+        workflow_submenu = griptape_nodes.addMenu(label)
+        for ver, node_name in new_versions:
+            workflow_submenu.addCommand('v{}'.format(ver), "nuke.createNode('{}')".format(node_name))
+            _GRIPTAPE_ADDED.add(node_name)
 
 
 # "Refresh Griptape Gizmos" lives on the main Nuke menu bar so that clicking

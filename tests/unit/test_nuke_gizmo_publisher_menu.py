@@ -100,22 +100,26 @@ def test_menu_code_never_removes_entire_griptape_menu() -> None:
     assert 'nodes_toolbar.removeItem("Griptape")' not in code
 
 
-def test_menu_code_tracks_and_removes_only_own_menu_items() -> None:
-    """Refresh must record added labels and remove only tracked items before re-populating."""
+def test_menu_code_is_add_only_never_calls_remove_item() -> None:
+    """Refresh must never call removeItem on the shared Griptape menu (issue #78).
+
+    removeItem on the shared Nodes > Griptape menu crashes the host. The refresh
+    is add-only: it tracks node names it has added in _GRIPTAPE_ADDED and skips
+    them on later refreshes instead of removing and re-adding.
+    """
     code = _extract_menu_code()
-    assert "_GRIPTAPE_MENU_ITEMS = []" in code
-    assert "griptape_nodes.removeItem(" in code
-    assert "_GRIPTAPE_MENU_ITEMS.append(" in code
-    # Tracked-item removal must precede re-population.
-    assert code.index("griptape_nodes.removeItem(") < code.index("griptape_nodes.addCommand(")
+    assert "removeItem(" not in code
+    assert "_GRIPTAPE_ADDED = set()" in code
+    assert "nn not in _GRIPTAPE_ADDED" in code
+    assert "_GRIPTAPE_ADDED.add(" in code
 
 
 def test_menu_code_reuses_existing_griptape_menu() -> None:
     """addMenu returns the existing menu when present — get-or-create, never recreate."""
     code = _extract_menu_code()
     assert "nodes_toolbar.addMenu('Griptape')" in code
-    # addMenu (get-or-create) must come before any removeItem on the submenu.
-    assert code.index("nodes_toolbar.addMenu('Griptape')") < code.index("griptape_nodes.removeItem(")
+    # Per-workflow submenus are also get-or-create (addMenu), never recreated.
+    assert "griptape_nodes.addMenu(label)" in code
 
 
 def test_menu_code_warns_on_remote_mount() -> None:
