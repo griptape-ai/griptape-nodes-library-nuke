@@ -365,25 +365,30 @@ class NukeGizmoPublisher:
     def _regenerate_menu_py(self, griptape_dir: Path) -> None:
         """Write griptape/menu.py with a dynamic refresh function.
 
-        The generated menu.py defines ``_refresh_griptape_menu()`` which uses
-        ``nuke.plugins()`` to discover ALL versioned ``.gizmo`` files at call time,
-        calls ``nuke.load()`` on each to force Nuke to re-read the TCL from disk,
-        and rebuilds the Griptape node-creation entries on the Nodes toolbar.
-        The refresh tracks the menu items it adds (module-level list in the
-        generated code) and removes only those on each rescan, so the
-        Nodes > Griptape menu can be shared with other plugins (e.g. Nuke's
-        built-in Griptape workflow node).
+        The generated menu.py defines ``_refresh_griptape_menu()`` which globs the
+        griptape directory for versioned ``.gizmo`` files at call time (the
+        filesystem is the source of truth; ``nuke.plugins()`` only returns a list
+        Nuke caches at startup), calls ``nuke.load()`` on each newly seen file so
+        ``nuke.createNode()`` can instantiate a gizmo published during the session,
+        and adds entries to the Nodes > Griptape menu.
+
+        The refresh is add-only: it tracks node names it has added (module-level
+        set in the generated code) and never removes items. Removing items from
+        the shared Nodes > Griptape menu crashes the host (issue #78), and the
+        menu is shared with other plugins (e.g. Nuke's built-in Griptape workflow
+        node), so it must never be wiped.
 
         "Refresh Griptape Gizmos" lives on the main Nuke menu bar (not the Nodes
         toolbar) so that clicking it never triggers Nuke's node-placement mode.
 
-        When a workflow has multiple published versions each version gets its own
-        entry inside a per-workflow submenu (e.g. Griptape > My Workflow > v1 / v2).
-        Single-version workflows get a flat entry with no submenu.
+        Each workflow gets its own submenu and each version is an entry inside it
+        (e.g. Griptape > My Workflow > v1 / v2). A gizmo deleted from disk lingers
+        in the menu until the next Nuke restart.
         """
         menu_code = """\
 import nuke
 import os
+import glob
 
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13-15).
 try:
@@ -421,30 +426,25 @@ def _refresh_griptape_menu():
     host (issue #78), so this only adds entries it has not added before. A gizmo
     deleted from disk lingers in the menu until the next Nuke restart.
     \"\"\"
-    # Remove then re-add the path to force Nuke to re-walk the directory.
-    # pluginAddPath is idempotent on an already-registered path; the remove
-    # invalidates the cached walk so nuke.plugins() sees newly written files.
-    # pluginRemovePath is undocumented — guard against versions that lack it.
-    if hasattr(nuke, 'pluginRemovePath'):
-        nuke.pluginRemovePath(_GRIPTAPE_DIR)
+    # Ensure our directory is on the plugin path (idempotent; init.py adds it
+    # too). nuke.load() below registers each gizmo so createNode() can find it.
     nuke.pluginAddPath(_GRIPTAPE_DIR)
 
-    # Use nuke.ALL so Nuke walks all plugin_path() directories (not just loaded plugins).
-    gizmo_paths = nuke.plugins(nuke.ALL, '*_v*.gizmo')
+    # Discover gizmos from the filesystem. nuke.plugins returns a list Nuke
+    # caches at startup, so it would miss gizmos published during this session;
+    # globbing the directory always sees the current files.
+    gizmo_paths = glob.glob(os.path.join(_GRIPTAPE_DIR, '*_v*.gizmo'))
 
     # Collect ALL versions per stem (not just the highest).
     # Filenames follow the pattern "<stem>_v<N>.gizmo"; we parse with rsplit.
-    workflows = {}  # stem -> sorted list of (version, node_name)
+    workflows = {}  # stem -> sorted list of (version, node_name, path)
     for path in gizmo_paths:
-        fname = os.path.basename(path)
-        if not fname.endswith('.gizmo'):
-            continue
-        name = fname[:-len('.gizmo')]  # e.g. "my_workflow_v02"
+        name = os.path.basename(path)[:-len('.gizmo')]  # e.g. "my_workflow_v02"
         parts = name.rsplit('_v', 1)
         if len(parts) != 2 or not parts[1].isdigit():
             continue
         stem, ver = parts[0], int(parts[1])
-        workflows.setdefault(stem, []).append((ver, name))
+        workflows.setdefault(stem, []).append((ver, name, path))
 
     for stem in workflows:
         workflows[stem].sort()
@@ -462,12 +462,20 @@ def _refresh_griptape_menu():
     # gizmos/versions appear on refresh; deleted ones linger until restart.
     global _GRIPTAPE_ADDED
     for stem in sorted(workflows):
-        new_versions = [(ver, nn) for ver, nn in workflows[stem] if nn not in _GRIPTAPE_ADDED]
+        new_versions = [(ver, nn, p) for ver, nn, p in workflows[stem] if nn not in _GRIPTAPE_ADDED]
         if not new_versions:
             continue
         label = stem.replace('_', ' ').title()
         workflow_submenu = griptape_nodes.addMenu(label)
-        for ver, node_name in new_versions:
+        for ver, node_name, path in new_versions:
+            # Register the gizmo by full path so createNode() finds a file
+            # written after startup. Forward slashes only (Nuke treats backslashes
+            # as escapes). nuke.load() is a no-op if already loaded and raises
+            # only on a genuinely bad file, which we skip.
+            try:
+                nuke.load(path.replace(os.sep, '/'))
+            except Exception:
+                pass
             workflow_submenu.addCommand('v{}'.format(ver), "nuke.createNode('{}')".format(node_name))
             _GRIPTAPE_ADDED.add(node_name)
 

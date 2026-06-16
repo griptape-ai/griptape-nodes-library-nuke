@@ -24,20 +24,22 @@ def _extract_menu_code() -> str:
     raise AssertionError(msg)
 
 
-def test_menu_code_forces_plugin_path_rescan() -> None:
-    """Must guard pluginRemovePath (undocumented) then re-add before nuke.plugins().
+def test_menu_code_discovers_via_glob_and_loads_gizmos() -> None:
+    """Refresh must discover gizmos from the filesystem and register them.
 
-    pluginAddPath is idempotent on an already-registered path — without the remove,
-    Nuke skips the directory walk and nuke.plugins() misses newly written gizmos.
-    pluginRemovePath must be guarded with hasattr to avoid crashing on Nuke versions
-    that don't expose it.
+    nuke.plugins() returns a list Nuke caches at startup, so it misses gizmos
+    published during the session ("nothing happens" on refresh). The refresh must
+    glob the directory for the current files and nuke.load() each one by full
+    path so nuke.createNode() can instantiate a gizmo added after launch.
     """
     code = _extract_menu_code()
-    assert "hasattr(nuke, 'pluginRemovePath')" in code
-    assert "nuke.pluginRemovePath(" in code
+    assert "import glob" in code
+    assert "glob.glob(" in code
+    assert "nuke.load(" in code
     assert "nuke.pluginAddPath(" in code
-    assert "nuke.plugins(" in code
-    assert code.index("hasattr(nuke, 'pluginRemovePath')") < code.index("nuke.pluginRemovePath(")
+    # The stale cached-discovery call must be gone.
+    assert "nuke.plugins(nuke.ALL" not in code
+    assert "pluginRemovePath" not in code
 
 
 def test_menu_code_contains_file_system_watcher() -> None:
