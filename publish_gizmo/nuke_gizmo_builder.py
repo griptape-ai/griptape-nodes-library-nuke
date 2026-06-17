@@ -300,11 +300,11 @@ class NukeGizmoBuilder:
         elif param_type in _FILE_PATH_TYPES:
             w.add_file_knob(knob_name, label, default=default or None)
         elif param_type == "bool":
-            w.add_bool_knob(knob_name, label, default=default)
+            w.add_bool_knob(knob_name, label, default=default if type(default) is bool else None)
         elif param_type == "float":
-            w.add_double_knob(knob_name, label, default=default)
+            w.add_double_knob(knob_name, label, default=default if type(default) is float else None)
         elif param_type == "int":
-            w.add_int_knob(knob_name, label, default=default)
+            w.add_int_knob(knob_name, label, default=default if type(default) is int else None)
         elif param_type in _MULTILINE_TYPES:
             w.add_multiline_string_knob(knob_name, label, default=default or None)
         else:
