@@ -461,6 +461,11 @@ def _refresh_griptape_menu():
             pass
     _GRIPTAPE_MENU_ITEMS = []
 
+    # If all items were removed, then the menu itself is removed and we
+    # have a dangling pointer, potentially leading to segfault, so
+    # idempotently re-add the menu.
+    griptape_nodes = nodes_toolbar.addMenu('Griptape')
+
     for stem in sorted(workflows):
         label = stem.replace('_', ' ').title()
         versions = workflows[stem]
