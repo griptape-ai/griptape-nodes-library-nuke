@@ -91,6 +91,21 @@ def test_menu_code_reuses_existing_griptape_menu() -> None:
     assert code.index("nodes_toolbar.addMenu('Griptape')") < code.index("griptape_nodes.removeItem(")
 
 
+def test_menu_code_readds_menu_after_removing_all_items() -> None:
+    """Re-acquire the menu handle after the removeItem loop.
+
+    When every tracked item is removed, Nuke silently destroys the parent menu
+    object, leaving a dangling C++ pointer. The next addCommand through that
+    stale handle triggers a segfault. A second addMenu call after the loop
+    obtains a fresh (or still-valid) handle and prevents the crash.
+    """
+    code = _extract_menu_code()
+    remove_idx = code.rindex("griptape_nodes.removeItem(")
+    add_cmd_idx = code.index("griptape_nodes.addCommand(")
+    readd_idx = code.index("nodes_toolbar.addMenu('Griptape')", remove_idx)
+    assert remove_idx < readd_idx < add_cmd_idx
+
+
 def test_menu_code_warns_on_remote_mount() -> None:
     """Must include remote-mount heuristic and print warning inside the Qt guard block.
 
