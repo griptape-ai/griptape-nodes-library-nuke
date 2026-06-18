@@ -45,6 +45,23 @@ class NukeKnobType:
     MULTILINE_STRING = 28
 
 
+def _has_numeric_value(default: object) -> bool:
+    """Return True if ``default`` is a value worth emitting for a numeric knob.
+
+    A value line like `` knob_name <value>`` must never be emitted with an empty
+    or blank value: Nuke's TCL parser would treat the *following* line's leading
+    token (typically the next ``addUserKnob``) as the knob's expression, producing
+    an "Expression: addUserKnob -> Nothing is named addUserKnob" error and leaving
+    the knob set to 0. ``None`` and empty/whitespace strings are therefore skipped;
+    ``0`` and ``0.0`` are real values and are kept.
+    """
+    if default is None:
+        return False
+    if isinstance(default, str) and default.strip() == "":
+        return False
+    return True
+
+
 def _tcl_escape(code: str) -> str:
     """Escape a Python code string for embedding inside a TCL double-quoted string.
 
@@ -148,18 +165,28 @@ class GizmoWriter:
         if default is not None:
             self._lines.append(f" {knob_name} {'1' if default else '0'}")
 
-    def add_int_knob(self, knob_name: str, label: str, default: int | None = None) -> None:
-        """Add an integer knob."""
+    def add_int_knob(self, knob_name: str, label: str, default: int | str | None = None) -> None:
+        """Add an integer knob.
+
+        ``default`` may arrive as a string from the untyped workflow shape; an
+        empty/blank value is skipped to avoid a dangling value line (see
+        ``_has_numeric_value``).
+        """
         self._knobs.append((NukeKnobType.INT, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.INT} {knob_name} l "{label}"}}')
-        if default is not None:
+        if _has_numeric_value(default):
             self._lines.append(f" {knob_name} {default}")
 
-    def add_double_knob(self, knob_name: str, label: str, default: float | None = None) -> None:
-        """Add a double-precision float knob."""
+    def add_double_knob(self, knob_name: str, label: str, default: float | str | None = None) -> None:
+        """Add a double-precision float knob.
+
+        ``default`` may arrive as a string from the untyped workflow shape; an
+        empty/blank value is skipped to avoid a dangling value line (see
+        ``_has_numeric_value``).
+        """
         self._knobs.append((NukeKnobType.DOUBLE, knob_name))
         self._lines.append(f' addUserKnob {{{NukeKnobType.DOUBLE} {knob_name} l "{label}"}}')
-        if default is not None:
+        if _has_numeric_value(default):
             self._lines.append(f" {knob_name} {default}")
 
     def add_multiline_string_knob(
