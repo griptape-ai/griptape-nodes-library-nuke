@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import json
 import logging
 import os
@@ -10,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
+import uuid
 from typing import Any
 
 from griptape_nodes.common.macro_parser import ParsedMacro
@@ -20,6 +20,7 @@ from griptape_nodes.exe_types.param_types.parameter_button import ParameterButto
 from griptape_nodes.exe_types.param_types.parameter_string import ParameterString
 from griptape_nodes.files.file import File
 from griptape_nodes.files.project_file import ProjectFileDestination
+from griptape_nodes.retained_mode.events.os_events import DeleteFileRequest, WriteFileRequest, WriteFileResultSuccess
 from griptape_nodes.retained_mode.events.project_events import GetPathForMacroRequest, GetPathForMacroResultSuccess
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.button import Button, ButtonDetailsMessagePayload
@@ -612,7 +613,13 @@ class NukeScriptNode(SuccessFailureNode):
     # Artifact / path resolution
     # ------------------------------------------------------------------
 
-    def _artifact_to_path(self, value: Any) -> str:
+    def _artifact_to_path(
+        self,
+        value: Any,
+        name: str = "input",
+        _cleanup: list[str] | None = None,
+        situation: str = "save_temp_file",
+    ) -> str:
         """Resolve a parameter value to a local file path Nuke can read."""
         if isinstance(value, str):
             return value
@@ -627,16 +634,17 @@ class NukeScriptNode(SuccessFailureNode):
             if val.startswith(("http://", "https://")):
                 detected = os.path.splitext(val.split("?")[0])[-1]
                 suffix = detected or (".mp4" if isinstance(value, _video_type) else ".png")
-                tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-                try:
-                    with urllib.request.urlopen(val, timeout=30) as response:  # noqa: S310
-                        tmp.write(response.read())
-                    tmp.close()
-                except Exception:
-                    tmp.close()
-                    os.unlink(tmp.name)
-                    raise
-                return tmp.name
+                _id = uuid.uuid4().hex[:8]
+                # Download the remote asset into a project-managed file so Nuke can read it
+                # by local path. UUID prefix avoids collisions when multiple nodes run in
+                # parallel. final_file_path (not resolve()) is used because the framework may
+                # rename the file under CREATE_NEW collision policy.
+                dest = ProjectFileDestination.from_situation(f"{self.name}_{name}_{_id}{suffix}", situation)
+                with urllib.request.urlopen(val, timeout=30) as response:  # noqa: S310
+                    tmp_path = self._write_scratch_file(str(dest.resolve()), response.read())
+                if _cleanup is not None:
+                    _cleanup.append(tmp_path)
+                return tmp_path
             if "{" in val:
                 try:
                     macro = ParsedMacro(val)
@@ -648,11 +656,26 @@ class NukeScriptNode(SuccessFailureNode):
                         return str(result.absolute_path)
             return val
         if isinstance(val, bytes):
-            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            tmp.write(val)
-            tmp.close()
-            return tmp.name
+            _id = uuid.uuid4().hex[:8]
+            # Materialise raw bytes (e.g. BlobArtifact image data) to a file Nuke can open.
+            # Same UUID + situation strategy as the URL branch above.
+            dest = ProjectFileDestination.from_situation(f"{self.name}_{name}_{_id}.png", situation)
+            tmp_path = self._write_scratch_file(str(dest.resolve()), val)
+            if _cleanup is not None:
+                _cleanup.append(tmp_path)
+            return tmp_path
         return str(value)
+
+    def _write_scratch_file(self, path: str, content: bytes) -> str:
+        """Write content and return the canonical path actually written.
+
+        The framework may rename the file (e.g. foo_1.png) under a CREATE_NEW collision
+        policy, so callers must use final_file_path rather than the path they passed in.
+        """
+        result = GriptapeNodes.handle_request(WriteFileRequest(file_path=path, content=content))
+        if not isinstance(result, WriteFileResultSuccess):
+            raise RuntimeError(f"Failed to write scratch file: {path}")
+        return result.final_file_path
 
     def _build_env(self, installation: NukeInstallation | None) -> dict[str, str]:
         """Merge global env settings, installation overrides, and foundry_LICENSE from os.environ."""
@@ -733,8 +756,10 @@ class NukeScriptNode(SuccessFailureNode):
             if ann.role == "input":
                 raw = self.get_parameter_value(ann.gt_name) or ""
                 if raw:
+                    # Paths are baked as absolute references into the .nk copy, so they must
+                    # outlive this call. Persist them as node outputs, not temp files.
                     inputs[ann.gt_name] = ManifestInput(
-                        path=self._artifact_to_path(raw),
+                        path=self._artifact_to_path(raw, name=ann.gt_name, situation="save_node_output"),
                         node=ann.node_name,
                     )
 
@@ -789,44 +814,65 @@ class NukeScriptNode(SuccessFailureNode):
 
         inputs: dict[str, ManifestInput] = {}
         outputs: dict[str, ManifestOutput] = {}
+        input_tmp_paths: list[str] = []
         output_tmp_paths: list[str] = []
         output_tmp_dirs: list[str] = []
-
-        for ann in self._annotations:
-            if ann.role == "input":
-                inputs[ann.gt_name] = ManifestInput(
-                    path=self._artifact_to_path(self.get_parameter_value(ann.gt_name) or ""),
-                    node=ann.node_name,
-                )
-            elif ann.gt_type == "ImageSequenceArtifact":
-                tmpdir = tempfile.mkdtemp(prefix="griptape_nuke_seq_")
-                output_tmp_dirs.append(tmpdir)
-                seq_path = os.path.join(tmpdir, "frame.%04d.png").replace("\\", "/")
-                outputs[ann.gt_name] = ManifestOutput(
-                    path=seq_path,
-                    node=ann.node_name,
-                    type="ImageSequenceArtifact",
-                )
-            else:
-                suffix = _TEMP_SUFFIX.get(ann.gt_type or "", ".png")
-                tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-                tmp.close()
-                output_tmp_paths.append(tmp.name)
-                outputs[ann.gt_name] = ManifestOutput(
-                    path=tmp.name,
-                    node=ann.node_name,
-                    type=ann.gt_type or "ImageArtifact",
-                )
-
-        knob_overrides: list[KnobOverride] = []
-        for ek in self._expose_knobs:
-            raw = self.get_parameter_value(ek.param_name)
-            if raw not in (None, ""):
-                knob_overrides.append(
-                    KnobOverride(node=ek.target_node, knob=ek.target_knob, value=_coerce_knob_value(raw))
-                )
+        _run_id = uuid.uuid4().hex[:8]
 
         try:
+            for ann in self._annotations:
+                if ann.role == "input":
+                    inputs[ann.gt_name] = ManifestInput(
+                        path=self._artifact_to_path(
+                            self.get_parameter_value(ann.gt_name) or "",
+                            name=ann.gt_name,
+                            _cleanup=input_tmp_paths,
+                        ),
+                        node=ann.node_name,
+                    )
+                elif ann.gt_type == "ImageSequenceArtifact":
+                    seq_dest = ProjectFileDestination.from_situation(
+                        f"{self.name}_{_run_id}_{ann.gt_name}_frame.png", "save_temp_file"
+                    )
+                    # Nuke requires the output directory to exist before it starts writing
+                    # frames. WriteFileRequest has no mkdir equivalent, so we force creation
+                    # by writing a sentinel .empty file. seq_dir is derived from final_file_path
+                    # (not resolve()) in case the framework renamed the directory under
+                    # CREATE_NEW collision policy.
+                    _empty_path = self._write_scratch_file(str(pathlib.Path(seq_dest.resolve()).parent / ".empty"), b"")
+                    seq_dir = str(pathlib.Path(_empty_path).parent)
+                    seq_path = f"{seq_dir}/{ann.gt_name}_frame.%04d.png".replace("\\", "/")
+                    output_tmp_dirs.append(seq_dir)
+                    outputs[ann.gt_name] = ManifestOutput(
+                        path=seq_path,
+                        node=ann.node_name,
+                        type="ImageSequenceArtifact",
+                    )
+                else:
+                    suffix = _TEMP_SUFFIX.get(ann.gt_type or "", ".png")
+                    placeholder_dest = ProjectFileDestination.from_situation(
+                        f"{self.name}_{_run_id}_{ann.gt_name}{suffix}", "save_temp_file"
+                    )
+                    # Pre-create the output file so Nuke has a known path to write into.
+                    # The runner overwrites this placeholder; after the run _path_to_artifact
+                    # reads it and re-saves to save_node_output so downstream nodes get a
+                    # persistent URL. The placeholder is cleaned up in the finally block.
+                    placeholder_path = self._write_scratch_file(str(placeholder_dest.resolve()), b"")
+                    output_tmp_paths.append(placeholder_path)
+                    outputs[ann.gt_name] = ManifestOutput(
+                        path=placeholder_path,
+                        node=ann.node_name,
+                        type=ann.gt_type or "ImageArtifact",
+                    )
+
+            knob_overrides: list[KnobOverride] = []
+            for ek in self._expose_knobs:
+                raw = self.get_parameter_value(ek.param_name)
+                if raw not in (None, ""):
+                    knob_overrides.append(
+                        KnobOverride(node=ek.target_node, knob=ek.target_knob, value=_coerce_knob_value(raw))
+                    )
+
             manifest = JobManifest(
                 script=script_path,
                 inputs=inputs,
@@ -855,9 +901,7 @@ class NukeScriptNode(SuccessFailureNode):
 
             self._set_status_results(was_successful=True, result_details="Render complete.")
         finally:
-            for p in output_tmp_paths:
-                with contextlib.suppress(OSError):
-                    os.unlink(p)
+            for p in input_tmp_paths + output_tmp_paths:
+                GriptapeNodes.handle_request(DeleteFileRequest(path=p, workspace_only=False))
             for d in output_tmp_dirs:
-                with contextlib.suppress(OSError):
-                    shutil.rmtree(d)
+                GriptapeNodes.handle_request(DeleteFileRequest(path=d, workspace_only=False))

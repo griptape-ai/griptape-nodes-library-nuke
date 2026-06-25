@@ -7,6 +7,12 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from griptape_nodes.retained_mode.events.os_events import (
+    DeleteFileRequest,
+    WriteFileRequest,
+    WriteFileResultFailure,
+    WriteFileResultSuccess,
+)
 
 from nuke_nodes.nuke_script_node import _coerce_knob_value, _path_to_artifact
 
@@ -18,11 +24,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # ---------------------------------------------------------------------------
 
 
-def _mock_project_file_destination(location: str = "http://static/file") -> MagicMock:
+def _mock_project_file_destination(
+    location: str = "http://static/file", resolved_path: str = "/fake/temp/placeholder.png"
+) -> MagicMock:
     mock_saved = MagicMock()
     mock_saved.location = location
     mock_dest_instance = MagicMock()
     mock_dest_instance.write_bytes.return_value = mock_saved
+    mock_dest_instance.resolve.return_value = resolved_path
     mock_dest_cls = MagicMock()
     mock_dest_cls.from_situation.return_value = mock_dest_instance
     return mock_dest_cls
@@ -110,8 +119,16 @@ class TestPathToArtifact:
         assert isinstance(result, ImageUrlArtifact)
 
 
+def _mock_artifact_to_path_dest(resolved_path: str = "/fake/temp/input.mp4") -> MagicMock:
+    dest = MagicMock()
+    dest.resolve.return_value = resolved_path
+    mock_cls = MagicMock()
+    mock_cls.from_situation.return_value = dest
+    return mock_cls
+
+
 class TestArtifactToPath:
-    def test_video_url_artifact_http_downloads_to_mp4_temp(self, tmp_path: Path) -> None:
+    def test_video_url_artifact_http_downloads_to_project_temp(self) -> None:
         node = _make_node()
 
         try:
@@ -126,13 +143,103 @@ class TestArtifactToPath:
         fake_response.__exit__ = MagicMock(return_value=False)
         fake_response.read.return_value = b"\x00" * 8
 
-        with patch("nuke_nodes.nuke_script_node.urllib.request.urlopen", return_value=fake_response) as mock_open:
-            result = node._artifact_to_path(artifact)
+        mock_dest_cls = _mock_artifact_to_path_dest("/fake/temp/input_resolve.mp4")
+        canonical_path = "/fake/temp/input_canonical.mp4"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.urllib.request.urlopen", return_value=fake_response) as mock_open,
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gtn,
+        ):
+            write_result = MagicMock(spec=WriteFileResultSuccess)
+            write_result.final_file_path = canonical_path
+            mock_gtn.handle_request.return_value = write_result
+            result = node._artifact_to_path(artifact, name="my_input")
 
         mock_open.assert_called_once()
-        assert result.endswith(".mp4")
-        # Clean up temp file
-        Path(result).unlink(missing_ok=True)
+        assert result == canonical_path
+        call_args = mock_dest_cls.from_situation.call_args
+        filename, situation = call_args[0]
+        assert situation == "save_temp_file"
+        assert "NukeScriptNode1" in filename
+        assert "my_input" in filename
+        assert filename.endswith(".mp4")
+
+    def test_video_url_artifact_http_appends_to_cleanup_list(self) -> None:
+        node = _make_node()
+
+        try:
+            from griptape.artifacts import VideoUrlArtifact
+
+            artifact = VideoUrlArtifact(value="http://example.com/clip.mp4")
+        except ImportError:
+            pytest.skip("griptape not installed")
+
+        fake_response = MagicMock()
+        fake_response.__enter__ = MagicMock(return_value=fake_response)
+        fake_response.__exit__ = MagicMock(return_value=False)
+        fake_response.read.return_value = b"\x00" * 8
+
+        cleanup: list[str] = []
+        mock_dest_cls = _mock_artifact_to_path_dest("/fake/temp/input_resolve.mp4")
+        canonical_path = "/fake/temp/input_canonical.mp4"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.urllib.request.urlopen", return_value=fake_response),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gtn,
+        ):
+            write_result = MagicMock(spec=WriteFileResultSuccess)
+            write_result.final_file_path = canonical_path
+            mock_gtn.handle_request.return_value = write_result
+            node._artifact_to_path(artifact, name="my_input", _cleanup=cleanup)
+
+        assert cleanup == [canonical_path]
+
+    def test_bytes_artifact_writes_to_project_temp_file(self) -> None:
+        node = _make_node()
+
+        class FakeArtifact:
+            value = b"\x89PNG\x00"
+
+        mock_dest_cls = _mock_artifact_to_path_dest("/fake/temp/input_resolve.png")
+        canonical_path = "/fake/temp/input_canonical.png"
+        cleanup: list[str] = []
+
+        with (
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gtn,
+        ):
+            write_result = MagicMock(spec=WriteFileResultSuccess)
+            write_result.final_file_path = canonical_path
+            mock_gtn.handle_request.return_value = write_result
+            result = node._artifact_to_path(FakeArtifact(), name="img_in", _cleanup=cleanup)
+
+        assert result == canonical_path
+        call_args = mock_dest_cls.from_situation.call_args
+        filename, situation = call_args[0]
+        assert situation == "save_temp_file"
+        assert "NukeScriptNode1" in filename
+        assert "img_in" in filename
+        assert filename.endswith(".png")
+        assert cleanup == [canonical_path]
+
+    def test_bytes_artifact_raises_on_write_failure(self) -> None:
+        node = _make_node()
+
+        class FakeArtifact:
+            value = b"\x89PNG\x00"
+
+        mock_dest_cls = _mock_artifact_to_path_dest("/fake/temp/input.png")
+        mock_failure = MagicMock(spec=WriteFileResultFailure)
+
+        with (
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as mock_gtn,
+        ):
+            mock_gtn.handle_request.return_value = mock_failure
+            with pytest.raises(RuntimeError, match="scratch file"):
+                node._artifact_to_path(FakeArtifact(), name="img_in")
 
     def test_video_url_artifact_local_path_returned_unchanged(self) -> None:
         node = _make_node()
@@ -410,6 +517,9 @@ class TestProcess:
             patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            write_result = MagicMock(spec=WriteFileResultSuccess)
+            write_result.final_file_path = "/fake/temp/placeholder.png"
+            MockGT.handle_request.return_value = write_result
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-123"
             instance.result.return_value = fake_result
@@ -451,6 +561,7 @@ class TestProcess:
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            MockGT.handle_request.return_value = MagicMock(spec=WriteFileResultSuccess)
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-456"
             instance.result.return_value = fake_result
@@ -501,11 +612,14 @@ class TestProcess:
         saved1, saved2 = MagicMock(), MagicMock()
         saved1.location = "http://s/f1.png"
         saved2.location = "http://s/f2.png"
+        # seq_dest: used by process() to resolve the sequence directory
+        seq_dest = MagicMock()
+        seq_dest.resolve.return_value = "/fake/temp/frames_frame.png"
         dest1, dest2 = MagicMock(), MagicMock()
         dest1.write_bytes.return_value = saved1
         dest2.write_bytes.return_value = saved2
         mock_dest_cls = MagicMock()
-        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
+        mock_dest_cls.from_situation.side_effect = [seq_dest, dest1, dest2]
         mock_file = MagicMock()
         mock_file.read_bytes.return_value = b"\x89PNG"
 
@@ -516,6 +630,10 @@ class TestProcess:
             patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            # final_file_path for the .empty sentinel — seq_dir is derived from its parent
+            write_result = MagicMock(spec=WriteFileResultSuccess)
+            write_result.final_file_path = "/fake/temp/.empty"
+            MockGT.handle_request.return_value = write_result
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-seq"
             instance.result.return_value = fake_result
@@ -570,6 +688,7 @@ class TestProcess:
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            MockGT.handle_request.return_value = MagicMock(spec=WriteFileResultSuccess)
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-789"
             instance.result.return_value = fake_result
@@ -581,3 +700,60 @@ class TestProcess:
         assert manifest.knob_overrides[0].node == "Grade1"
         assert manifest.knob_overrides[0].knob == "multiply"
         assert manifest.knob_overrides[0].value == pytest.approx(0.0)
+
+    def test_mid_loop_failure_still_cleans_up_earlier_files(self, tmp_path: Path) -> None:
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._annotations = [
+            GriptapeAnnotation(node_name="Write1", role="output", gt_name="out1", gt_type="ImageArtifact"),
+            GriptapeAnnotation(node_name="Write2", role="output", gt_name="out2", gt_type="ImageArtifact"),
+        ]
+        node._expose_knobs = []
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "frame_start": 1001,
+                "frame_end": 1001,
+            }.get(name)
+        )
+
+        resolve_path_1 = "/fake/temp/out1_resolve.png"
+        canonical_path_1 = "/fake/temp/out1_canonical.png"
+        dest1, dest2 = MagicMock(), MagicMock()
+        dest1.resolve.return_value = resolve_path_1
+        dest2.resolve.return_value = "/fake/temp/out2_resolve.png"
+        mock_dest_cls = MagicMock()
+        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
+
+        write_success = MagicMock(spec=WriteFileResultSuccess)
+        write_success.final_file_path = canonical_path_1
+        write_failure = MagicMock(spec=WriteFileResultFailure)
+
+        call_count = {"n": 0}
+
+        def handle_request_side_effect(request: object) -> object:
+            if isinstance(request, WriteFileRequest):
+                call_count["n"] += 1
+                return write_success if call_count["n"] == 1 else write_failure
+            return MagicMock(spec=WriteFileResultSuccess)
+
+        with (
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider"),
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            MockGT.handle_request.side_effect = handle_request_side_effect
+
+            with pytest.raises(RuntimeError):
+                node.process()
+
+        delete_calls = [c for c in MockGT.handle_request.call_args_list if isinstance(c.args[0], DeleteFileRequest)]
+        deleted_paths = {c.args[0].path for c in delete_calls}
+        assert canonical_path_1 in deleted_paths
+        assert resolve_path_1 not in deleted_paths
