@@ -241,7 +241,12 @@ class NukeGizmoBuilder:
             # Write Read nodes in reverse order so that Switch input(0) maps to
             # the first media output (matching the active_output enum index 0).
             for idx, name in enumerate(reversed(media_output_names)):
-                w.add_read_node(_read_node_name(name), xpos=idx * 200, ypos=0)
+                w.add_read_node(
+                    _read_node_name(name),
+                    xpos=idx * 200,
+                    ypos=0,
+                    file_expression=f"parent.{_output_knob_name(name)}",
+                )
             center_x = (len(media_output_names) - 1) * 100
             w.add_switch_node(
                 "SwitchOutput",
@@ -251,7 +256,12 @@ class NukeGizmoBuilder:
             )
             w.add_output_node(_output_node_name(0), xpos=center_x, ypos=200)
         elif media_output_names:
-            w.add_read_node(_read_node_name(media_output_names[0]), xpos=0, ypos=0)
+            w.add_read_node(
+                _read_node_name(media_output_names[0]),
+                xpos=0,
+                ypos=0,
+                file_expression=f"parent.{_output_knob_name(media_output_names[0])}",
+            )
             w.add_output_node(_output_node_name(0), xpos=0, ypos=100)
         else:
             w.add_output_node(_output_node_name(0), xpos=0, ypos=100, no_inputs=True)

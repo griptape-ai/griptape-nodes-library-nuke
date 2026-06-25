@@ -491,10 +491,11 @@ else:
                                         node.begin()
                                         _r = nuke.toNode(_read_name)  # noqa: F821
                                         if _r:
-                                            # Forward slashes are required: Nuke's TCL
-                                            # layer interprets backslashes as escape
-                                            # sequences when .nk files are saved/reloaded.
-                                            _r["file"].setValue(str(_mv).replace("\\", "/"))
+                                            # The Read node's file knob is expression-linked
+                                            # to the top-level output knob (set above via
+                                            # _output_knob_map), so we only need to trigger
+                                            # a reload — not overwrite the expression with
+                                            # a literal path.
                                             try:
                                                 _r["reload"].execute()
                                             except Exception:
@@ -597,7 +598,11 @@ else:
                                     node.begin()
                                     _r = nuke.toNode(_read_name)  # noqa: F821
                                     if _r:
-                                        _r["file"].setValue(str(_mv).replace("\\", "/"))
+                                        # The Read node's file knob is expression-linked
+                                        # to the top-level output knob (set above via
+                                        # _output_knob_map), so we only need to trigger
+                                        # a reload — not overwrite the expression with
+                                        # a literal path.
                                         try:
                                             _r["reload"].execute()
                                         except Exception:

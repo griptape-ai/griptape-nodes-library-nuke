@@ -12,10 +12,28 @@ def _minimal_shape(input_params: dict[str, dict]) -> dict:
     }
 
 
+def _shape_with_output(output_params: dict[str, dict]) -> dict:
+    return {
+        "input": {"Nuke Start Flow": {}},
+        "output": {"Nuke End Flow": output_params},
+    }
+
+
 def _generate_gizmo(input_params: dict[str, dict]) -> str:
     builder = NukeGizmoBuilder(
         workflow_name="test_workflow",
         workflow_shape=_minimal_shape(input_params),
+        companion_dir="/tmp/test",
+        workflow_file="/tmp/test/test_workflow.json",
+        current_version=1,
+    )
+    return builder.generate()
+
+
+def _generate_gizmo_with_output(output_params: dict[str, dict]) -> str:
+    builder = NukeGizmoBuilder(
+        workflow_name="test_workflow",
+        workflow_shape=_shape_with_output(output_params),
         companion_dir="/tmp/test",
         workflow_file="/tmp/test/test_workflow.json",
         current_version=1,
@@ -130,3 +148,81 @@ class TestSubclassDefaultsRejectedByStrictTypeCheck:
         lines = gizmo.splitlines()
         value_lines = [line for line in lines if line.strip().startswith("scale ")]
         assert value_lines == []
+
+
+class TestReadNodeExpressionLink:
+    """Internal Read nodes must expression-link their file knob to the
+    persistent top-level output knob so the path survives .nk save/reload
+    and copy-paste (Nuke does not serialize internal gizmo-node edits into
+    the .nk).
+    """
+
+    def test_single_media_output_read_node_links_to_output_knob(self) -> None:
+        """A single image output generates a Read whose file is linked to image_out."""
+        gizmo = _generate_gizmo_with_output(
+            {
+                "image": {
+                    "type": "ImageUrlArtifact",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                }
+            }
+        )
+        # The internal Read node must carry the TCL expression, not an empty literal.
+        assert r'file "\[value parent.image_out]"' in gizmo
+        # Sanity: the top-level output knob must still be declared.
+        assert "image_out" in gizmo
+
+    def test_single_media_output_no_literal_file_empty(self) -> None:
+        """The hardcoded 'file ""' must not appear when an expression is used."""
+        gizmo = _generate_gizmo_with_output(
+            {
+                "result": {
+                    "type": "ImageUrlArtifact",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                }
+            }
+        )
+        # Expression-linked Read must not fall back to the empty literal.
+        assert 'file ""' not in gizmo
+
+    def test_multiple_media_outputs_each_read_links_to_its_own_knob(self) -> None:
+        """Multiple image outputs each get a Read linked to their own *_out knob."""
+        gizmo = _generate_gizmo_with_output(
+            {
+                "alpha": {
+                    "type": "ImageUrlArtifact",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                },
+                "beauty": {
+                    "type": "ImageUrlArtifact",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                },
+            }
+        )
+        assert r'file "\[value parent.alpha_out]"' in gizmo
+        assert r'file "\[value parent.beauty_out]"' in gizmo
+        # No empty literals anywhere.
+        assert 'file ""' not in gizmo
+
+    def test_non_media_output_does_not_produce_read_node(self) -> None:
+        """A plain string output has no Read node and no expression."""
+        gizmo = _generate_gizmo_with_output(
+            {
+                "caption": {
+                    "type": "str",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                }
+            }
+        )
+        assert "GEN_READ" not in gizmo
+        assert r"\[value" not in gizmo

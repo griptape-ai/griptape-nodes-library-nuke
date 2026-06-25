@@ -237,9 +237,13 @@ class NukeGizmoPublisher:
         template.situations["save_node_output"] = SituationTemplate(
             name="save_node_output",
             description="Node generates and saves output (Nuke gizmo)",
-            macro=f"{{outputs}}/{workflow_name}/{{node_name?:_}}{{file_name_base}}_v{{_index?:04}}.{{file_extension}}",
+            # Drop node_name and version-index suffixes so the artist's chosen
+            # filename is preserved exactly.  {sub_dirs?:/} passes through any
+            # relative subdirectory the artist typed (e.g. "renders/comp.exr"
+            # lands under griptape_outputs/<workflow>/renders/comp.exr).
+            macro=f"{{outputs}}/{workflow_name}/{{sub_dirs?:/}}{{file_name_base}}.{{file_extension}}",
             policy=SituationPolicy(
-                on_collision=SituationFilePolicy.CREATE_NEW,
+                on_collision=SituationFilePolicy.OVERWRITE,
                 create_dirs=True,
             ),
             fallback="save_file",

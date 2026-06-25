@@ -45,10 +45,13 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     """
     script_dir = Path(__file__).parent
 
-    # Load .env with python-dotenv (handles quoted values correctly)
+    # Load .env with python-dotenv (handles quoted values correctly).
+    # override=True ensures bundled secrets (e.g. GT_CLOUD_API_KEY) win over
+    # whatever the parent Nuke process happened to inherit from the system
+    # environment, which may be stale or empty.
     env_path = script_dir / ".env"
     if env_path.exists():
-        load_dotenv(env_path)
+        load_dotenv(env_path, override=True)
 
     # When a Nuke script directory is available, use it as the workspace so
     # that relative directory macros in project.yml (like ``outputs``) resolve
