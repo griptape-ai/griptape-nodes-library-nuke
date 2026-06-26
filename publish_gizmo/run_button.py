@@ -26,6 +26,7 @@ Qt (PySide2 or PySide6) is bundled with Nuke and available here.
 
 import json
 import os
+from pathlib import Path
 import platform
 import shutil
 import subprocess
@@ -304,6 +305,19 @@ else:
             print(f"[Griptape] knob '{_k}' -> type={type(inputs[_k]).__name__!r} value={inputs[_k]!r}")
         else:
             print(f"[Griptape] knob '{_k}' -> NOT FOUND on node")
+
+    # -- Resolve bare filenames against output_dir --
+    # When the artist sets an Output Directory on the gizmo and a workflow input
+    # is a relative filename (e.g. output_file="julia_test.jpg"), combine them
+    # into an absolute path so SaveImage bypasses the project macro and writes
+    # exactly where the artist expects.  Already-absolute paths are left alone.
+    if output_dir:
+        _output_dir_path = Path(output_dir)
+        for _k in list(inputs.keys()):
+            _v = inputs[_k]
+            if isinstance(_v, str) and _v and not Path(_v).is_absolute():
+                inputs[_k] = str(_output_dir_path / _v)
+                print(f"[Griptape] resolved '{_k}' -> {inputs[_k]!r}")
 
     # -- Render media inputs from upstream Nuke connections to temp files --
 
