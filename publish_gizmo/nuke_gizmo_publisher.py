@@ -233,15 +233,15 @@ class NukeGizmoPublisher:
             path_macro="griptape_outputs",
         )
 
-        workflow_name = companion_base.name
         template.situations["save_node_output"] = SituationTemplate(
             name="save_node_output",
             description="Node generates and saves output (Nuke gizmo)",
-            # Drop node_name and version-index suffixes so the artist's chosen
-            # filename is preserved exactly.  {sub_dirs?:/} passes through any
-            # relative subdirectory the artist typed (e.g. "renders/comp.exr"
-            # lands under griptape_outputs/<workflow>/renders/comp.exr).
-            macro=f"{{outputs}}/{workflow_name}/{{sub_dirs?:/}}{{file_name_base}}.{{file_extension}}",
+            # No workflow-name subdirectory: files land directly under {outputs}.
+            # When Output Directory is set at runtime, {outputs} is redirected there,
+            # so files go directly into the artist's chosen directory.
+            # {sub_dirs?:/} passes through any relative subdirectory the artist typed
+            # (e.g. "renders/comp.exr" lands under griptape_outputs/renders/comp.exr).
+            macro="{outputs}/{sub_dirs?:/}{file_name_base}.{file_extension}",
             policy=SituationPolicy(
                 on_collision=SituationFilePolicy.OVERWRITE,
                 create_dirs=True,
