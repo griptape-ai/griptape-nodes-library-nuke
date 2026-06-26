@@ -26,7 +26,6 @@ Qt (PySide2 or PySide6) is bundled with Nuke and available here.
 
 import json
 import os
-from pathlib import Path
 import platform
 import shutil
 import subprocess
@@ -34,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 # run_button.py is exec'd (not imported) by the gizmo bootstrap, so __file__'s
 # directory is not added to sys.path automatically. Insert it so that
