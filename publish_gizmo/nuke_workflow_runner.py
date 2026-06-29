@@ -48,12 +48,12 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     script_dir = Path(__file__).parent
 
     # Load .env with python-dotenv (handles quoted values correctly).
-    # override=True ensures bundled secrets (e.g. GT_CLOUD_API_KEY) win over
-    # whatever the parent Nuke process happened to inherit from the system
-    # environment, which may be stale or empty.
+    # override=False: the bundled .env only fills env vars the parent Nuke
+    # process did not already set, so a pipeline/farm job can supply its own
+    # credentials (e.g. per-job GT_CLOUD_API_KEY) without being clobbered.
     env_path = script_dir / ".env"
     if env_path.exists():
-        load_dotenv(env_path, override=True)
+        load_dotenv(env_path, override=False)
 
     # When a Nuke script directory is available, use it as the workspace so
     # that relative directory macros in project.yml (like ``outputs``) resolve
@@ -281,10 +281,10 @@ def main() -> None:
                 delete=False,
                 encoding="utf-8",
             )
+            temp_project_file = tmp.name  # register for cleanup before any write can raise
+            project_file_path = temp_project_file
             tmp.write(template.to_yaml())
             tmp.close()
-            temp_project_file = tmp.name
-            project_file_path = temp_project_file
 
     try:
         output = module.execute_workflow(

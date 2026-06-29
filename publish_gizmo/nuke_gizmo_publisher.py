@@ -241,6 +241,11 @@ class NukeGizmoPublisher:
             # so files go directly into the artist's chosen directory.
             # {sub_dirs?:/} passes through any relative subdirectory the artist typed
             # (e.g. "renders/comp.exr" lands under griptape_outputs/renders/comp.exr).
+            # Note: ":/" is a separator FORMAT (appended to the value), not a default —
+            # when sub_dirs is absent the whole token including its separator is dropped,
+            # so the result is "{outputs}/comp.exr" (single slash, no "//").
+            # sub_dirs carries no trailing slash, so "{sub_dirs?}" alone would yield
+            # "renderscomp.exr".
             macro="{outputs}/{sub_dirs?:/}{file_name_base}.{file_extension}",
             policy=SituationPolicy(
                 on_collision=SituationFilePolicy.OVERWRITE,
