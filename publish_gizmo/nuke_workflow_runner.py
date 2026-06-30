@@ -26,10 +26,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
 from griptape_nodes.common.project_templates import load_project_template_from_yaml
+from griptape_nodes.common.project_templates.directory import DirectoryDefinition
 from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
 from output_protocol import emit_payload
 
@@ -45,10 +47,13 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     """
     script_dir = Path(__file__).parent
 
-    # Load .env with python-dotenv (handles quoted values correctly)
+    # Load .env with python-dotenv (handles quoted values correctly).
+    # override=False: the bundled .env only fills env vars the parent Nuke
+    # process did not already set, so a pipeline/farm job can supply its own
+    # credentials (e.g. per-job GT_CLOUD_API_KEY) without being clobbered.
     env_path = script_dir / ".env"
     if env_path.exists():
-        load_dotenv(env_path)
+        load_dotenv(env_path, override=False)
 
     # When a Nuke script directory is available, use it as the workspace so
     # that relative directory macros in project.yml (like ``outputs``) resolve
@@ -251,16 +256,50 @@ def main() -> None:
         sys.exit(1)
 
     script_dir = Path(__file__).parent
-    project_file = script_dir / "project.yml"
+    bundle_project_file = script_dir / "project.yml"
+
+    # When an output directory is specified, build a per-run temp project.yml that
+    # redirects {outputs} to the requested directory.  The bundle's situation macro
+    # and OVERWRITE policy are kept exactly as authored — only the directory changes.
+    # This makes the engine's actual save path agree with the path we report to Nuke.
+    # The bundle file itself is never modified.
+    temp_project_file = None
+    project_file_path: str | None = str(bundle_project_file) if bundle_project_file.exists() else None
+
+    if args.output_dir and bundle_project_file.exists():
+        validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
+        template = load_project_template_from_yaml(bundle_project_file.read_text(encoding="utf-8"), validation_info)
+        if template is not None:
+            template.directories["outputs"] = DirectoryDefinition(
+                name="outputs",
+                path_macro=args.output_dir,
+            )
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".yml",
+                prefix="griptape_nuke_run_",
+                delete=False,
+                encoding="utf-8",
+            )
+            temp_project_file = tmp.name  # register for cleanup before any write can raise
+            project_file_path = temp_project_file
+            tmp.write(template.to_yaml())
+            tmp.close()
 
     try:
         output = module.execute_workflow(
             input=flow_input,
-            project_file_path=str(project_file) if project_file.exists() else None,
+            project_file_path=project_file_path,
         )
     except Exception as e:
         emit_payload({"error": f"Workflow execution failed: {e}"})
         sys.exit(1)
+    finally:
+        if temp_project_file is not None:
+            try:
+                Path(temp_project_file).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
     macro_map = _build_macro_map(Path(__file__).parent, workspace_dir=workspace_dir)

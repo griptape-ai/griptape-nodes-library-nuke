@@ -213,12 +213,28 @@ class GizmoWriter:
         self._lines.append(f"  ypos {ypos}")
         self._lines.append(" }")
 
-    def add_read_node(self, name: str, xpos: int, ypos: int) -> None:
-        """Add a Read node with an empty file path to the internal graph."""
+    def add_read_node(self, name: str, xpos: int, ypos: int, file_expression: str | None = None) -> None:
+        """Add a Read node to the internal graph.
+
+        Args:
+            name: Nuke node name (e.g. ``GEN_READ_image``).
+            xpos: Horizontal position in the node graph.
+            ypos: Vertical position in the node graph.
+            file_expression: When provided, the Read node's ``file`` knob is set
+                to a live TCL expression ``[value <file_expression>]`` rather than
+                an empty literal.  Use this to link the Read to a persistent
+                top-level user knob so the path survives save/reload and copy-paste.
+                Example: ``"parent.image_out"``.
+        """
         self._lines.append(" Read {")
         self._lines.append("  inputs 0")
         self._lines.append(f"  name {name}")
-        self._lines.append('  file ""')
+        if file_expression is not None:
+            # The leading backslash prevents TCL from evaluating [value …] at
+            # parse time; Nuke stores it as a live expression knob instead.
+            self._lines.append(f'  file "\\[value {file_expression}]"')
+        else:
+            self._lines.append('  file ""')
         self._lines.append(f"  xpos {xpos}")
         self._lines.append(f"  ypos {ypos}")
         self._lines.append(" }")
