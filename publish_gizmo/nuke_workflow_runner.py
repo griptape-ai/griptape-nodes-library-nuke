@@ -18,16 +18,25 @@ Output:
 
 from __future__ import annotations
 
-import argparse
-import importlib.util
-import json
-import logging
 import os
-import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+# Redirect the engine's USER config into a throwaway dir inside the bundle so
+# per-run project paths (and any other engine writes) never pollute the user's
+# global ~/.config/griptape_nodes.  Must be set before any griptape_nodes import
+# because xdg_config_home() is evaluated once at config_manager import time.
+# The guard lets run_button.py's explicit env= take precedence when set by the parent.
+if not os.environ.get("XDG_CONFIG_HOME"):
+    os.environ["XDG_CONFIG_HOME"] = str(Path(__file__).resolve().parent / ".gtn_config").replace("\\", "/")
+
+import argparse  # noqa: E402
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+import logging  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
 
 from dotenv import load_dotenv
 from griptape_nodes.common.project_templates import load_project_template_from_yaml

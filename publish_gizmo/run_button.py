@@ -54,6 +54,16 @@ except ImportError:
     _SENTINEL = ""
 
 
+def _build_child_env(companion: str, base_env: dict) -> dict:
+    """Return a subprocess env with XDG_CONFIG_HOME redirected into the bundle.
+
+    Keeps all engine config writes (e.g. projects_to_register) inside the
+    throwaway companion directory instead of the user's global ~/.config.
+    companion must already be an absolute forward-slashed path.
+    """
+    return {**base_env, "XDG_CONFIG_HOME": companion + "/.gtn_config"}
+
+
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).
 try:
     from PySide6.QtCore import Qt
@@ -267,6 +277,12 @@ if not companion or not os.path.isdir(companion):
 # TCL string encoding when the .nk file is saved and reloaded.
 companion = companion.replace("\\", "/")
 node["_companion_dir"].setValue(companion)
+
+# Build the child-process environment once.  Redirecting XDG_CONFIG_HOME into a
+# bundle-local subdir ensures the engine's user config writes (e.g. the
+# projects_to_register list) stay inside the throwaway bundle directory and never
+# pollute the user's global ~/.config/griptape_nodes.
+_child_env = _build_child_env(companion, os.environ)
 
 # -- Resolve workflow file from version subdir --
 
@@ -532,6 +548,7 @@ else:
                     text=True,
                     bufsize=1,
                     cwd=companion,
+                    env=_child_env,
                 )
                 _process_ref[0] = p
 
@@ -581,7 +598,7 @@ else:
             # ------------------------------------------------------------------
             # Fallback: blocking path when Qt is not available
             # ------------------------------------------------------------------
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=companion, timeout=600)
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=companion, timeout=600, env=_child_env)
             if result.returncode == 0:
                 try:
                     output = _extract_runner_output(result.stdout)
