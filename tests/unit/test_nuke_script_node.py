@@ -57,49 +57,6 @@ class TestPathToArtifact:
         assert isinstance(result, VideoUrlArtifact)
         assert result.value == "http://static/clip.mp4"
 
-    def test_image_sequence_artifact_returns_list_artifact(self, tmp_path: Path) -> None:
-        f1 = tmp_path / "frame.0001.png"
-        f2 = tmp_path / "frame.0002.png"
-        f1.write_bytes(b"\x89PNG")
-        f2.write_bytes(b"\x89PNG")
-
-        saved1, saved2 = MagicMock(), MagicMock()
-        saved1.location = "http://s/f1.png"
-        saved2.location = "http://s/f2.png"
-        dest1, dest2 = MagicMock(), MagicMock()
-        dest1.write_bytes.return_value = saved1
-        dest2.write_bytes.return_value = saved2
-        mock_dest_cls = MagicMock()
-        mock_dest_cls.from_situation.side_effect = [dest1, dest2]
-
-        mock_file = MagicMock()
-        mock_file.read_bytes.return_value = b"\x89PNG"
-
-        with (
-            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
-            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
-        ):
-            result = _path_to_artifact("ImageSequenceArtifact", [str(f1), str(f2)])
-
-        from griptape.artifacts import ImageUrlArtifact, ListArtifact
-
-        assert isinstance(result, ListArtifact)
-        assert len(result.value) == 2
-        assert all(isinstance(item, ImageUrlArtifact) for item in result.value)
-
-    def test_image_sequence_artifact_empty_list_returns_empty_list_artifact(self) -> None:
-        with patch("nuke_nodes.nuke_script_node.GriptapeNodes"):
-            result = _path_to_artifact("ImageSequenceArtifact", [])
-
-        from griptape.artifacts import ListArtifact
-
-        assert isinstance(result, ListArtifact)
-        assert len(result.value) == 0
-
-    def test_image_sequence_artifact_raises_type_error_for_str_path(self) -> None:
-        with pytest.raises(TypeError, match="ImageSequenceArtifact"):
-            _path_to_artifact("ImageSequenceArtifact", "/tmp/frame.%04d.png")
-
     def test_image_artifact_unchanged(self, tmp_path: Path) -> None:
         img_file = tmp_path / "out.png"
         img_file.write_bytes(b"\x89PNG")
@@ -254,6 +211,29 @@ class TestArtifactToPath:
         result = node._artifact_to_path(artifact)
         assert result == "/local/clip.mp4"
 
+    def test_sequence_constructs_hash_pattern_path(self) -> None:
+        try:
+            from griptape_nodes.common.sequences import MissingItemPolicy  # type: ignore  # noqa: PLC0415, I001
+            from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415, I001
+        except ImportError:
+            pytest.skip("griptape_nodes.common.sequences not available in this engine version")
+
+        seq = GtSequence(
+            entries=[],
+            first=1001,
+            last=1002,
+            discovered_first=1001,
+            discovered_last=1002,
+            padding=4,
+            pattern="frame_####.png",
+            directory="/out/frames",
+            policy=MissingItemPolicy.SPLIT,
+            present_numbers={1001, 1002},
+        )
+        node = _make_node()
+        result = node._artifact_to_path(seq)
+        assert result == "/out/frames/frame_####.png"
+
 
 class TestCoerceKnobValue:
     def test_integer_string(self) -> None:
@@ -342,6 +322,39 @@ class TestRefreshDynamicPorts:
         node._refresh_dynamic_ports(str(nk_fixture))
         # No dynamic ports should be registered
         assert node._dynamic_param_names == []
+
+    def test_image_sequence_output_port_is_sequence_type(self, tmp_path: Path) -> None:
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "seq.nk"
+        nk_file.write_text("")
+        (tmp_path / "seq.gt.json").write_text("{}")
+        ann = GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="ImageSequenceArtifact")
+
+        node = _make_node()
+        with patch("nuke_nodes.nuke_script_node.read_sidecar", return_value=([ann], [], False)):
+            node._refresh_dynamic_ports(str(nk_file))
+
+        created = {c.args[0].name: c.args[0] for c in node.add_parameter.call_args_list}
+        assert "frames" in created
+        assert created["frames"].type == "Sequence"
+        assert created["frames"].output_type == "Sequence"
+
+    def test_input_port_includes_sequence_in_input_types(self, tmp_path: Path) -> None:
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "seq_in.nk"
+        nk_file.write_text("")
+        (tmp_path / "seq_in.gt.json").write_text("{}")
+        ann = GriptapeAnnotation(node_name="Read1", role="input", gt_name="src", gt_type="ImageArtifact")
+
+        node = _make_node()
+        with patch("nuke_nodes.nuke_script_node.read_sidecar", return_value=([ann], [], False)):
+            node._refresh_dynamic_ports(str(nk_file))
+
+        created = {c.args[0].name: c.args[0] for c in node.add_parameter.call_args_list}
+        assert "src" in created
+        assert "Sequence" in created["src"].input_types
 
 
 class TestEnsureAnnotations:
@@ -573,18 +586,19 @@ class TestProcess:
         assert "1" in call_kwargs["result_details"]
         node._handle_failure_exception.assert_called_once()
 
-    def test_sequence_output_produces_list_artifact(self, tmp_path: Path) -> None:
+    def test_sequence_output_produces_sequence_object(self, tmp_path: Path) -> None:
+        try:
+            from griptape_nodes.common.sequences import MissingItemPolicy  # type: ignore  # noqa: PLC0415, I001
+            from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415, I001
+            from griptape_nodes.retained_mode.events.os_events import ScanSequencesResultSuccess  # type: ignore  # noqa: PLC0415, I001
+        except (ImportError, AttributeError):
+            pytest.skip("Sequence API not available in this engine version")
+
         from execution.provider import JobResult, JobStatus
         from script_parser.annotation import GriptapeAnnotation
 
         nk_file = tmp_path / "test.nk"
         nk_file.write_text("")
-
-        # Create fake frame files
-        f1 = tmp_path / "frame.0001.png"
-        f2 = tmp_path / "frame.0002.png"
-        f1.write_bytes(b"\x89PNG")
-        f2.write_bytes(b"\x89PNG")
 
         node = _make_node()
         node._annotations = [
@@ -592,6 +606,7 @@ class TestProcess:
         ]
         node._expose_knobs = []
 
+        seq_path = str(tmp_path / "frame_####.png")
         node.get_parameter_value = MagicMock(
             side_effect=lambda name: {
                 "script_path": str(nk_file),
@@ -606,45 +621,46 @@ class TestProcess:
             status=JobStatus.SUCCEEDED,
             return_code=0,
             log=[],
-            outputs={"frames": [str(f1), str(f2)]},
+            outputs={"frames": seq_path},
         )
 
-        saved1, saved2 = MagicMock(), MagicMock()
-        saved1.location = "http://s/f1.png"
-        saved2.location = "http://s/f2.png"
-        # seq_dest: used by process() to resolve the sequence directory
+        fake_sequence = GtSequence(
+            entries=[],
+            first=1001,
+            last=1002,
+            discovered_first=1001,
+            discovered_last=1002,
+            padding=4,
+            pattern="frame_####.png",
+            directory=str(tmp_path),
+            policy=MissingItemPolicy.SPLIT,
+            present_numbers={1001, 1002},
+        )
+        scan_success = MagicMock(spec=ScanSequencesResultSuccess)
+        scan_success.sequences = [fake_sequence]
+
         seq_dest = MagicMock()
-        seq_dest.resolve.return_value = "/fake/temp/frames_frame.png"
-        dest1, dest2 = MagicMock(), MagicMock()
-        dest1.write_bytes.return_value = saved1
-        dest2.write_bytes.return_value = saved2
+        seq_dest.resolve.return_value = seq_path
         mock_dest_cls = MagicMock()
-        mock_dest_cls.from_situation.side_effect = [seq_dest, dest1, dest2]
-        mock_file = MagicMock()
-        mock_file.read_bytes.return_value = b"\x89PNG"
+        mock_dest_cls.from_situation.return_value = seq_dest
 
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
-            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
             patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.os.makedirs"),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
-            # final_file_path for the .empty sentinel — seq_dir is derived from its parent
-            write_result = MagicMock(spec=WriteFileResultSuccess)
-            write_result.final_file_path = "/fake/temp/.empty"
-            MockGT.handle_request.return_value = write_result
+            MockGT.handle_request.return_value = scan_success
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-seq"
             instance.result.return_value = fake_result
 
             node.process()
 
-        from griptape.artifacts import ListArtifact
-
         output_val = node.parameter_output_values.__setitem__.call_args[0][1]
-        assert isinstance(output_val, ListArtifact)
-        assert len(output_val.value) == 2
+        assert isinstance(output_val, GtSequence)
+        assert output_val.pattern == "frame_####.png"
 
     def test_applies_zero_float_knob_override(self, tmp_path: Path) -> None:
         from execution.provider import JobResult, JobStatus

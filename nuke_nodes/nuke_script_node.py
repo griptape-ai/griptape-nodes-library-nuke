@@ -20,7 +20,11 @@ from griptape_nodes.exe_types.param_types.parameter_button import ParameterButto
 from griptape_nodes.exe_types.param_types.parameter_string import ParameterString
 from griptape_nodes.files.file import File
 from griptape_nodes.files.project_file import ProjectFileDestination
-from griptape_nodes.retained_mode.events.os_events import DeleteFileRequest, WriteFileRequest, WriteFileResultSuccess
+from griptape_nodes.retained_mode.events.os_events import (
+    DeleteFileRequest,
+    WriteFileRequest,
+    WriteFileResultSuccess,
+)
 from griptape_nodes.retained_mode.events.project_events import GetPathForMacroRequest, GetPathForMacroResultSuccess
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.button import Button, ButtonDetailsMessagePayload
@@ -40,8 +44,6 @@ from script_parser.sidecar import read_knob_schema, read_sidecar
 _RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "runner.py"))
 _BAKE_RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "baker.py"))
 
-# Temp file suffix per gt_type — used when creating output placeholders before Nuke runs.
-# ImageSequenceArtifact is handled separately (mkdtemp + pattern path) and not listed here.
 _TEMP_SUFFIX: dict[str, str] = {
     "ThreeDUrlArtifact": ".obj",
     "GLTFUrlArtifact": ".glb",
@@ -49,8 +51,8 @@ _TEMP_SUFFIX: dict[str, str] = {
 }
 
 
-def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
-    """Convert a runner output file path (or list of paths) to the appropriate Griptape artifact."""
+def _path_to_artifact(gt_type: str, path: str) -> Any:
+    """Convert a runner output file path to the appropriate Griptape artifact."""
     if gt_type in {"ThreeDUrlArtifact", "GLTFUrlArtifact"}:
         if not isinstance(path, str):
             raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
@@ -92,22 +94,6 @@ def _path_to_artifact(gt_type: str, path: str | list[str]) -> Any:
             return VideoUrlArtifact(value=saved.location)
         except ImportError:
             return saved.location
-    if gt_type == "ImageSequenceArtifact":
-        if not isinstance(path, list):
-            raise TypeError(f"Expected list[str] for ImageSequenceArtifact, got {type(path).__name__!r}: {path!r}")
-        try:
-            from griptape.artifacts import ImageUrlArtifact, ListArtifact  # noqa: PLC0415
-
-            items = []
-            for fp in path:
-                frame_suffix = pathlib.Path(fp).suffix or ".png"
-                frame_saved = ProjectFileDestination.from_situation(
-                    filename=f"frame{frame_suffix}", situation="save_node_output"
-                ).write_bytes(File(fp).read_bytes())
-                items.append(ImageUrlArtifact(value=frame_saved.location))
-            return ListArtifact(items)
-        except ImportError:
-            return path
     if not isinstance(path, str):
         raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
     file_bytes = File(path).read_bytes()
@@ -475,7 +461,14 @@ class NukeScriptNode(SuccessFailureNode):
             param = Parameter(
                 name=ann.gt_name,
                 type=ann.gt_type or "str",
-                input_types=["str", "ImageArtifact", "ImageUrlArtifact", "BlobArtifact", "VideoUrlArtifact"],
+                input_types=[
+                    "str",
+                    "ImageArtifact",
+                    "ImageUrlArtifact",
+                    "BlobArtifact",
+                    "VideoUrlArtifact",
+                    "Sequence",
+                ],
                 default_value="",
                 display_name=ann.gt_label or ann.gt_name,
                 tooltip=f"Input path for Nuke node {ann.node_name!r}",
@@ -524,8 +517,9 @@ class NukeScriptNode(SuccessFailureNode):
             elif ann.gt_type == "ImageSequenceArtifact":
                 param = Parameter(
                     name=ann.gt_name,
-                    type="list",
-                    default_value="",
+                    type="Sequence",
+                    output_type="Sequence",
+                    default_value=None,
                     display_name=ann.gt_label or ann.gt_name,
                     tooltip=f"Image sequence output from Nuke node {ann.node_name!r}",
                     allow_input=False,
@@ -621,6 +615,13 @@ class NukeScriptNode(SuccessFailureNode):
         situation: str = "save_temp_file",
     ) -> str:
         """Resolve a parameter value to a local file path Nuke can read."""
+        try:
+            from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415
+
+            if isinstance(value, GtSequence):
+                return (value.directory + "/" + value.pattern).replace("\\", "/")
+        except ImportError:
+            pass
         if isinstance(value, str):
             return value
         try:
@@ -816,7 +817,6 @@ class NukeScriptNode(SuccessFailureNode):
         outputs: dict[str, ManifestOutput] = {}
         input_tmp_paths: list[str] = []
         output_tmp_paths: list[str] = []
-        output_tmp_dirs: list[str] = []
         _run_id = uuid.uuid4().hex[:8]
 
         try:
@@ -831,18 +831,9 @@ class NukeScriptNode(SuccessFailureNode):
                         node=ann.node_name,
                     )
                 elif ann.gt_type == "ImageSequenceArtifact":
-                    seq_dest = ProjectFileDestination.from_situation(
-                        f"{self.name}_{_run_id}_{ann.gt_name}_frame.png", "save_temp_file"
-                    )
-                    # Nuke requires the output directory to exist before it starts writing
-                    # frames. WriteFileRequest has no mkdir equivalent, so we force creation
-                    # by writing a sentinel .empty file. seq_dir is derived from final_file_path
-                    # (not resolve()) in case the framework renamed the directory under
-                    # CREATE_NEW collision policy.
-                    _empty_path = self._write_scratch_file(str(pathlib.Path(seq_dest.resolve()).parent / ".empty"), b"")
-                    seq_dir = str(pathlib.Path(_empty_path).parent)
-                    seq_path = f"{seq_dir}/{ann.gt_name}_frame.%04d.png".replace("\\", "/")
-                    output_tmp_dirs.append(seq_dir)
+                    seq_dest = ProjectFileDestination.from_situation("frame_####.png", "save_node_output")
+                    seq_path = str(seq_dest.resolve()).replace("\\", "/")
+                    os.makedirs(os.path.dirname(seq_path), exist_ok=True)
                     outputs[ann.gt_name] = ManifestOutput(
                         path=seq_path,
                         node=ann.node_name,
@@ -897,11 +888,26 @@ class NukeScriptNode(SuccessFailureNode):
                 if gt_name not in outputs:
                     logging.getLogger(__name__).warning("Nuke runner returned unknown output key %r; skipping", gt_name)
                     continue
-                self.parameter_output_values[gt_name] = _path_to_artifact(outputs[gt_name].type, path)
+                ann_type = outputs[gt_name].type
+                if ann_type == "ImageSequenceArtifact":
+                    from griptape_nodes.retained_mode.events.os_events import ScanSequencesRequest  # type: ignore  # noqa: PLC0415, I001
+                    from griptape_nodes.retained_mode.events.os_events import ScanSequencesResultSuccess  # type: ignore  # noqa: PLC0415, I001
+
+                    scan_result = GriptapeNodes.handle_request(
+                        ScanSequencesRequest(
+                            path=path,
+                            start_number=frame_start,
+                            end_number=frame_end,
+                        )
+                    )
+                    if isinstance(scan_result, ScanSequencesResultSuccess) and scan_result.sequences:  # pyright: ignore[reportAttributeAccessIssue]
+                        self.parameter_output_values[gt_name] = scan_result.sequences[0]  # pyright: ignore[reportAttributeAccessIssue]
+                    else:
+                        raise RuntimeError(f"No frames found for sequence at {path!r}")
+                else:
+                    self.parameter_output_values[gt_name] = _path_to_artifact(ann_type, path)
 
             self._set_status_results(was_successful=True, result_details="Render complete.")
         finally:
             for p in input_tmp_paths + output_tmp_paths:
                 GriptapeNodes.handle_request(DeleteFileRequest(path=p, workspace_only=False))
-            for d in output_tmp_dirs:
-                GriptapeNodes.handle_request(DeleteFileRequest(path=d, workspace_only=False))

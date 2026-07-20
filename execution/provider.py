@@ -17,5 +17,5 @@ class JobResult:
     handle: str
     status: JobStatus
     return_code: int
-    outputs: dict[str, str | list[str]] = field(default_factory=dict)
+    outputs: dict[str, str] = field(default_factory=dict)
     log: list[str] = field(default_factory=list)
