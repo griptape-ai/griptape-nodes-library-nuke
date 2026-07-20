@@ -6,7 +6,7 @@ authors = [{ name = "Dan Hutchinson", email = "dan.hutchinson@foundry.com" }]
 readme = "README.md"
 requires-python = "~=3.12.0"
 dependencies = [
-    "griptape-nodes>=0.81.0",
+    "griptape-nodes>=0.93.0",
 ]
 
 [build-system]

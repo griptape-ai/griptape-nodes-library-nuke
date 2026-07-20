@@ -69,6 +69,8 @@ class NukeGizmoPublisher:
 
             self._packager.emit_progress(5.0, "Saving workflow...")
             workflow = WorkflowRegistry.get_workflow_by_name(self._workflow_name)
+            if not workflow.file_path:
+                return PublishWorkflowResultFailure(result_details="Workflow has no file path; save it first.")
             save_result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name=Path(workflow.file_path).stem))
             if not isinstance(save_result, SaveWorkflowResultSuccess):
                 return PublishWorkflowResultFailure(result_details="Failed to save workflow before packaging.")

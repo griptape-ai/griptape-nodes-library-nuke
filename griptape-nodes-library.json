@@ -6,16 +6,14 @@
         "author": "Griptape",
         "description": "Library for Nuke nodes",
         "library_version": "0.3.0",
-        "engine_version": "0.81.0",
+        "engine_version": "0.93.0",
         "tags": [
             "Griptape",
             "AI",
             "Nuke"
         ],
         "dependencies": {
-            "pip_dependencies": [
-                "trimesh>=4.12.2"
-            ]
+            "pip_dependencies": []
         }
     },
     "categories": [

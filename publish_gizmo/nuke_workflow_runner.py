@@ -122,8 +122,11 @@ def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dic
     # Absolute path_macros (e.g. from a legacy publish) are kept as-is.
     result = {}
     for dir_def in template.directories.values():
-        value = dir_def.path_macro
-        if value and not Path(value).is_absolute():
+        raw = dir_def.path_macro
+        value: str | None = raw if isinstance(raw, str) else raw.select()
+        if not value:
+            continue
+        if not Path(value).is_absolute():
             value = str(base_dir / value)
         # Normalize to forward slashes: Nuke/TCL treats backslashes as escape
         # characters when saving .nk files, which silently mangles Windows paths.
