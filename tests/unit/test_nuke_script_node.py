@@ -594,6 +594,11 @@ class TestProcess:
         except (ImportError, AttributeError):
             pytest.skip("Sequence API not available in this engine version")
 
+        from griptape_nodes.retained_mode.events.project_events import (
+            GetPathForMacroRequest,
+            GetPathForMacroResultSuccess,
+        )
+
         from execution.provider import JobResult, JobStatus
         from script_parser.annotation import GriptapeAnnotation
 
@@ -606,7 +611,6 @@ class TestProcess:
         ]
         node._expose_knobs = []
 
-        seq_path = str(tmp_path / "frame_####.png")
         node.get_parameter_value = MagicMock(
             side_effect=lambda name: {
                 "script_path": str(nk_file),
@@ -615,6 +619,10 @@ class TestProcess:
                 "frame_end": 1002,
             }.get(name)
         )
+
+        macro_success = MagicMock(spec=GetPathForMacroResultSuccess)
+        macro_success.absolute_path = tmp_path / "NukeScriptNode1" / "frames" / "frame_####.png"
+        seq_path = str(macro_success.absolute_path).replace("\\", "/")
 
         fake_result = JobResult(
             handle="handle-seq",
@@ -639,19 +647,18 @@ class TestProcess:
         scan_success = MagicMock(spec=ScanSequencesResultSuccess)
         scan_success.sequences = [fake_sequence]
 
-        seq_dest = MagicMock()
-        seq_dest.resolve.return_value = seq_path
-        mock_dest_cls = MagicMock()
-        mock_dest_cls.from_situation.return_value = seq_dest
+        def _handle_request(req: object) -> object:
+            if isinstance(req, GetPathForMacroRequest):
+                return macro_success
+            return scan_success
 
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
-            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
             patch("nuke_nodes.nuke_script_node.os.makedirs"),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
-            MockGT.handle_request.return_value = scan_success
+            MockGT.handle_request.side_effect = _handle_request
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-seq"
             instance.result.return_value = fake_result

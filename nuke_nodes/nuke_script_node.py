@@ -831,8 +831,15 @@ class NukeScriptNode(SuccessFailureNode):
                         node=ann.node_name,
                     )
                 elif ann.gt_type == "ImageSequenceArtifact":
-                    seq_dest = ProjectFileDestination.from_situation("frame_####.png", "save_node_output")
-                    seq_path = str(seq_dest.resolve()).replace("\\", "/")
+                    macro_result = GriptapeNodes.handle_request(
+                        GetPathForMacroRequest(
+                            parsed_macro=ParsedMacro("{outputs}/nuke/{node_name}/{param_name}/frame_####.png"),
+                            variables={"node_name": self.name, "param_name": ann.gt_name},
+                        )
+                    )
+                    if not isinstance(macro_result, GetPathForMacroResultSuccess):
+                        raise RuntimeError(f"Could not resolve output path for sequence {ann.gt_name!r}")
+                    seq_path = str(macro_result.absolute_path).replace("\\", "/")
                     os.makedirs(os.path.dirname(seq_path), exist_ok=True)
                     outputs[ann.gt_name] = ManifestOutput(
                         path=seq_path,
