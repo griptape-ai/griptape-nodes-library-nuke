@@ -187,7 +187,7 @@ if _p.show():
 
 def _build_copy_link_button_code(knob_name: str) -> str:
     """Return Python for a per-output Copy Link button: puts [value <node>.<knob>] on the clipboard."""
-    return f'''\
+    return f"""\
 _n = nuke.thisNode()
 _expr = "[value " + _n.fullName() + ".{knob_name}]"
 try:
@@ -196,7 +196,7 @@ except ImportError:
     from PySide2.QtGui import QGuiApplication
 QGuiApplication.clipboard().setText(_expr)
 nuke.tprint("[Griptape] Copied to clipboard: " + _expr)
-'''
+"""
 
 
 class NukeGizmoBuilder:
