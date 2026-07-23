@@ -329,7 +329,7 @@ class TestRefreshDynamicPorts:
         nk_file = tmp_path / "seq.nk"
         nk_file.write_text("")
         (tmp_path / "seq.gt.json").write_text("{}")
-        ann = GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="ImageSequenceArtifact")
+        ann = GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="Sequence")
 
         node = _make_node()
         with patch("nuke_nodes.nuke_script_node.read_sidecar", return_value=([ann], [], False)):
@@ -607,7 +607,7 @@ class TestProcess:
 
         node = _make_node()
         node._annotations = [
-            GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="ImageSequenceArtifact")
+            GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="Sequence")
         ]
         node._expose_knobs = []
 

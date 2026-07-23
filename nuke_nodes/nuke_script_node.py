@@ -514,7 +514,7 @@ class NukeScriptNode(SuccessFailureNode):
                         user_defined=True,
                         parent_element_name="Outputs",
                     )
-            elif ann.gt_type == "ImageSequenceArtifact":
+            elif ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
                 param = Parameter(
                     name=ann.gt_name,
                     type="Sequence",
@@ -830,7 +830,7 @@ class NukeScriptNode(SuccessFailureNode):
                         ),
                         node=ann.node_name,
                     )
-                elif ann.gt_type == "ImageSequenceArtifact":
+                elif ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
                     macro_result = GriptapeNodes.handle_request(
                         GetPathForMacroRequest(
                             parsed_macro=ParsedMacro("{outputs}/nuke/{node_name}/{param_name}/frame_####.png"),
@@ -844,7 +844,7 @@ class NukeScriptNode(SuccessFailureNode):
                     outputs[ann.gt_name] = ManifestOutput(
                         path=seq_path,
                         node=ann.node_name,
-                        type="ImageSequenceArtifact",
+                        type="Sequence",
                     )
                 else:
                     suffix = _TEMP_SUFFIX.get(ann.gt_type or "", ".png")
@@ -896,7 +896,7 @@ class NukeScriptNode(SuccessFailureNode):
                     logging.getLogger(__name__).warning("Nuke runner returned unknown output key %r; skipping", gt_name)
                     continue
                 ann_type = outputs[gt_name].type
-                if ann_type == "ImageSequenceArtifact":
+                if ann_type == "Sequence":
                     from griptape_nodes.retained_mode.events.os_events import ScanSequencesRequest  # type: ignore  # noqa: PLC0415, I001
                     from griptape_nodes.retained_mode.events.os_events import ScanSequencesResultSuccess  # type: ignore  # noqa: PLC0415, I001
 

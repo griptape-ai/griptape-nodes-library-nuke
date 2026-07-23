@@ -50,10 +50,10 @@ class TestExecuteTypes:
 
         assert "VideoUrlArtifact" in _EXECUTE_TYPES
 
-    def test_contains_image_sequence_artifact(self) -> None:
+    def test_contains_sequence(self) -> None:
         from nuke_runner.runner import _EXECUTE_TYPES
 
-        assert "ImageSequenceArtifact" in _EXECUTE_TYPES
+        assert "Sequence" in _EXECUTE_TYPES
 
     def test_contains_image_artifact(self) -> None:
         from nuke_runner.runner import _EXECUTE_TYPES
@@ -97,14 +97,14 @@ class TestNonExecutableArtifactSkipped:
         _nuke.execute.assert_not_called()
 
 
-class TestImageSequenceArtifactOutput:
+class TestSequenceOutput:
     def test_writes_pattern_path_for_sequence(self, tmp_path: Path) -> None:
         seq_dir = tmp_path / "seq"
         seq_dir.mkdir()
         pattern = str(seq_dir / "frame_####.png")
 
         manifest = _base_manifest(
-            outputs={"frames": {"path": pattern, "node": "Write1", "type": "ImageSequenceArtifact"}}
+            outputs={"frames": {"path": pattern, "node": "Write1", "type": "Sequence"}}
         )
 
         _nuke.scriptOpen = MagicMock()

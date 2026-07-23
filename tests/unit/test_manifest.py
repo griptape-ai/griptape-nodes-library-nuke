@@ -104,11 +104,11 @@ def test_bake_output_path_defaults_empty() -> None:
 def test_manifest_output_sequence_pattern_path_round_trips() -> None:
     m = JobManifest(
         script="/tmp/test.nk",
-        outputs={"frames": ManifestOutput(path="/out/frame_####.png", node="Write1", type="ImageSequenceArtifact")},
+        outputs={"frames": ManifestOutput(path="/out/frame_####.png", node="Write1", type="Sequence")},
     )
     restored = JobManifest.from_json(m.to_json())
     assert restored.outputs["frames"].path == "/out/frame_####.png"
-    assert restored.outputs["frames"].type == "ImageSequenceArtifact"
+    assert restored.outputs["frames"].type == "Sequence"
 
 
 def test_manifest_output_str_path_normalisation_unchanged() -> None:

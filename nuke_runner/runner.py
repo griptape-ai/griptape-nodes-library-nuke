@@ -18,7 +18,7 @@ import nuke  # type: ignore[import-not-found]
 # Artifact types whose output is written by a Nuke execute call on a file-knob node.
 _EXECUTE_TYPES = {
     "ImageArtifact",
-    "ImageSequenceArtifact",
+    "Sequence",
     "ImageUrlArtifact",
     "VideoArtifact",
     "VideoUrlArtifact",
