@@ -225,4 +225,117 @@ class TestReadNodeExpressionLink:
             }
         )
         assert "GEN_READ" not in gizmo
-        assert r"\[value" not in gizmo
+        assert r'file "\[value' not in gizmo
+
+
+class TestTclExpressionDefaultsEscaped:
+    """Defaults containing TCL brackets must be escaped so they survive gizmo parse as literal text."""
+
+    def test_str_default_with_expression_is_escaped(self) -> None:
+        gizmo = _generate_gizmo({"prompt": {"type": "str", "default_value": "[value this.name]"}})
+        assert r' prompt "\[value this.name]"' in gizmo
+        assert ' prompt "[value this.name]"' not in gizmo
+
+    def test_str_default_with_quote_is_escaped(self) -> None:
+        gizmo = _generate_gizmo({"prompt": {"type": "str", "default_value": 'say "hi"'}})
+        assert r' prompt "say \"hi\""' in gizmo
+
+    def test_file_default_with_expression_is_escaped(self) -> None:
+        gizmo = _generate_gizmo({"image": {"type": "ImageUrlArtifact", "default_value": "[frame].jpg"}})
+        assert r' image "\[frame].jpg"' in gizmo
+
+    def test_plain_default_unchanged(self) -> None:
+        gizmo = _generate_gizmo({"prompt": {"type": "str", "default_value": "hello world"}})
+        assert ' prompt "hello world"' in gizmo
+
+
+class TestTclHintTooltips:
+    """String-family input knobs and output knobs must carry TCL-expression tooltips."""
+
+    def test_str_input_knob_has_expression_tooltip(self) -> None:
+        gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 folder_path" in line)
+        assert ' t "' in knob_line
+        assert r"\[value this.name]" in knob_line
+
+    def test_tooltips_never_contain_unescaped_brackets(self) -> None:
+        gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
+        for line in gizmo.splitlines():
+            # PyScript button lines carry raw Python in T "..." where brackets are
+            # brace-quoted and safe; only value-knob tooltips need escaping.
+            if ' t "' in line and "addUserKnob {22" not in line:
+                assert "[value" not in line.replace(r"\[value", "")
+                assert "[file" not in line.replace(r"\[file", "")
+                assert "[frame" not in line.replace(r"\[frame", "")
+
+    def test_output_dir_knob_has_expression_tooltip(self) -> None:
+        gizmo = _generate_gizmo({})
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 output_dir" in line)
+        assert ' t "' in knob_line
+        assert r"\[file dirname" in knob_line
+
+    def test_output_knob_has_reference_tooltip(self) -> None:
+        gizmo = _generate_gizmo_with_output(
+            {"caption": {"type": "str", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}
+        )
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 caption_out" in line)
+        assert "+DISABLED" in knob_line
+        assert ' t "' in knob_line
+        assert r"\[value" in knob_line
+        assert "caption_out" in knob_line
+
+    def test_numeric_knobs_have_no_tooltip(self) -> None:
+        gizmo = _generate_gizmo({"count": {"type": "int", "default_value": 1}})
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {3 count" in line)
+        assert ' t "' not in knob_line
+
+
+class TestExpressionLinkButtons:
+    """String-family knobs get same-line Link/Copy Link PyScript buttons; other types do not."""
+
+    def test_str_input_gets_link_button(self) -> None:
+        gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
+        button_line = next(line for line in gizmo.splitlines() if "addUserKnob {22 _link_folder_path" in line)
+        assert 'l "Link..."' in button_line
+        assert "-STARTLINE" in button_line
+        assert "value this.name" in button_line
+        assert "setValue" in button_line
+
+    def test_link_button_immediately_follows_its_knob(self) -> None:
+        gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
+        lines = gizmo.splitlines()
+        knob_idx = next(i for i, line in enumerate(lines) if "addUserKnob {1 folder_path" in line)
+        button_idx = next(i for i, line in enumerate(lines) if "addUserKnob {22 _link_folder_path" in line)
+        assert button_idx == knob_idx + 1
+
+    def test_int_input_gets_no_link_button(self) -> None:
+        gizmo = _generate_gizmo({"count": {"type": "int", "default_value": 1}})
+        assert "_link_count" not in gizmo
+
+    def test_dropdown_input_gets_no_link_button(self) -> None:
+        gizmo = _generate_gizmo(
+            {"mode": {"type": "str", "default_value": "a", "ui_options": {"simple_dropdown": ["a", "b"]}}}
+        )
+        assert "_link_mode" not in gizmo
+
+    def test_output_dir_gets_link_button(self) -> None:
+        gizmo = _generate_gizmo({})
+        assert "addUserKnob {22 _link_output_dir" in gizmo
+
+    def test_output_knob_gets_copy_link_button(self) -> None:
+        gizmo = _generate_gizmo_with_output(
+            {"caption": {"type": "str", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}
+        )
+        button_line = next(line for line in gizmo.splitlines() if "addUserKnob {22 _copy_caption_out" in line)
+        assert 'l "Copy Link"' in button_line
+        assert "-STARTLINE" in button_line
+        assert "fullName()" in button_line
+        assert "clipboard" in button_line
+
+    def test_multiline_input_gets_link_button(self) -> None:
+        gizmo = _generate_gizmo({"config": {"type": "JsonArtifact", "default_value": ""}})
+        assert "addUserKnob {22 _link_config" in gizmo
+
+    def test_file_input_gets_link_button(self) -> None:
+        gizmo = _generate_gizmo({"image": {"type": "ImageUrlArtifact", "default_value": ""}})
+        assert "addUserKnob {22 _link_image" in gizmo

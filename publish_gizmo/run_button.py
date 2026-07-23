@@ -64,6 +64,23 @@ def _build_child_env(companion: str, base_env: dict) -> dict:
     return {**base_env, "XDG_CONFIG_HOME": companion + "/.gtn_config"}
 
 
+def _expand_tcl(n, knob_name: str, raw):
+    """Expand TCL bracket expressions in a string knob value, falling back to the raw text.
+
+    Plain String_Knobs never evaluate [bracket] expressions themselves, so we ask
+    TCL's ``value`` command to read the knob — it evaluates in the knob's own node
+    context, making ``this`` resolve to the gizmo instance. Values that aren't
+    valid TCL (e.g. JSON arrays) raise and fall back to the raw text.
+    """
+    if not isinstance(raw, str) or "[" not in raw:
+        return raw
+    try:
+        expanded = nuke.tcl("value", n.fullName() + "." + knob_name)  # noqa: F821
+    except Exception:  # noqa: BLE001
+        return raw
+    return expanded if expanded else raw
+
+
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).
 try:
     from PySide6.QtCore import Qt
@@ -302,7 +319,7 @@ _nk_script_dir = nuke.script_directory()  # noqa: F821
 if _nk_script_dir:
     _nk_script_dir = _nk_script_dir.replace("\\", "/")
 
-output_dir = node["output_dir"].value()
+output_dir = _expand_tcl(node, "output_dir", node["output_dir"].value())
 if output_dir:
     output_dir = output_dir.replace("\\", "/")
 
@@ -316,7 +333,7 @@ else:
     inputs: dict = {}
     for _k in _param_names:
         if node.knob(_k):
-            inputs[_k] = node[_k].value()
+            inputs[_k] = _expand_tcl(node, _k, node[_k].value())
             print(f"[Griptape] knob '{_k}' -> type={type(inputs[_k]).__name__!r} value={inputs[_k]!r}")
         else:
             print(f"[Griptape] knob '{_k}' -> NOT FOUND on node")

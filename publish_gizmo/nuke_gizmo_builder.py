@@ -72,6 +72,31 @@ _INPUT_NODE_PREFIX = "Input"
 _OUTPUT_NODE_PREFIX = "Output"
 _TEMP_FILE_PREFIX = "gt_input"
 
+# Tooltips advertising Nuke TCL expression support (string knobs have no
+# right-click "Add expression" menu, so hover hints are the discovery path)
+_TCL_HINT_TOOLTIP = (
+    "Supports Nuke TCL expressions in [brackets], e.g. [value this.name] or [frame]. "
+    "Expressions are evaluated when the workflow runs."
+)
+_OUTPUT_DIR_TOOLTIP = (
+    "Directory for workflow outputs. Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
+)
+_LINK_BUTTON_TOOLTIP = (
+    "Set this field to a live expression: gizmo name, script folder, script name, frame, or any node.knob."
+)
+_COPY_LINK_TOOLTIP = (
+    "Copy a [value ...] expression for this output to the clipboard. "
+    "Paste it into any text field (e.g. a Text node's message) to link it."
+)
+
+
+def _output_tooltip(knob_name: str) -> str:
+    """Tooltip telling users how to reference this output from other nodes."""
+    return (
+        f"Workflow output. Reference it from any other node with a TCL expression, "
+        f"e.g. [value <this node's name>.{knob_name}]."
+    )
+
 
 def _read_node_name(param_name: str) -> str:
     """Return the internal Read node name for a given media output parameter."""
@@ -134,6 +159,46 @@ if nuke.thisKnob().name() == "active_output":
 """
 
 
+def _build_link_button_code(knob_name: str) -> str:
+    """Return Python for a per-input Link button: preset chooser that writes a TCL expression into the knob."""
+    return f'''\
+_n = nuke.thisNode()
+_p = nuke.Panel("Link {knob_name}")
+_p.addEnumerationPulldown("Link to", "{{This gizmo's name}} {{Nuke script folder}} {{Nuke script name}} {{Current frame}} {{Custom node.knob}}")
+if _p.show():
+    _c = _p.value("Link to")
+    _expr = None
+    if _c == "This gizmo's name":
+        _expr = "[value this.name]"
+    elif _c == "Nuke script folder":
+        _expr = "[file dirname [value root.name]]"
+    elif _c == "Nuke script name":
+        _expr = "[file rootname [file tail [value root.name]]]"
+    elif _c == "Current frame":
+        _expr = "[frame]"
+    else:
+        _t = nuke.getInput("Node.knob to link to (e.g. Text1.message)", "")
+        if _t:
+            _expr = "[value " + _t + "]"
+    if _expr:
+        _n["{knob_name}"].setValue(_expr)
+'''
+
+
+def _build_copy_link_button_code(knob_name: str) -> str:
+    """Return Python for a per-output Copy Link button: puts [value <node>.<knob>] on the clipboard."""
+    return f'''\
+_n = nuke.thisNode()
+_expr = "[value " + _n.fullName() + ".{knob_name}]"
+try:
+    from PySide6.QtGui import QGuiApplication
+except ImportError:
+    from PySide2.QtGui import QGuiApplication
+QGuiApplication.clipboard().setText(_expr)
+nuke.tprint("[Griptape] Copied to clipboard: " + _expr)
+'''
+
+
 class NukeGizmoBuilder:
     """Generates a Nuke .gizmo text file from a Griptape workflow shape.
 
@@ -174,7 +239,14 @@ class NukeGizmoBuilder:
 
         # --- Run tab (leftmost) ---
         w.add_tab("run_tab", label="Run")
-        w.add_string_knob("output_dir", label="Output Directory")
+        w.add_string_knob("output_dir", label="Output Directory", tooltip=_OUTPUT_DIR_TOOLTIP)
+        w.add_pyscript_knob(
+            "_link_output_dir",
+            label="Link...",
+            python_code=_build_link_button_code("output_dir"),
+            flags="-STARTLINE",
+            tooltip=_LINK_BUTTON_TOOLTIP,
+        )
         run_code = self._build_run_button_bootstrap(
             input_params,
             list(output_params.keys()),
@@ -308,7 +380,8 @@ class NukeGizmoBuilder:
             default_index = choices.index(default) if default and default in choices else None
             w.add_enumeration_knob(knob_name, label, choices, default_index=default_index)
         elif param_type in _FILE_PATH_TYPES:
-            w.add_file_knob(knob_name, label, default=default or None)
+            w.add_file_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            self._write_link_button(w, knob_name)
         elif param_type == "bool":
             w.add_bool_knob(knob_name, label, default=default if type(default) is bool else None)
         elif param_type == "float":
@@ -316,9 +389,22 @@ class NukeGizmoBuilder:
         elif param_type == "int":
             w.add_int_knob(knob_name, label, default=default if type(default) is int else None)
         elif param_type in _MULTILINE_TYPES:
-            w.add_multiline_string_knob(knob_name, label, default=default or None)
+            w.add_multiline_string_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            self._write_link_button(w, knob_name)
         else:
-            w.add_string_knob(knob_name, label, default=default or None)
+            w.add_string_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            self._write_link_button(w, knob_name)
+
+    @staticmethod
+    def _write_link_button(w: GizmoWriter, knob_name: str) -> None:
+        """Write a same-line Link button that fills the knob with a preset TCL expression."""
+        w.add_pyscript_knob(
+            f"_link_{knob_name}",
+            label="Link...",
+            python_code=_build_link_button_code(knob_name),
+            flags="-STARTLINE",
+            tooltip=_LINK_BUTTON_TOOLTIP,
+        )
 
     def _write_output_knob(self, w: GizmoWriter, name: str, info: dict) -> None:
         """Write a read-only knob for a workflow output parameter."""
@@ -327,11 +413,18 @@ class NukeGizmoBuilder:
         param_type = info.get("type", "str")
 
         if param_type in _FILE_PATH_TYPES:
-            w.add_file_knob(knob_name, label, flags="+DISABLED")
+            w.add_file_knob(knob_name, label, flags="+DISABLED", tooltip=_output_tooltip(knob_name))
         elif param_type in _MULTILINE_TYPES:
-            w.add_multiline_string_knob(knob_name, label, flags="+DISABLED")
+            w.add_multiline_string_knob(knob_name, label, flags="+DISABLED", tooltip=_output_tooltip(knob_name))
         else:
-            w.add_string_knob(knob_name, label, flags="+DISABLED")
+            w.add_string_knob(knob_name, label, flags="+DISABLED", tooltip=_output_tooltip(knob_name))
+        w.add_pyscript_knob(
+            f"_copy_{knob_name}",
+            label="Copy Link",
+            python_code=_build_copy_link_button_code(knob_name),
+            flags="-STARTLINE",
+            tooltip=_COPY_LINK_TOOLTIP,
+        )
 
     def _build_run_button_bootstrap(
         self,
