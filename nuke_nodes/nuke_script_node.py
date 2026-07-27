@@ -56,22 +56,15 @@ def _path_to_artifact(gt_type: str, path: str) -> Any:
     if gt_type in {"ThreeDUrlArtifact", "GLTFUrlArtifact"}:
         if not isinstance(path, str):
             raise TypeError(f"Expected str path for {gt_type!r}, got {type(path).__name__!r}: {path!r}")
-        suffix = pathlib.Path(path).suffix.lower() or ".obj"
-        if suffix in {".glb", ".gltf"}:
-            file_bytes = File(path).read_bytes()
-            serve_suffix = suffix
-        else:
-            try:
-                import trimesh  # pyright: ignore[reportMissingImports]  # noqa: PLC0415
-
-                scene = trimesh.load(path)
-                file_bytes = scene.export(file_type="glb")  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue]
-                serve_suffix = ".glb"
-            except Exception:
-                file_bytes = File(path).read_bytes()
-                serve_suffix = suffix
+        suffix = pathlib.Path(path).suffix.lower() or ".glb"
+        if suffix not in {".glb", ".gltf"}:
+            raise ValueError(
+                f"3D output {gt_type!r} requires a .glb or .gltf file; got {suffix!r}. "
+                "Configure Nuke's Write node to export GLB directly."
+            )
+        file_bytes = File(path).read_bytes()
         saved = ProjectFileDestination.from_situation(
-            filename=f"model{serve_suffix}", situation="save_node_output"
+            filename=f"model{suffix}", situation="save_node_output"
         ).write_bytes(file_bytes)
         try:
             from griptape_nodes_library.three_d.three_d_artifact import (  # pyright: ignore[reportMissingImports]
@@ -514,6 +507,7 @@ class NukeScriptNode(SuccessFailureNode):
                         user_defined=True,
                         parent_element_name="Outputs",
                     )
+            # ImageSequenceArtifact: backward-compat for sidecars annotated before engine 0.93
             elif ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
                 param = Parameter(
                     name=ann.gt_name,
@@ -830,6 +824,7 @@ class NukeScriptNode(SuccessFailureNode):
                         ),
                         node=ann.node_name,
                     )
+                # ImageSequenceArtifact: backward-compat for sidecars annotated before engine 0.93
                 elif ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
                     macro_result = GriptapeNodes.handle_request(
                         GetPathForMacroRequest(
@@ -840,7 +835,9 @@ class NukeScriptNode(SuccessFailureNode):
                     if not isinstance(macro_result, GetPathForMacroResultSuccess):
                         raise RuntimeError(f"Could not resolve output path for sequence {ann.gt_name!r}")
                     seq_path = str(macro_result.absolute_path).replace("\\", "/")
-                    os.makedirs(os.path.dirname(seq_path), exist_ok=True)
+                    from griptape_nodes.retained_mode.events.os_events import MakeDirectoryRequest  # noqa: PLC0415
+
+                    GriptapeNodes.handle_request(MakeDirectoryRequest(path=os.path.dirname(seq_path)))
                     outputs[ann.gt_name] = ManifestOutput(
                         path=seq_path,
                         node=ann.node_name,

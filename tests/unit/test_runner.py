@@ -103,9 +103,7 @@ class TestSequenceOutput:
         seq_dir.mkdir()
         pattern = str(seq_dir / "frame_####.png")
 
-        manifest = _base_manifest(
-            outputs={"frames": {"path": pattern, "node": "Write1", "type": "Sequence"}}
-        )
+        manifest = _base_manifest(outputs={"frames": {"path": pattern, "node": "Write1", "type": "Sequence"}})
 
         _nuke.scriptOpen = MagicMock()
         _nuke.root.return_value = MagicMock()

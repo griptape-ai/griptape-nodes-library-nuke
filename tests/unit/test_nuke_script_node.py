@@ -75,6 +75,45 @@ class TestPathToArtifact:
 
         assert isinstance(result, ImageUrlArtifact)
 
+    def test_three_d_artifact_glb_path_produces_artifact(self, tmp_path: Path) -> None:
+        glb_file = tmp_path / "model.glb"
+        glb_file.write_bytes(b"glTF")
+
+        mock_dest_cls = _mock_project_file_destination("http://static/model.glb")
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"glTF"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+        ):
+            result = _path_to_artifact("ThreeDUrlArtifact", str(glb_file))
+
+        assert result is not None
+
+    def test_three_d_artifact_gltf_path_produces_artifact(self, tmp_path: Path) -> None:
+        gltf_file = tmp_path / "model.gltf"
+        gltf_file.write_bytes(b"{}")
+
+        mock_dest_cls = _mock_project_file_destination("http://static/model.gltf")
+        mock_file = MagicMock()
+        mock_file.read_bytes.return_value = b"{}"
+
+        with (
+            patch("nuke_nodes.nuke_script_node.File", return_value=mock_file),
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+        ):
+            result = _path_to_artifact("GLTFUrlArtifact", str(gltf_file))
+
+        assert result is not None
+
+    def test_three_d_artifact_non_glb_raises_value_error(self, tmp_path: Path) -> None:
+        obj_file = tmp_path / "model.obj"
+        obj_file.write_bytes(b"v 0 0 0")
+
+        with pytest.raises(ValueError, match=r"\.obj"):
+            _path_to_artifact("ThreeDUrlArtifact", str(obj_file))
+
 
 def _mock_artifact_to_path_dest(resolved_path: str = "/fake/temp/input.mp4") -> MagicMock:
     dest = MagicMock()
