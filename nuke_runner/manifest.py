@@ -24,6 +24,11 @@ class ManifestOutput:
     type: str = "ImageArtifact"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.path, str):
+            raise TypeError(
+                f"ManifestOutput.path must be str (schema {SCHEMA_VERSION} removed list support); "
+                f"got {type(self.path).__name__!r}"
+            )
         self.path = self.path.replace("\\", "/")
 
 

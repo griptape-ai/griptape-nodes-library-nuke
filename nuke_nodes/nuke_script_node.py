@@ -23,8 +23,6 @@ from griptape_nodes.files.project_file import ProjectFileDestination
 from griptape_nodes.retained_mode.events.os_events import (
     DeleteFileRequest,
     MakeDirectoryRequest,
-    ScanSequencesRequest,  # type: ignore[attr-defined]
-    ScanSequencesResultSuccess,  # type: ignore[attr-defined]
     WriteFileRequest,
     WriteFileResultSuccess,
 )
@@ -895,6 +893,16 @@ class NukeScriptNode(SuccessFailureNode):
                     continue
                 ann_type = outputs[gt_name].type
                 if ann_type == "Sequence":
+                    try:
+                        from griptape_nodes.retained_mode.events.os_events import (  # type: ignore[attr-defined]  # noqa: PLC0415
+                            ScanSequencesRequest,
+                            ScanSequencesResultSuccess,
+                        )
+                    except ImportError as exc:
+                        raise RuntimeError(
+                            "Sequence output scanning requires griptape-nodes with ScanSequencesRequest support "
+                            "(upgrade to the version that ships this feature)."
+                        ) from exc
                     scan_result = GriptapeNodes.handle_request(
                         ScanSequencesRequest(
                             path=path,

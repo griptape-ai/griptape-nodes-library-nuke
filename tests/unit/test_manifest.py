@@ -82,6 +82,19 @@ def test_manifest_from_json_rejects_wrong_schema_version() -> None:
         JobManifest.from_json(bad_json)
 
 
+def test_manifest_from_json_rejects_v1_0_schema() -> None:
+    """schema 1.0 used list[str] paths; 1.1 reader must reject it cleanly."""
+    old_json = PRD_CANONICAL_JSON.replace(SCHEMA_VERSION, "griptape-nuke-runner/1.0")
+    with pytest.raises(ValueError, match="Unsupported manifest schema"):
+        JobManifest.from_json(old_json)
+
+
+def test_manifest_output_raises_type_error_for_list_path() -> None:
+    """Direct construction with a list raises TypeError, not AttributeError."""
+    with pytest.raises(TypeError, match="must be str"):
+        ManifestOutput(path=["/tmp/f.0001.exr", "/tmp/f.0002.exr"], node="Write1")  # type: ignore[arg-type]
+
+
 def test_manifest_default_output_format_is_png() -> None:
     output = ManifestOutput(path="/tmp/out.png", node="WriteNode")
     assert output.format == "png"
