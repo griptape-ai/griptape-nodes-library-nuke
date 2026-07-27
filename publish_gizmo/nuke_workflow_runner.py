@@ -123,7 +123,7 @@ def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dic
     result = {}
     for dir_def in template.directories.values():
         raw = dir_def.path_macro
-        value: str | None = raw if isinstance(raw, str) else raw.select()
+        value: str | None = raw if isinstance(raw, str) else raw.select() if hasattr(raw, "select") else None
         if not value:
             continue
         if not Path(value).is_absolute():

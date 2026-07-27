@@ -22,6 +22,9 @@ from griptape_nodes.files.file import File
 from griptape_nodes.files.project_file import ProjectFileDestination
 from griptape_nodes.retained_mode.events.os_events import (
     DeleteFileRequest,
+    MakeDirectoryRequest,
+    ScanSequencesRequest,  # type: ignore[attr-defined]
+    ScanSequencesResultSuccess,  # type: ignore[attr-defined]
     WriteFileRequest,
     WriteFileResultSuccess,
 )
@@ -835,8 +838,6 @@ class NukeScriptNode(SuccessFailureNode):
                     if not isinstance(macro_result, GetPathForMacroResultSuccess):
                         raise RuntimeError(f"Could not resolve output path for sequence {ann.gt_name!r}")
                     seq_path = str(macro_result.absolute_path).replace("\\", "/")
-                    from griptape_nodes.retained_mode.events.os_events import MakeDirectoryRequest  # noqa: PLC0415
-
                     GriptapeNodes.handle_request(MakeDirectoryRequest(path=os.path.dirname(seq_path)))
                     outputs[ann.gt_name] = ManifestOutput(
                         path=seq_path,
@@ -894,9 +895,6 @@ class NukeScriptNode(SuccessFailureNode):
                     continue
                 ann_type = outputs[gt_name].type
                 if ann_type == "Sequence":
-                    from griptape_nodes.retained_mode.events.os_events import ScanSequencesRequest  # type: ignore  # noqa: PLC0415, I001
-                    from griptape_nodes.retained_mode.events.os_events import ScanSequencesResultSuccess  # type: ignore  # noqa: PLC0415, I001
-
                     scan_result = GriptapeNodes.handle_request(
                         ScanSequencesRequest(
                             path=path,

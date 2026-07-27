@@ -379,6 +379,23 @@ class TestRefreshDynamicPorts:
         assert created["frames"].type == "Sequence"
         assert created["frames"].output_type == "Sequence"
 
+    def test_image_sequence_artifact_backward_compat_port_is_sequence_type(self, tmp_path: Path) -> None:
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "compat.nk"
+        nk_file.write_text("")
+        (tmp_path / "compat.gt.json").write_text("{}")
+        ann = GriptapeAnnotation(node_name="Write1", role="output", gt_name="frames", gt_type="ImageSequenceArtifact")
+
+        node = _make_node()
+        with patch("nuke_nodes.nuke_script_node.read_sidecar", return_value=([ann], [], False)):
+            node._refresh_dynamic_ports(str(nk_file))
+
+        created = {c.args[0].name: c.args[0] for c in node.add_parameter.call_args_list}
+        assert "frames" in created
+        assert created["frames"].type == "Sequence"
+        assert created["frames"].output_type == "Sequence"
+
     def test_input_port_includes_sequence_in_input_types(self, tmp_path: Path) -> None:
         from script_parser.annotation import GriptapeAnnotation
 
@@ -694,7 +711,6 @@ class TestProcess:
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
-            patch("nuke_nodes.nuke_script_node.os.makedirs"),
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
             MockGT.handle_request.side_effect = _handle_request
@@ -703,6 +719,11 @@ class TestProcess:
             instance.result.return_value = fake_result
 
             node.process()
+
+        from griptape_nodes.retained_mode.events.os_events import MakeDirectoryRequest
+
+        mkdir_calls = [c for c in MockGT.handle_request.call_args_list if isinstance(c.args[0], MakeDirectoryRequest)]
+        assert len(mkdir_calls) == 1
 
         output_val = node.parameter_output_values.__setitem__.call_args[0][1]
         assert isinstance(output_val, GtSequence)
