@@ -20,12 +20,31 @@ class _FakeNuke:
         return self.result
 
 
+class _FakeExprKnob:
+    def __init__(self, text: str, evaluated: str | None = None, error: Exception | None = None) -> None:
+        self._text = text
+        self._evaluated = evaluated
+        self._error = error
+
+    def getText(self) -> str:  # noqa: N802
+        return self._text
+
+    def evaluate(self) -> str | None:
+        if self._error is not None:
+            raise self._error
+        return self._evaluated
+
+
 class _FakeNode:
-    def __init__(self, full_name: str) -> None:
+    def __init__(self, full_name: str, expr_knobs: dict | None = None) -> None:
         self._full_name = full_name
+        self._expr_knobs = expr_knobs or {}
 
     def fullName(self) -> str:  # noqa: N802
         return self._full_name
+
+    def knob(self, name: str):
+        return self._expr_knobs.get(name)
 
 
 def _load_expand_tcl(fake_nuke: _FakeNuke):
@@ -79,3 +98,22 @@ class TestExpandTcl:
         expand = _load_expand_tcl(fake)
         expand(_FakeNode("Group1.wf_v01"), "output_dir", "[file dirname [value root.name]]")
         assert fake.calls == [("value", "Group1.wf_v01.output_dir")]
+
+    def test_stored_link_expression_takes_precedence(self) -> None:
+        fake = _FakeNuke(result="should-not-be-used")
+        expand = _load_expand_tcl(fake)
+        node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("[value this.name]", evaluated="Gizmo1")})
+        assert expand(node, "prompt", "stale display text") == "Gizmo1"
+        assert fake.calls == []
+
+    def test_empty_stored_expression_falls_through_to_raw(self) -> None:
+        fake = _FakeNuke()
+        expand = _load_expand_tcl(fake)
+        node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("")})
+        assert expand(node, "prompt", "typed text") == "typed text"
+
+    def test_failing_stored_expression_falls_through(self) -> None:
+        fake = _FakeNuke()
+        expand = _load_expand_tcl(fake)
+        node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("[bad", error=RuntimeError("bad expression"))})
+        assert expand(node, "prompt", "typed text") == "typed text"

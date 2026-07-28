@@ -300,6 +300,49 @@ class TestExpressionLinkButtons:
         assert "-STARTLINE" in button_line
         assert "value this.name" in button_line
         assert "setValue" in button_line
+        assert "evaluate" in button_line
+        # setExpression returns False on string-family knobs (verified in Nuke 17);
+        # the input link button must not attempt it.
+        assert "setExpression" not in button_line
+        # The expression is stored in the hidden companion knob, not the visible field.
+        assert "_gt_expr_folder_path" in button_line
+
+    def test_link_button_has_hidden_expression_knob(self) -> None:
+        gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
+        assert 'addUserKnob {1 _gt_expr_folder_path l "" +INVISIBLE}' in gizmo
+
+    def test_knob_changed_refreshes_links_on_rename(self) -> None:
+        gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
+        knob_changed_line = next(line for line in gizmo.splitlines() if line.startswith(" knobChanged"))
+        assert "_gt_expr_" in knob_changed_line
+        assert '\\"name\\"' in knob_changed_line
+
+    def test_knob_changed_handles_active_output_only_with_multiple_media_outputs(self) -> None:
+        single = _generate_gizmo_with_output(
+            {"image": {"type": "ImageUrlArtifact", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}
+        )
+        single_kc = next(line for line in single.splitlines() if line.startswith(" knobChanged"))
+        assert "active_output" not in single_kc
+
+        multi = _generate_gizmo_with_output(
+            {
+                "alpha": {
+                    "type": "ImageUrlArtifact",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                },
+                "beauty": {
+                    "type": "ImageUrlArtifact",
+                    "default_value": "",
+                    "mode_allowed_output": True,
+                    "ui_options": {},
+                },
+            }
+        )
+        multi_kc = next(line for line in multi.splitlines() if line.startswith(" knobChanged"))
+        assert "active_output" in multi_kc
+        assert "SwitchOutput" in multi_kc
 
     def test_link_button_immediately_follows_its_knob(self) -> None:
         gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
@@ -331,6 +374,8 @@ class TestExpressionLinkButtons:
         assert "-STARTLINE" in button_line
         assert "fullName()" in button_line
         assert "clipboard" in button_line
+        assert "selectedNodes" in button_line
+        assert "setExpression" in button_line
 
     def test_multiline_input_gets_link_button(self) -> None:
         gizmo = _generate_gizmo({"config": {"type": "JsonArtifact", "default_value": ""}})

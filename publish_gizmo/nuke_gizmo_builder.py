@@ -82,11 +82,12 @@ _OUTPUT_DIR_TOOLTIP = (
     "Directory for workflow outputs. Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
 )
 _LINK_BUTTON_TOOLTIP = (
-    "Set this field to a live expression: gizmo name, script folder, script name, frame, or any node.knob."
+    "Link this field to the gizmo name, script folder, script name, frame, or any node.knob. "
+    "The field shows the linked value; editing it by hand removes the link."
 )
 _COPY_LINK_TOOLTIP = (
     "Copy a [value ...] expression for this output to the clipboard. "
-    "Paste it into any text field (e.g. a Text node's message) to link it."
+    "Select another node first to expression-link one of its knobs to this output directly."
 )
 
 
@@ -139,23 +140,50 @@ def _label(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _build_active_output_knob_changed() -> str:
+def _build_knob_changed_code(has_multiple_media_outputs: bool) -> str:
     """Return Python code for the gizmo's knobChanged callback.
 
-    When the user changes the ``active_output`` selector, this code updates
-    the internal SwitchOutput node's ``which`` knob so the correct Read node
-    flows to the gizmo's output pipe immediately — no re-run needed.
+    Always handles Link-expression upkeep: on rename, linked fields are
+    re-evaluated so they display the current value; manually editing a linked
+    field clears its stored expression (unlink). When the gizmo has multiple
+    media outputs, also flips the internal SwitchOutput when ``active_output``
+    changes.
     """
-    return """\
-if nuke.thisKnob().name() == "active_output":
-    n = nuke.thisNode()
-    n.begin()
+    active_output_block = """\
+if _gt_kn == "active_output":
+    _gt_n.begin()
     try:
-        switch = nuke.toNode("SwitchOutput")
-        if switch:
-            switch["which"].setValue(int(n["active_output"].getValue()))
+        _gt_switch = nuke.toNode("SwitchOutput")
+        if _gt_switch:
+            _gt_switch["which"].setValue(int(_gt_n["active_output"].getValue()))
     finally:
-        n.end()
+        _gt_n.end()
+el"""
+    prefix = active_output_block if has_multiple_media_outputs else ""
+    return f"""\
+_gt_k = nuke.thisKnob()
+_gt_n = nuke.thisNode()
+_gt_kn = _gt_k.name()
+{prefix}if _gt_kn == "name":
+    for _gt_name in list(_gt_n.knobs()):
+        if _gt_name.startswith("_gt_expr_"):
+            _gt_target = _gt_name[9:]
+            if _gt_n[_gt_name].getText() and _gt_n.knob(_gt_target):
+                try:
+                    _gt_v = _gt_n[_gt_name].evaluate()
+                except Exception:
+                    _gt_v = None
+                if _gt_v:
+                    _gt_n[_gt_target].setValue(_gt_v)
+elif not _gt_kn.startswith("_gt_") and _gt_n.knob("_gt_expr_" + _gt_kn):
+    _gt_ek = _gt_n["_gt_expr_" + _gt_kn]
+    if _gt_ek.getText():
+        try:
+            _gt_cur = _gt_ek.evaluate()
+        except Exception:
+            _gt_cur = None
+        if _gt_k.getText() != _gt_cur:
+            _gt_ek.setValue("")
 """
 
 
@@ -181,12 +209,22 @@ if _p.show():
         if _t:
             _expr = "[value " + _t + "]"
     if _expr:
-        _n["{knob_name}"].setValue(_expr)
+        _ek = _n["_gt_expr_{knob_name}"]
+        _ek.setValue(_expr)
+        try:
+            _v = _ek.evaluate()
+        except Exception:
+            _v = None
+        if _v:
+            _n["{knob_name}"].setValue(_v)
+        else:
+            _ek.setValue("")
+            _n["{knob_name}"].setValue(_expr)
 '''
 
 
 def _build_copy_link_button_code(knob_name: str) -> str:
-    """Return Python for a per-output Copy Link button: puts [value <node>.<knob>] on the clipboard."""
+    """Return Python for a per-output Copy Link button: clipboard copy, plus a live expression link when one node is selected."""
     return f"""\
 _n = nuke.thisNode()
 _expr = "[value " + _n.fullName() + ".{knob_name}]"
@@ -196,6 +234,25 @@ except ImportError:
     from PySide2.QtGui import QGuiApplication
 QGuiApplication.clipboard().setText(_expr)
 nuke.tprint("[Griptape] Copied to clipboard: " + _expr)
+_sel = [_s for _s in nuke.selectedNodes() if _s.fullName() != _n.fullName()]
+if len(_sel) == 1:
+    _target = _sel[0]
+    _kn = nuke.getInput("Expression-link a knob on " + _target.name() + " to this output (blank = clipboard only)", "")
+    if _kn:
+        if _target.knob(_kn):
+            _tk = _target[_kn]
+            _linked = False
+            try:
+                _linked = bool(_tk.setExpression(_expr))
+            except Exception:
+                _linked = False
+            if not _linked or not _tk.hasExpression():
+                _tk.setValue(_expr)
+                nuke.tprint("[Griptape] Set " + _target.name() + "." + _kn + " to live expression text: " + _expr)
+            else:
+                nuke.tprint("[Griptape] Expression-linked " + _target.name() + "." + _kn + " -> " + _expr)
+        else:
+            nuke.message("No knob named '" + _kn + "' on " + _target.name())
 """
 
 
@@ -240,13 +297,7 @@ class NukeGizmoBuilder:
         # --- Run tab (leftmost) ---
         w.add_tab("run_tab", label="Run")
         w.add_string_knob("output_dir", label="Output Directory", tooltip=_OUTPUT_DIR_TOOLTIP)
-        w.add_pyscript_knob(
-            "_link_output_dir",
-            label="Link...",
-            python_code=_build_link_button_code("output_dir"),
-            flags="-STARTLINE",
-            tooltip=_LINK_BUTTON_TOOLTIP,
-        )
+        self._write_link_button(w, "output_dir")
         run_code = self._build_run_button_bootstrap(
             input_params,
             list(output_params.keys()),
@@ -280,9 +331,12 @@ class NukeGizmoBuilder:
                 if name in media_output_names
             ]
             w.add_enumeration_knob("active_output", "Active Output", choices)
-            w.set_knob_changed(_build_active_output_knob_changed())
         for name, info in output_params.items():
             self._write_output_knob(w, name, info)
+
+        # Always present: refreshes linked fields on rename and unlinks a field
+        # the user manually edits; also drives SwitchOutput for multi-output gizmos.
+        w.set_knob_changed(_build_knob_changed_code(has_multiple_media_outputs=len(media_output_names) > 1))
 
         w.end_gizmo_header()
 
@@ -397,7 +451,12 @@ class NukeGizmoBuilder:
 
     @staticmethod
     def _write_link_button(w: GizmoWriter, knob_name: str) -> None:
-        """Write a same-line Link button that fills the knob with a preset TCL expression."""
+        """Write a same-line Link button plus the hidden knob that stores the link's expression.
+
+        The visible knob always displays the evaluated value; the expression
+        lives in ``_gt_expr_<knob>`` and is re-evaluated by the gizmo's
+        knobChanged callback (e.g. on rename).
+        """
         w.add_pyscript_knob(
             f"_link_{knob_name}",
             label="Link...",
@@ -405,6 +464,7 @@ class NukeGizmoBuilder:
             flags="-STARTLINE",
             tooltip=_LINK_BUTTON_TOOLTIP,
         )
+        w.add_invisible_string_knob(f"_gt_expr_{knob_name}")
 
     def _write_output_knob(self, w: GizmoWriter, name: str, info: dict) -> None:
         """Write a read-only knob for a workflow output parameter."""

@@ -65,13 +65,24 @@ def _build_child_env(companion: str, base_env: dict) -> dict:
 
 
 def _expand_tcl(n, knob_name: str, raw):
-    """Expand TCL bracket expressions in a string knob value, falling back to the raw text.
+    """Resolve a knob's runtime value, preferring its stored Link expression.
 
-    Plain String_Knobs never evaluate [bracket] expressions themselves, so we ask
-    TCL's ``value`` command to read the knob — it evaluates in the knob's own node
-    context, making ``this`` resolve to the gizmo instance. Values that aren't
+    A knob linked via the gizmo's Link button stores its TCL expression in a
+    hidden ``_gt_expr_<knob>`` companion knob while the visible field shows the
+    evaluated value; re-evaluating the expression here keeps time-dependent
+    links (e.g. [frame]) fresh. Hand-typed [bracket] text in the visible field
+    is expanded via TCL's ``value`` command, which evaluates in the knob's own
+    node context so ``this`` resolves to the gizmo instance. Values that aren't
     valid TCL (e.g. JSON arrays) raise and fall back to the raw text.
     """
+    expr_knob = n.knob("_gt_expr_" + knob_name)
+    if expr_knob is not None and expr_knob.getText():
+        try:
+            expanded = expr_knob.evaluate()
+        except Exception:  # noqa: BLE001
+            expanded = None
+        if expanded:
+            return expanded
     if not isinstance(raw, str) or "[" not in raw:
         return raw
     try:
