@@ -60,6 +60,10 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     # override=False: the bundled .env only fills env vars the parent Nuke
     # process did not already set, so a pipeline/farm job can supply its own
     # credentials (e.g. per-job GT_CLOUD_API_KEY) without being clobbered.
+    # The Griptape Cloud credential — a GT_CLOUD_API_KEY or a GRIPTAPE_NODES_LICENSE
+    # (enterprise) — travels through this .env; the engine's SecretsManager reads
+    # whichever is present, so cloud nodes authenticate headlessly the same way
+    # they do in the desktop app.
     env_path = script_dir / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=False)

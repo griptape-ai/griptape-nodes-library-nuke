@@ -93,6 +93,12 @@ class NukeGizmoPublisher:
             # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
             self._packager.package_to_folder(companion_base, workflow)
 
+            # Ensure the Griptape Cloud credential reaches the bundle. The desktop
+            # app injects it into the engine's process env at spawn without writing
+            # it to any .env file, so the packager (which reads .env files only)
+            # misses it — a gizmo would then fail cloud auth headlessly.
+            self._backfill_cloud_credential(companion_base)
+
             # Override the bundled project.yml with Nuke-specific output conventions
             # so outputs land next to the .nk file, not inside the companion bundle.
             self._customize_project_yml(companion_base)
@@ -195,6 +201,56 @@ class NukeGizmoPublisher:
             details = f"Failed to move file from '{source_path}' to '{destination_path}'."
             logger.error(details)
             raise TypeError(details)
+
+    # -- Credential backfill --
+
+    # Griptape Cloud accepts either credential as a Bearer token; the License is
+    # preferred when both are present (mirrors the engine/std-lib resolvers).
+    _CLOUD_CREDENTIAL_NAMES = ("GRIPTAPE_NODES_LICENSE", "GT_CLOUD_API_KEY")
+
+    @classmethod
+    def _backfill_cloud_credential(cls, companion_base: Path) -> None:
+        """Write the Griptape Cloud credential into the bundle .env if it is missing.
+
+        ``SecretsManager.get_secret`` reads the process env first, so it surfaces
+        a desktop-injected credential (License or API key) that never landed in an
+        on-disk .env. A value already present in the bundle .env is left untouched.
+        """
+        env_path = companion_base / ".env"
+        read_result = GriptapeNodes.handle_request(
+            ReadFileRequest(file_path=str(env_path), workspace_only=False, encoding="utf-8")
+        )
+        existing = (
+            read_result.content
+            if isinstance(read_result, ReadFileResultSuccess) and isinstance(read_result.content, str)
+            else ""
+        )
+        existing_keys = {
+            line.split("=", 1)[0].strip() for line in existing.splitlines() if "=" in line and not line.startswith("#")
+        }
+
+        secrets_manager = GriptapeNodes.SecretsManager()
+        additions = []
+        for name in cls._CLOUD_CREDENTIAL_NAMES:
+            if name in existing_keys:
+                continue
+            value = secrets_manager.get_secret(name, should_error_on_not_found=False)
+            if value:
+                additions.append(f'{name}="{value}"')
+
+        if not additions:
+            return
+
+        updated = (
+            existing.rstrip("\n") + "\n" + "\n".join(additions) + "\n"
+            if existing.strip()
+            else "\n".join(additions) + "\n"
+        )
+        write_result = GriptapeNodes.handle_request(
+            WriteFileRequest(file_path=str(env_path), content=updated, encoding="utf-8")
+        )
+        if not isinstance(write_result, WriteFileResultSuccess):
+            logger.warning("Could not backfill Griptape Cloud credential into bundle .env at '%s'.", env_path)
 
     # -- Project template customisation --
 
