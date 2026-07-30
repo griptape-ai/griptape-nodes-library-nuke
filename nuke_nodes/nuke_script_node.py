@@ -23,6 +23,8 @@ from griptape_nodes.files.project_file import ProjectFileDestination
 from griptape_nodes.retained_mode.events.os_events import (
     DeleteFileRequest,
     MakeDirectoryRequest,
+    ScanSequencesRequest,
+    ScanSequencesResultSuccess,
     WriteFileRequest,
     WriteFileResultSuccess,
 )
@@ -893,16 +895,6 @@ class NukeScriptNode(SuccessFailureNode):
                     continue
                 ann_type = outputs[gt_name].type
                 if ann_type == "Sequence":
-                    try:
-                        from griptape_nodes.retained_mode.events.os_events import (  # type: ignore[attr-defined]  # noqa: PLC0415
-                            ScanSequencesRequest,
-                            ScanSequencesResultSuccess,
-                        )
-                    except ImportError as exc:
-                        raise RuntimeError(
-                            "Sequence output scanning requires griptape-nodes with ScanSequencesRequest support "
-                            "(upgrade to the version that ships this feature)."
-                        ) from exc
                     scan_result = GriptapeNodes.handle_request(
                         ScanSequencesRequest(
                             path=path,
@@ -910,8 +902,8 @@ class NukeScriptNode(SuccessFailureNode):
                             end_number=frame_end,
                         )
                     )
-                    if isinstance(scan_result, ScanSequencesResultSuccess) and scan_result.sequences:  # pyright: ignore[reportAttributeAccessIssue]
-                        self.parameter_output_values[gt_name] = scan_result.sequences[0]  # pyright: ignore[reportAttributeAccessIssue]
+                    if isinstance(scan_result, ScanSequencesResultSuccess) and scan_result.sequences:
+                        self.parameter_output_values[gt_name] = scan_result.sequences[0]
                     else:
                         raise RuntimeError(f"No frames found for sequence at {path!r}")
                 else:
