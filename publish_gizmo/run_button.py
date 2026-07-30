@@ -53,6 +53,11 @@ except ImportError:
 
     _SENTINEL = ""
 
+# _expand_tcl lives in a sibling module so the unit tests can import it directly
+# rather than source-parsing this exec'd script. tcl_utils.py is copied into the
+# companion bundle at publish time (see NukeGizmoPublisher).
+from tcl_utils import _expand_tcl  # noqa: E402
+
 
 def _build_child_env(companion: str, base_env: dict) -> dict:
     """Return a subprocess env with XDG_CONFIG_HOME redirected into the bundle.
@@ -62,34 +67,6 @@ def _build_child_env(companion: str, base_env: dict) -> dict:
     companion must already be an absolute forward-slashed path.
     """
     return {**base_env, "XDG_CONFIG_HOME": companion + "/.gtn_config"}
-
-
-def _expand_tcl(n, knob_name: str, raw):
-    """Resolve a knob's runtime value, preferring its stored Link expression.
-
-    A knob linked via the gizmo's Link button stores its TCL expression in a
-    hidden ``_gt_expr_<knob>`` companion knob while the visible field shows the
-    evaluated value; re-evaluating the expression here keeps time-dependent
-    links (e.g. [frame]) fresh. Hand-typed [bracket] text in the visible field
-    is expanded via TCL's ``value`` command, which evaluates in the knob's own
-    node context so ``this`` resolves to the gizmo instance. Values that aren't
-    valid TCL (e.g. JSON arrays) raise and fall back to the raw text.
-    """
-    expr_knob = n.knob("_gt_expr_" + knob_name)
-    if expr_knob is not None and expr_knob.getText():
-        try:
-            expanded = expr_knob.evaluate()
-        except Exception:  # noqa: BLE001
-            expanded = None
-        if expanded:
-            return expanded
-    if not isinstance(raw, str) or "[" not in raw:
-        return raw
-    try:
-        expanded = nuke.tcl("value", n.fullName() + "." + knob_name)  # noqa: F821
-    except Exception:  # noqa: BLE001
-        return raw
-    return expanded if expanded else raw
 
 
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).

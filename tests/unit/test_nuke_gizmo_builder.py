@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
+
 import pytest
 
-from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder
+from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder, _build_knob_changed_code
 
 
 def _minimal_shape(input_params: dict[str, dict]) -> dict:
@@ -261,12 +263,29 @@ class TestTclHintTooltips:
     def test_tooltips_never_contain_unescaped_brackets(self) -> None:
         gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
         for line in gizmo.splitlines():
-            # PyScript button lines carry raw Python in T "..." where brackets are
-            # brace-quoted and safe; only value-knob tooltips need escaping.
-            if ' t "' in line and "addUserKnob {22" not in line:
-                assert "[value" not in line.replace(r"\[value", "")
-                assert "[file" not in line.replace(r"\[file", "")
-                assert "[frame" not in line.replace(r"\[frame", "")
+            # Check the tooltip attribute (t "...") on EVERY knob, including {22}
+            # PyScript buttons — their _COPY_LINK_TOOLTIP / _LINK_BUTTON_TOOLTIP
+            # contain [value ...] and must be escaped. Only the tooltip substring
+            # is checked so the T "..." script body (where brackets have no TCL
+            # significance, since Nuke does not substitute inside a script attr)
+            # does not produce false positives.
+            if ' t "' not in line:
+                continue
+            tooltip = line.split(' t "', 1)[1].split('"', 1)[0]
+            assert "[value" not in tooltip.replace(r"\[value", "")
+            assert "[file" not in tooltip.replace(r"\[file", "")
+            assert "[frame" not in tooltip.replace(r"\[frame", "")
+
+    def test_copy_link_tooltip_escapes_brackets(self) -> None:
+        """The Copy Link button's tooltip contains [value ...] and must be escaped."""
+        gizmo = _generate_gizmo_with_output(
+            {"caption": {"type": "str", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}
+        )
+        button_line = next(line for line in gizmo.splitlines() if "addUserKnob {22 _copy_caption_out" in line)
+        assert ' t "' in button_line
+        tooltip = button_line.split(' t "', 1)[1].split('"', 1)[0]
+        assert r"\[value" in tooltip
+        assert "[value" not in tooltip.replace(r"\[value", "")
 
     def test_output_dir_knob_has_expression_tooltip(self) -> None:
         gizmo = _generate_gizmo({})
@@ -311,18 +330,28 @@ class TestExpressionLinkButtons:
         gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
         assert 'addUserKnob {1 _gt_expr_folder_path l "" +INVISIBLE}' in gizmo
 
+    def test_knob_changed_code_is_valid_python(self) -> None:
+        """The generated callback must parse as Python — guards against string-concat
+        traps (e.g. an 'el' fragment relying on the next literal to form 'elif')."""
+        ast.parse(_build_knob_changed_code())
+
     def test_knob_changed_refreshes_links_on_rename(self) -> None:
         gizmo = _generate_gizmo({"folder_path": {"type": "str", "default_value": ""}})
         knob_changed_line = next(line for line in gizmo.splitlines() if line.startswith(" knobChanged"))
         assert "_gt_expr_" in knob_changed_line
         assert '\\"name\\"' in knob_changed_line
 
-    def test_knob_changed_handles_active_output_only_with_multiple_media_outputs(self) -> None:
+    def test_knob_changed_always_present_and_guards_switch_output(self) -> None:
+        """The callback is emitted unconditionally; the SwitchOutput branch is
+        guarded by nuke.toNode so it is a safe no-op on single-output gizmos."""
         single = _generate_gizmo_with_output(
             {"image": {"type": "ImageUrlArtifact", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}
         )
         single_kc = next(line for line in single.splitlines() if line.startswith(" knobChanged"))
-        assert "active_output" not in single_kc
+        # active_output handling is always present, but guarded by a SwitchOutput lookup.
+        assert "active_output" in single_kc
+        assert "SwitchOutput" in single_kc
+        assert "_gt_expr_" in single_kc
 
         multi = _generate_gizmo_with_output(
             {

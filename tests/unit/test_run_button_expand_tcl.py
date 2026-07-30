@@ -1,10 +1,11 @@
-"""Tests for run_button._expand_tcl — TCL bracket-expression expansion for knob values."""
+"""Tests for tcl_utils._expand_tcl — TCL bracket-expression expansion for knob values."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import pytest
 
-_RUN_BUTTON = Path(__file__).parent.parent.parent / "publish_gizmo" / "run_button.py"
+from publish_gizmo import tcl_utils
+from publish_gizmo.tcl_utils import _expand_tcl
 
 
 class _FakeNuke:
@@ -47,73 +48,61 @@ class _FakeNode:
         return self._expr_knobs.get(name)
 
 
-def _load_expand_tcl(fake_nuke: _FakeNuke):
-    """Extract _expand_tcl from run_button.py without running its top-level Nuke code."""
-    source = _RUN_BUTTON.read_text(encoding="utf-8")
-    lines = source.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith("def _expand_tcl("))
-    body_lines = []
-    for line in lines[start:]:
-        if body_lines and line and not line[0].isspace() and not line.startswith("def _expand_tcl"):
-            break
-        body_lines.append(line)
-    ns: dict = {"nuke": fake_nuke}
-    exec("\n".join(body_lines), ns)  # noqa: S102
-    return ns["_expand_tcl"]
+@pytest.fixture
+def fake_nuke(monkeypatch: pytest.MonkeyPatch) -> _FakeNuke:
+    """Install a fake ``nuke`` on the tcl_utils module for the duration of a test."""
+    fake = _FakeNuke()
+    monkeypatch.setattr(tcl_utils, "nuke", fake)
+    return fake
 
 
 class TestExpandTcl:
-    def test_non_str_value_returned_unchanged(self) -> None:
-        fake = _FakeNuke()
-        expand = _load_expand_tcl(fake)
-        assert expand(_FakeNode("Gizmo1"), "count", 5) == 5
-        assert expand(_FakeNode("Gizmo1"), "flag", None) is None
-        assert fake.calls == []
+    def test_non_str_value_returned_unchanged(self, fake_nuke: _FakeNuke) -> None:
+        assert _expand_tcl(_FakeNode("Gizmo1"), "count", 5) == 5
+        assert _expand_tcl(_FakeNode("Gizmo1"), "flag", None) is None
+        assert fake_nuke.calls == []
 
-    def test_str_without_bracket_returned_unchanged(self) -> None:
-        fake = _FakeNuke()
-        expand = _load_expand_tcl(fake)
-        assert expand(_FakeNode("Gizmo1"), "prompt", "hello") == "hello"
-        assert fake.calls == []
+    def test_str_without_bracket_returned_unchanged(self, fake_nuke: _FakeNuke) -> None:
+        assert _expand_tcl(_FakeNode("Gizmo1"), "prompt", "hello") == "hello"
+        assert fake_nuke.calls == []
 
-    def test_str_with_bracket_expanded_via_tcl_value(self) -> None:
-        fake = _FakeNuke(result="Gizmo1")
-        expand = _load_expand_tcl(fake)
-        assert expand(_FakeNode("Gizmo1"), "prompt", "[value this.name]") == "Gizmo1"
-        assert fake.calls == [("value", "Gizmo1.prompt")]
+    def test_str_with_bracket_expanded_via_tcl_value(self, fake_nuke: _FakeNuke) -> None:
+        fake_nuke.result = "Gizmo1"
+        assert _expand_tcl(_FakeNode("Gizmo1"), "prompt", "[value this.name]") == "Gizmo1"
+        assert fake_nuke.calls == [("value", "Gizmo1.prompt")]
 
-    def test_tcl_error_falls_back_to_raw(self) -> None:
-        fake = _FakeNuke(error=RuntimeError("bad expression"))
-        expand = _load_expand_tcl(fake)
+    def test_tcl_error_falls_back_to_raw(self, fake_nuke: _FakeNuke) -> None:
+        fake_nuke.error = RuntimeError("bad expression")
         raw = '[{"a": 1}, {"b": 2}]'
-        assert expand(_FakeNode("Gizmo1"), "config", raw) == raw
+        assert _expand_tcl(_FakeNode("Gizmo1"), "config", raw) == raw
 
-    def test_empty_expansion_falls_back_to_raw(self) -> None:
-        fake = _FakeNuke(result="")
-        expand = _load_expand_tcl(fake)
-        assert expand(_FakeNode("Gizmo1"), "prompt", "[value this.missing]") == "[value this.missing]"
+    def test_empty_tcl_expansion_passes_through(self, fake_nuke: _FakeNuke) -> None:
+        """A hand-typed expression evaluating to "" returns "" (not the raw text)."""
+        fake_nuke.result = ""
+        assert _expand_tcl(_FakeNode("Gizmo1"), "prompt", "[value this.missing]") == ""
 
-    def test_nested_node_path_used_in_tcl_call(self) -> None:
-        fake = _FakeNuke(result="/out")
-        expand = _load_expand_tcl(fake)
-        expand(_FakeNode("Group1.wf_v01"), "output_dir", "[file dirname [value root.name]]")
-        assert fake.calls == [("value", "Group1.wf_v01.output_dir")]
+    def test_nested_node_path_used_in_tcl_call(self, fake_nuke: _FakeNuke) -> None:
+        fake_nuke.result = "/out"
+        _expand_tcl(_FakeNode("Group1.wf_v01"), "output_dir", "[file dirname [value root.name]]")
+        assert fake_nuke.calls == [("value", "Group1.wf_v01.output_dir")]
 
-    def test_stored_link_expression_takes_precedence(self) -> None:
-        fake = _FakeNuke(result="should-not-be-used")
-        expand = _load_expand_tcl(fake)
+    def test_stored_link_expression_takes_precedence(self, fake_nuke: _FakeNuke) -> None:
+        fake_nuke.result = "should-not-be-used"
         node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("[value this.name]", evaluated="Gizmo1")})
-        assert expand(node, "prompt", "stale display text") == "Gizmo1"
-        assert fake.calls == []
+        assert _expand_tcl(node, "prompt", "stale display text") == "Gizmo1"
+        assert fake_nuke.calls == []
 
-    def test_empty_stored_expression_falls_through_to_raw(self) -> None:
-        fake = _FakeNuke()
-        expand = _load_expand_tcl(fake)
+    def test_empty_stored_expression_returns_empty(self, fake_nuke: _FakeNuke) -> None:
+        """A stored link that evaluates to "" returns "" — not the stale display text."""
+        node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("[value root.name]", evaluated="")})
+        assert _expand_tcl(node, "prompt", "stale display text") == ""
+        assert fake_nuke.calls == []
+
+    def test_blank_stored_expression_falls_through_to_raw(self, fake_nuke: _FakeNuke) -> None:
+        """No stored expression text at all -> fall through to the raw value."""
         node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("")})
-        assert expand(node, "prompt", "typed text") == "typed text"
+        assert _expand_tcl(node, "prompt", "typed text") == "typed text"
 
-    def test_failing_stored_expression_falls_through(self) -> None:
-        fake = _FakeNuke()
-        expand = _load_expand_tcl(fake)
+    def test_failing_stored_expression_falls_through(self, fake_nuke: _FakeNuke) -> None:
         node = _FakeNode("Gizmo1", {"_gt_expr_prompt": _FakeExprKnob("[bad", error=RuntimeError("bad expression"))})
-        assert expand(node, "prompt", "typed text") == "typed text"
+        assert _expand_tcl(node, "prompt", "typed text") == "typed text"

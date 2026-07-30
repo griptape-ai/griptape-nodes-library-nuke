@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 
-from publish_gizmo.constants import RUN_BUTTON_FILENAME, versioned_node_name
+from publish_gizmo.constants import GT_EXPR_PREFIX, RUN_BUTTON_FILENAME, versioned_node_name
 from publish_gizmo.gizmo_validator import validate_gizmo
 from publish_gizmo.gizmo_writer import GizmoWriter, NukeKnobType
 
@@ -92,10 +92,16 @@ _COPY_LINK_TOOLTIP = (
 
 
 def _output_tooltip(knob_name: str) -> str:
-    """Tooltip telling users how to reference this output from other nodes."""
+    """Tooltip telling users how to reference this output from other nodes.
+
+    ``knob_name`` already carries the ``_out`` suffix (e.g. ``caption_out``),
+    so the example expression uses that suffixed name even though the panel
+    labels the knob without it (e.g. "Caption"). This is intentional — the
+    suffixed name is exactly what the user must type in the expression.
+    """
     return (
         f"Workflow output. Reference it from any other node with a TCL expression, "
-        f"e.g. [value <this node's name>.{knob_name}]."
+        f"e.g. [value <this node's name>.{knob_name}] (note the '_out' suffix — that is the real knob name)."
     )
 
 
@@ -140,34 +146,33 @@ def _label(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _build_knob_changed_code(has_multiple_media_outputs: bool) -> str:
+def _build_knob_changed_code() -> str:
     """Return Python code for the gizmo's knobChanged callback.
 
-    Always handles Link-expression upkeep: on rename, linked fields are
-    re-evaluated so they display the current value; manually editing a linked
-    field clears its stored expression (unlink). When the gizmo has multiple
-    media outputs, also flips the internal SwitchOutput when ``active_output``
-    changes.
+    Handles three cases: on ``active_output`` change, flip the internal
+    SwitchOutput (a no-op guarded by ``nuke.toNode`` when the gizmo has no
+    such node, e.g. a single-output gizmo); on rename, re-evaluate linked
+    fields so they display the current value; on a manual edit of a linked
+    field, clear its stored expression (unlink).
     """
-    active_output_block = """\
-if _gt_kn == "active_output":
-    _gt_n.begin()
-    try:
-        _gt_switch = nuke.toNode("SwitchOutput")
-        if _gt_switch:
-            _gt_switch["which"].setValue(int(_gt_n["active_output"].getValue()))
-    finally:
-        _gt_n.end()
-el"""
-    prefix = active_output_block if has_multiple_media_outputs else ""
+    prefix = GT_EXPR_PREFIX
+    prefix_len = len(GT_EXPR_PREFIX)
     return f"""\
 _gt_k = nuke.thisKnob()
 _gt_n = nuke.thisNode()
 _gt_kn = _gt_k.name()
-{prefix}if _gt_kn == "name":
+if _gt_kn == "active_output":
+    _gt_switch = nuke.toNode("SwitchOutput")
+    if _gt_switch:
+        _gt_n.begin()
+        try:
+            _gt_switch["which"].setValue(int(_gt_n["active_output"].getValue()))
+        finally:
+            _gt_n.end()
+elif _gt_kn == "name":
     for _gt_name in list(_gt_n.knobs()):
-        if _gt_name.startswith("_gt_expr_"):
-            _gt_target = _gt_name[9:]
+        if _gt_name.startswith("{prefix}"):
+            _gt_target = _gt_name[{prefix_len}:]
             if _gt_n[_gt_name].getText() and _gt_n.knob(_gt_target):
                 try:
                     _gt_v = _gt_n[_gt_name].evaluate()
@@ -175,8 +180,11 @@ _gt_kn = _gt_k.name()
                     _gt_v = None
                 if _gt_v:
                     _gt_n[_gt_target].setValue(_gt_v)
-elif not _gt_kn.startswith("_gt_") and _gt_n.knob("_gt_expr_" + _gt_kn):
-    _gt_ek = _gt_n["_gt_expr_" + _gt_kn]
+elif not _gt_kn.startswith("_gt_") and _gt_n.knob("{prefix}" + _gt_kn):
+    # Unlink: a manual edit clears the stored expression. Note the value-comparison
+    # tradeoff — if the user types text identical to the current evaluated value,
+    # the link is NOT cleared (values are equal). Accepted; not a bug.
+    _gt_ek = _gt_n["{prefix}" + _gt_kn]
     if _gt_ek.getText():
         try:
             _gt_cur = _gt_ek.evaluate()
@@ -209,7 +217,7 @@ if _p.show():
         if _t:
             _expr = "[value " + _t + "]"
     if _expr:
-        _ek = _n["_gt_expr_{knob_name}"]
+        _ek = _n["{GT_EXPR_PREFIX}{knob_name}"]
         _ek.setValue(_expr)
         try:
             _v = _ek.evaluate()
@@ -335,8 +343,9 @@ class NukeGizmoBuilder:
             self._write_output_knob(w, name, info)
 
         # Always present: refreshes linked fields on rename and unlinks a field
-        # the user manually edits; also drives SwitchOutput for multi-output gizmos.
-        w.set_knob_changed(_build_knob_changed_code(has_multiple_media_outputs=len(media_output_names) > 1))
+        # the user manually edits; also drives SwitchOutput for multi-output gizmos
+        # (a no-op, guarded by nuke.toNode, when there is no SwitchOutput node).
+        w.set_knob_changed(_build_knob_changed_code())
 
         w.end_gizmo_header()
 
@@ -464,7 +473,7 @@ class NukeGizmoBuilder:
             flags="-STARTLINE",
             tooltip=_LINK_BUTTON_TOOLTIP,
         )
-        w.add_invisible_string_knob(f"_gt_expr_{knob_name}")
+        w.add_invisible_string_knob(f"{GT_EXPR_PREFIX}{knob_name}")
 
     def _write_output_knob(self, w: GizmoWriter, name: str, info: dict) -> None:
         """Write a read-only knob for a workflow output parameter."""

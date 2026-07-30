@@ -126,6 +126,7 @@ class NukeGizmoPublisher:
             self._copy_file(
                 Path(__file__).parent / "output_protocol.py", companion_base / "output_protocol.py", overwrite=True
             )
+            self._copy_file(Path(__file__).parent / "tcl_utils.py", companion_base / "tcl_utils.py", overwrite=True)
 
             available_versions = self._collect_versions(companion_base)
 

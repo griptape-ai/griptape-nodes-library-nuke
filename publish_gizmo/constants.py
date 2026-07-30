@@ -13,6 +13,11 @@ INIT_MARKER = "# griptape-plugin-path"
 # Filename of the run-button script copied into each companion directory
 RUN_BUTTON_FILENAME = "run_button.py"
 
+# Prefix for the hidden companion knob that stores a Link button's TCL expression
+# (the visible knob shows the evaluated value). Kept in sync with the local copy
+# in the bundled tcl_utils.py, which cannot import this module at runtime.
+GT_EXPR_PREFIX = "_gt_expr_"
+
 # Regex that extracts (workflow_stem, version_int) from a versioned gizmo filename
 VERSION_RE = re.compile(r"^(.+)_v(\d+)\.gizmo$")
 
