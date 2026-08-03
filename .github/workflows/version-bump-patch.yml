@@ -8,20 +8,42 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Create bump branch
+        run: git checkout -b bump-tmp
+
       - name: Bump patch version
         run: make version/patch
 
-      - name: Push changes
-        run: git push
+      - name: Push bump branch
+        run: |
+          VERSION=$(make version/get)
+          git push origin "bump-tmp:chore/bump-v${VERSION}"
+
+      - name: Open PR with auto-merge
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          VERSION=$(make version/get)
+          BRANCH="chore/bump-v${VERSION}"
+          if ! gh pr view "${BRANCH}" --json number -q .number 2>/dev/null; then
+            gh pr create \
+              --title "chore: bump v${VERSION}" \
+              --body "Automated version bump to v${VERSION}." \
+              --base main \
+              --head "${BRANCH}"
+          fi
+          gh pr merge "${BRANCH}" --auto --squash
