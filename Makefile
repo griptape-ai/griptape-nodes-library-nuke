@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+MAKEFLAGS += --no-print-directory
 
 LIBRARY_JSON := griptape-nodes-library.json
 
@@ -10,42 +11,42 @@ version/get: ## Get version.
 version/set: ## Set version. Usage: make version/set v=1.2.3
 	@jq --arg v "$(v)" '.metadata.library_version = $$v' $(LIBRARY_JSON) > $(LIBRARY_JSON).tmp
 	@mv $(LIBRARY_JSON).tmp $(LIBRARY_JSON)
-	@make version/commit
+	@$(MAKE) version/commit
 
 .PHONY: version/patch
 version/patch: ## Bump patch version.
-	@CURRENT=$$(make version/get); \
+	@CURRENT=$$($(MAKE) version/get); \
 	IFS='.' read -r major minor patch <<< "$$CURRENT"; \
 	NEW_VERSION="$${major}.$${minor}.$$((patch + 1))"; \
 	jq --arg v "$$NEW_VERSION" '.metadata.library_version = $$v' $(LIBRARY_JSON) > $(LIBRARY_JSON).tmp; \
 	mv $(LIBRARY_JSON).tmp $(LIBRARY_JSON); \
 	echo "Bumped to $$NEW_VERSION"
-	@make version/commit
+	@$(MAKE) version/commit
 
 .PHONY: version/minor
 version/minor: ## Bump minor version.
-	@CURRENT=$$(make version/get); \
+	@CURRENT=$$($(MAKE) version/get); \
 	IFS='.' read -r major minor patch <<< "$$CURRENT"; \
 	NEW_VERSION="$${major}.$$((minor + 1)).0"; \
 	jq --arg v "$$NEW_VERSION" '.metadata.library_version = $$v' $(LIBRARY_JSON) > $(LIBRARY_JSON).tmp; \
 	mv $(LIBRARY_JSON).tmp $(LIBRARY_JSON); \
 	echo "Bumped to $$NEW_VERSION"
-	@make version/commit
+	@$(MAKE) version/commit
 
 .PHONY: version/major
 version/major: ## Bump major version.
-	@CURRENT=$$(make version/get); \
+	@CURRENT=$$($(MAKE) version/get); \
 	IFS='.' read -r major minor patch <<< "$$CURRENT"; \
 	NEW_VERSION="$$((major + 1)).0.0"; \
 	jq --arg v "$$NEW_VERSION" '.metadata.library_version = $$v' $(LIBRARY_JSON) > $(LIBRARY_JSON).tmp; \
 	mv $(LIBRARY_JSON).tmp $(LIBRARY_JSON); \
 	echo "Bumped to $$NEW_VERSION"
-	@make version/commit
+	@$(MAKE) version/commit
 
 .PHONY: version/commit
 version/commit: ## Commit version.
 	@git add $(LIBRARY_JSON)
-	@git commit -m "chore: bump v$$(make version/get)"
+	@git commit -m "chore: bump v$$($(MAKE) version/get)"
 
 .PHONY: version/publish
 version/publish: ## Create and push git tags.
@@ -68,7 +69,7 @@ print(f'Synced {len(deps)} dependencies to $(LIBRARY_JSON)')"
 
 .PHONY: install
 install: ## Install all dependencies.
-	@make install/all
+	@$(MAKE) install/all
 
 .PHONY: install/core
 install/core: deps/sync ## Install core dependencies.
@@ -92,8 +93,16 @@ format: ## Format project.
 
 .PHONY: fix
 fix: ## Fix project.
-	@make format
+	@$(MAKE) format
 	@uv run ruff check --fix --unsafe-fixes
+
+.PHONY: test
+test: ## Run tests.
+	@uv run pytest
+
+.PHONY: test/unit
+test/unit: ## Run unit tests.
+	@uv run pytest tests/unit
 
 .PHONY: check
 check: check/format check/lint check/types check/json ## Run all checks.
