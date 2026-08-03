@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 
-from publish_gizmo.constants import RUN_BUTTON_FILENAME, versioned_node_name
+from publish_gizmo.constants import GT_EXPR_PREFIX, RUN_BUTTON_FILENAME, versioned_node_name
 from publish_gizmo.gizmo_validator import validate_gizmo
 from publish_gizmo.gizmo_writer import GizmoWriter, NukeKnobType
 
@@ -72,6 +72,38 @@ _INPUT_NODE_PREFIX = "Input"
 _OUTPUT_NODE_PREFIX = "Output"
 _TEMP_FILE_PREFIX = "gt_input"
 
+# Tooltips advertising Nuke TCL expression support (string knobs have no
+# right-click "Add expression" menu, so hover hints are the discovery path)
+_TCL_HINT_TOOLTIP = (
+    "Supports Nuke TCL expressions in [brackets], e.g. [value this.name] or [frame]. "
+    "Expressions are evaluated when the workflow runs."
+)
+_OUTPUT_DIR_TOOLTIP = (
+    "Directory for workflow outputs. Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
+)
+_LINK_BUTTON_TOOLTIP = (
+    "Link this field to the gizmo name, script folder, script name, frame, or any node.knob. "
+    "The field shows the linked value; editing it by hand removes the link."
+)
+_COPY_LINK_TOOLTIP = (
+    "Copy a [value ...] expression for this output to the clipboard. "
+    "Select another node first to expression-link one of its knobs to this output directly."
+)
+
+
+def _output_tooltip(knob_name: str) -> str:
+    """Tooltip telling users how to reference this output from other nodes.
+
+    ``knob_name`` already carries the ``_out`` suffix (e.g. ``caption_out``),
+    so the example expression uses that suffixed name even though the panel
+    labels the knob without it (e.g. "Caption"). This is intentional — the
+    suffixed name is exactly what the user must type in the expression.
+    """
+    return (
+        f"Workflow output. Reference it from any other node with a TCL expression, "
+        f"e.g. [value <this node's name>.{knob_name}] (note the '_out' suffix — that is the real knob name)."
+    )
+
 
 def _read_node_name(param_name: str) -> str:
     """Return the internal Read node name for a given media output parameter."""
@@ -114,23 +146,121 @@ def _label(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _build_active_output_knob_changed() -> str:
+def _build_knob_changed_code() -> str:
     """Return Python code for the gizmo's knobChanged callback.
 
-    When the user changes the ``active_output`` selector, this code updates
-    the internal SwitchOutput node's ``which`` knob so the correct Read node
-    flows to the gizmo's output pipe immediately — no re-run needed.
+    Handles three cases: on ``active_output`` change, flip the internal
+    SwitchOutput (a no-op guarded by ``nuke.toNode`` when the gizmo has no
+    such node, e.g. a single-output gizmo); on rename, re-evaluate linked
+    fields so they display the current value; on a manual edit of a linked
+    field, clear its stored expression (unlink).
     """
-    return """\
-if nuke.thisKnob().name() == "active_output":
-    n = nuke.thisNode()
-    n.begin()
-    try:
-        switch = nuke.toNode("SwitchOutput")
-        if switch:
-            switch["which"].setValue(int(n["active_output"].getValue()))
-    finally:
-        n.end()
+    prefix = GT_EXPR_PREFIX
+    prefix_len = len(GT_EXPR_PREFIX)
+    return f"""\
+_gt_k = nuke.thisKnob()
+_gt_n = nuke.thisNode()
+_gt_kn = _gt_k.name()
+if _gt_kn == "active_output":
+    _gt_switch = nuke.toNode("SwitchOutput")
+    if _gt_switch:
+        _gt_n.begin()
+        try:
+            _gt_switch["which"].setValue(int(_gt_n["active_output"].getValue()))
+        finally:
+            _gt_n.end()
+elif _gt_kn == "name":
+    for _gt_name in list(_gt_n.knobs()):
+        if _gt_name.startswith("{prefix}"):
+            _gt_target = _gt_name[{prefix_len}:]
+            if _gt_n[_gt_name].getText() and _gt_n.knob(_gt_target):
+                try:
+                    _gt_v = _gt_n[_gt_name].evaluate()
+                except Exception:
+                    _gt_v = None
+                if _gt_v:
+                    _gt_n[_gt_target].setValue(_gt_v)
+elif not _gt_kn.startswith("_gt_") and _gt_n.knob("{prefix}" + _gt_kn):
+    # Unlink: a manual edit clears the stored expression. Note the value-comparison
+    # tradeoff — if the user types text identical to the current evaluated value,
+    # the link is NOT cleared (values are equal). Accepted; not a bug.
+    _gt_ek = _gt_n["{prefix}" + _gt_kn]
+    if _gt_ek.getText():
+        try:
+            _gt_cur = _gt_ek.evaluate()
+        except Exception:
+            _gt_cur = None
+        if _gt_k.getText() != _gt_cur:
+            _gt_ek.setValue("")
+"""
+
+
+def _build_link_button_code(knob_name: str) -> str:
+    """Return Python for a per-input Link button: preset chooser that writes a TCL expression into the knob."""
+    return f'''\
+_n = nuke.thisNode()
+_p = nuke.Panel("Link {knob_name}")
+_p.addEnumerationPulldown("Link to", "{{This gizmo's name}} {{Nuke script folder}} {{Nuke script name}} {{Current frame}} {{Custom node.knob}}")
+if _p.show():
+    _c = _p.value("Link to")
+    _expr = None
+    if _c == "This gizmo's name":
+        _expr = "[value this.name]"
+    elif _c == "Nuke script folder":
+        _expr = "[file dirname [value root.name]]"
+    elif _c == "Nuke script name":
+        _expr = "[file rootname [file tail [value root.name]]]"
+    elif _c == "Current frame":
+        _expr = "[frame]"
+    else:
+        _t = nuke.getInput("Node.knob to link to (e.g. Text1.message)", "")
+        if _t:
+            _expr = "[value " + _t + "]"
+    if _expr:
+        _ek = _n["{GT_EXPR_PREFIX}{knob_name}"]
+        _ek.setValue(_expr)
+        try:
+            _v = _ek.evaluate()
+        except Exception:
+            _v = None
+        if _v:
+            _n["{knob_name}"].setValue(_v)
+        else:
+            _ek.setValue("")
+            _n["{knob_name}"].setValue(_expr)
+'''
+
+
+def _build_copy_link_button_code(knob_name: str) -> str:
+    """Return Python for a per-output Copy Link button: clipboard copy, plus a live expression link when one node is selected."""
+    return f"""\
+_n = nuke.thisNode()
+_expr = "[value " + _n.fullName() + ".{knob_name}]"
+try:
+    from PySide6.QtGui import QGuiApplication
+except ImportError:
+    from PySide2.QtGui import QGuiApplication
+QGuiApplication.clipboard().setText(_expr)
+nuke.tprint("[Griptape] Copied to clipboard: " + _expr)
+_sel = [_s for _s in nuke.selectedNodes() if _s.fullName() != _n.fullName()]
+if len(_sel) == 1:
+    _target = _sel[0]
+    _kn = nuke.getInput("Expression-link a knob on " + _target.name() + " to this output (blank = clipboard only)", "")
+    if _kn:
+        if _target.knob(_kn):
+            _tk = _target[_kn]
+            _linked = False
+            try:
+                _linked = bool(_tk.setExpression(_expr))
+            except Exception:
+                _linked = False
+            if not _linked or not _tk.hasExpression():
+                _tk.setValue(_expr)
+                nuke.tprint("[Griptape] Set " + _target.name() + "." + _kn + " to live expression text: " + _expr)
+            else:
+                nuke.tprint("[Griptape] Expression-linked " + _target.name() + "." + _kn + " -> " + _expr)
+        else:
+            nuke.message("No knob named '" + _kn + "' on " + _target.name())
 """
 
 
@@ -174,7 +304,8 @@ class NukeGizmoBuilder:
 
         # --- Run tab (leftmost) ---
         w.add_tab("run_tab", label="Run")
-        w.add_string_knob("output_dir", label="Output Directory")
+        w.add_string_knob("output_dir", label="Output Directory", tooltip=_OUTPUT_DIR_TOOLTIP)
+        self._write_link_button(w, "output_dir")
         run_code = self._build_run_button_bootstrap(
             input_params,
             list(output_params.keys()),
@@ -208,9 +339,13 @@ class NukeGizmoBuilder:
                 if name in media_output_names
             ]
             w.add_enumeration_knob("active_output", "Active Output", choices)
-            w.set_knob_changed(_build_active_output_knob_changed())
         for name, info in output_params.items():
             self._write_output_knob(w, name, info)
+
+        # Always present: refreshes linked fields on rename and unlinks a field
+        # the user manually edits; also drives SwitchOutput for multi-output gizmos
+        # (a no-op, guarded by nuke.toNode, when there is no SwitchOutput node).
+        w.set_knob_changed(_build_knob_changed_code())
 
         w.end_gizmo_header()
 
@@ -308,7 +443,8 @@ class NukeGizmoBuilder:
             default_index = choices.index(default) if default and default in choices else None
             w.add_enumeration_knob(knob_name, label, choices, default_index=default_index)
         elif param_type in _FILE_PATH_TYPES:
-            w.add_file_knob(knob_name, label, default=default or None)
+            w.add_file_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            self._write_link_button(w, knob_name)
         elif param_type == "bool":
             w.add_bool_knob(knob_name, label, default=default if type(default) is bool else None)
         elif param_type == "float":
@@ -316,9 +452,28 @@ class NukeGizmoBuilder:
         elif param_type == "int":
             w.add_int_knob(knob_name, label, default=default if type(default) is int else None)
         elif param_type in _MULTILINE_TYPES:
-            w.add_multiline_string_knob(knob_name, label, default=default or None)
+            w.add_multiline_string_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            self._write_link_button(w, knob_name)
         else:
-            w.add_string_knob(knob_name, label, default=default or None)
+            w.add_string_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            self._write_link_button(w, knob_name)
+
+    @staticmethod
+    def _write_link_button(w: GizmoWriter, knob_name: str) -> None:
+        """Write a same-line Link button plus the hidden knob that stores the link's expression.
+
+        The visible knob always displays the evaluated value; the expression
+        lives in ``_gt_expr_<knob>`` and is re-evaluated by the gizmo's
+        knobChanged callback (e.g. on rename).
+        """
+        w.add_pyscript_knob(
+            f"_link_{knob_name}",
+            label="Link...",
+            python_code=_build_link_button_code(knob_name),
+            flags="-STARTLINE",
+            tooltip=_LINK_BUTTON_TOOLTIP,
+        )
+        w.add_invisible_string_knob(f"{GT_EXPR_PREFIX}{knob_name}")
 
     def _write_output_knob(self, w: GizmoWriter, name: str, info: dict) -> None:
         """Write a read-only knob for a workflow output parameter."""
@@ -327,11 +482,18 @@ class NukeGizmoBuilder:
         param_type = info.get("type", "str")
 
         if param_type in _FILE_PATH_TYPES:
-            w.add_file_knob(knob_name, label, flags="+DISABLED")
+            w.add_file_knob(knob_name, label, flags="+DISABLED", tooltip=_output_tooltip(knob_name))
         elif param_type in _MULTILINE_TYPES:
-            w.add_multiline_string_knob(knob_name, label, flags="+DISABLED")
+            w.add_multiline_string_knob(knob_name, label, flags="+DISABLED", tooltip=_output_tooltip(knob_name))
         else:
-            w.add_string_knob(knob_name, label, flags="+DISABLED")
+            w.add_string_knob(knob_name, label, flags="+DISABLED", tooltip=_output_tooltip(knob_name))
+        w.add_pyscript_knob(
+            f"_copy_{knob_name}",
+            label="Copy Link",
+            python_code=_build_copy_link_button_code(knob_name),
+            flags="-STARTLINE",
+            tooltip=_COPY_LINK_TOOLTIP,
+        )
 
     def _build_run_button_bootstrap(
         self,

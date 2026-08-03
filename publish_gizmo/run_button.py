@@ -53,6 +53,11 @@ except ImportError:
 
     _SENTINEL = ""
 
+# _expand_tcl lives in a sibling module so the unit tests can import it directly
+# rather than source-parsing this exec'd script. tcl_utils.py is copied into the
+# companion bundle at publish time (see NukeGizmoPublisher).
+from tcl_utils import _expand_tcl  # noqa: E402
+
 
 def _build_child_env(companion: str, base_env: dict) -> dict:
     """Return a subprocess env with XDG_CONFIG_HOME redirected into the bundle.
@@ -302,7 +307,7 @@ _nk_script_dir = nuke.script_directory()  # noqa: F821
 if _nk_script_dir:
     _nk_script_dir = _nk_script_dir.replace("\\", "/")
 
-output_dir = node["output_dir"].value()
+output_dir = _expand_tcl(node, "output_dir", node["output_dir"].value())
 if output_dir:
     output_dir = output_dir.replace("\\", "/")
 
@@ -316,7 +321,7 @@ else:
     inputs: dict = {}
     for _k in _param_names:
         if node.knob(_k):
-            inputs[_k] = node[_k].value()
+            inputs[_k] = _expand_tcl(node, _k, node[_k].value())
             print(f"[Griptape] knob '{_k}' -> type={type(inputs[_k]).__name__!r} value={inputs[_k]!r}")
         else:
             print(f"[Griptape] knob '{_k}' -> NOT FOUND on node")

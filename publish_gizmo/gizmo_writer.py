@@ -60,6 +60,14 @@ def _tcl_escape(code: str) -> str:
     return code
 
 
+def _tcl_escape_literal(text: str) -> str:
+    """Escape a literal knob value or tooltip so TCL stores it verbatim instead of evaluating it."""
+    text = text.replace("\\", "\\\\")
+    text = text.replace('"', '\\"')
+    text = text.replace("[", "\\[")
+    return text.replace("$", "\\$")
+
+
 class GizmoWriter:
     """Builds Nuke ``.gizmo`` file content line by line.
 
@@ -125,21 +133,27 @@ class GizmoWriter:
 
     # -- Value knobs --
 
-    def add_string_knob(self, knob_name: str, label: str, default: str | None = None, flags: str = "") -> None:
+    def add_string_knob(
+        self, knob_name: str, label: str, default: str | None = None, flags: str = "", tooltip: str | None = None
+    ) -> None:
         """Add a single-line string knob."""
         self._knobs.append((NukeKnobType.STRING, knob_name))
+        tooltip_part = f' t "{_tcl_escape_literal(tooltip)}"' if tooltip else ""
         flag_suffix = f" {flags}" if flags else ""
-        self._lines.append(f' addUserKnob {{{NukeKnobType.STRING} {knob_name} l "{label}"{flag_suffix}}}')
+        self._lines.append(f' addUserKnob {{{NukeKnobType.STRING} {knob_name} l "{label}"{tooltip_part}{flag_suffix}}}')
         if default is not None:
-            self._lines.append(f' {knob_name} "{default}"')
+            self._lines.append(f' {knob_name} "{_tcl_escape_literal(default)}"')
 
-    def add_file_knob(self, knob_name: str, label: str, default: str | None = None, flags: str = "") -> None:
+    def add_file_knob(
+        self, knob_name: str, label: str, default: str | None = None, flags: str = "", tooltip: str | None = None
+    ) -> None:
         """Add a file-browser knob."""
         self._knobs.append((NukeKnobType.FILE, knob_name))
+        tooltip_part = f' t "{_tcl_escape_literal(tooltip)}"' if tooltip else ""
         flag_suffix = f" {flags}" if flags else ""
-        self._lines.append(f' addUserKnob {{{NukeKnobType.FILE} {knob_name} l "{label}"{flag_suffix}}}')
+        self._lines.append(f' addUserKnob {{{NukeKnobType.FILE} {knob_name} l "{label}"{tooltip_part}{flag_suffix}}}')
         if default is not None:
-            self._lines.append(f' {knob_name} "{default}"')
+            self._lines.append(f' {knob_name} "{_tcl_escape_literal(default)}"')
 
     def add_bool_knob(self, knob_name: str, label: str, default: bool | None = None) -> None:
         """Add a checkbox (boolean) knob."""
@@ -163,14 +177,17 @@ class GizmoWriter:
             self._lines.append(f" {knob_name} {default}")
 
     def add_multiline_string_knob(
-        self, knob_name: str, label: str, default: str | None = None, flags: str = ""
+        self, knob_name: str, label: str, default: str | None = None, flags: str = "", tooltip: str | None = None
     ) -> None:
         """Add a multi-line text knob."""
         self._knobs.append((NukeKnobType.MULTILINE_STRING, knob_name))
+        tooltip_part = f' t "{_tcl_escape_literal(tooltip)}"' if tooltip else ""
         flag_suffix = f" {flags}" if flags else ""
-        self._lines.append(f' addUserKnob {{{NukeKnobType.MULTILINE_STRING} {knob_name} l "{label}"{flag_suffix}}}')
+        self._lines.append(
+            f' addUserKnob {{{NukeKnobType.MULTILINE_STRING} {knob_name} l "{label}"{tooltip_part}{flag_suffix}}}'
+        )
         if default is not None:
-            self._lines.append(f' {knob_name} "{default}"')
+            self._lines.append(f' {knob_name} "{_tcl_escape_literal(default)}"')
 
     def add_enumeration_knob(self, knob_name: str, label: str, choices: list, default_index: int | None = None) -> None:
         """Add a dropdown enumeration knob."""
@@ -180,16 +197,19 @@ class GizmoWriter:
         if default_index is not None:
             self._lines.append(f" {knob_name} {default_index}")
 
-    def add_pyscript_knob(self, knob_name: str, label: str, python_code: str, flags: str = "+STARTLINE") -> None:
+    def add_pyscript_knob(
+        self, knob_name: str, label: str, python_code: str, flags: str = "+STARTLINE", tooltip: str | None = None
+    ) -> None:
         """Add a PyScript button knob.
 
         ``python_code`` is plain Python; this method handles TCL escaping.
         """
         self._knobs.append((NukeKnobType.PYSCRIPT, knob_name))
         escaped = _tcl_escape(python_code)
+        tooltip_part = f' t "{_tcl_escape_literal(tooltip)}"' if tooltip else ""
         flag_suffix = f" {flags}" if flags else ""
         self._lines.append(
-            f' addUserKnob {{{NukeKnobType.PYSCRIPT} {knob_name} l "{label}" T "{escaped}"{flag_suffix}}}'
+            f' addUserKnob {{{NukeKnobType.PYSCRIPT} {knob_name} l "{label}"{tooltip_part} T "{escaped}"{flag_suffix}}}'
         )
 
     def add_invisible_string_knob(self, knob_name: str, value: str | None = None) -> None:
