@@ -33,7 +33,7 @@ def _run_main(manifest: dict, tmp_path: Path) -> dict:
 
 def _base_manifest(outputs: dict | None = None) -> dict:
     return {
-        "schema": "griptape-nuke-runner/1.0",
+        "schema": "griptape-nuke-runner/1.1",
         "script": "/fake/comp.nk",
         "frame_range": [1001, 1001],
         "inputs": {},
@@ -50,10 +50,10 @@ class TestExecuteTypes:
 
         assert "VideoUrlArtifact" in _EXECUTE_TYPES
 
-    def test_contains_image_sequence_artifact(self) -> None:
+    def test_contains_sequence(self) -> None:
         from nuke_runner.runner import _EXECUTE_TYPES
 
-        assert "ImageSequenceArtifact" in _EXECUTE_TYPES
+        assert "Sequence" in _EXECUTE_TYPES
 
     def test_contains_image_artifact(self) -> None:
         from nuke_runner.runner import _EXECUTE_TYPES
@@ -97,19 +97,13 @@ class TestNonExecutableArtifactSkipped:
         _nuke.execute.assert_not_called()
 
 
-class TestImageSequenceArtifactOutput:
-    def test_globs_rendered_frames_and_writes_list(self, tmp_path: Path) -> None:
+class TestSequenceOutput:
+    def test_writes_pattern_path_for_sequence(self, tmp_path: Path) -> None:
         seq_dir = tmp_path / "seq"
         seq_dir.mkdir()
-        pattern = str(seq_dir / "frame.%04d.png")
+        pattern = str(seq_dir / "frame_####.png")
 
-        # Create fake rendered frame files
-        (seq_dir / "frame.1001.png").write_bytes(b"\x89PNG")
-        (seq_dir / "frame.1002.png").write_bytes(b"\x89PNG")
-
-        manifest = _base_manifest(
-            outputs={"frames": {"path": pattern, "node": "Write1", "type": "ImageSequenceArtifact"}}
-        )
+        manifest = _base_manifest(outputs={"frames": {"path": pattern, "node": "Write1", "type": "Sequence"}})
 
         _nuke.scriptOpen = MagicMock()
         _nuke.root.return_value = MagicMock()
@@ -118,27 +112,4 @@ class TestImageSequenceArtifactOutput:
         _nuke.execute = MagicMock()
 
         result = _run_main(manifest, tmp_path)
-        frames = result["outputs"]["frames"]
-        assert isinstance(frames, list)
-        assert len(frames) == 2
-        assert all("frame." in p for p in frames)
-
-    def test_empty_glob_writes_empty_list(self, tmp_path: Path) -> None:
-        seq_dir = tmp_path / "emptyseq"
-        seq_dir.mkdir()
-        pattern = str(seq_dir / "frame.%04d.png")
-
-        manifest = _base_manifest(
-            outputs={"frames": {"path": pattern, "node": "Write1", "type": "ImageSequenceArtifact"}}
-        )
-
-        _nuke.scriptOpen = MagicMock()
-        _nuke.root.return_value = MagicMock()
-        _nuke.root.return_value.__getitem__ = MagicMock(return_value=MagicMock())
-        _nuke.toNode.return_value = MagicMock()
-        _nuke.execute = MagicMock()
-
-        result = _run_main(manifest, tmp_path)
-        frames = result["outputs"]["frames"]
-        assert isinstance(frames, list)
-        assert frames == []
+        assert result["outputs"]["frames"] == pattern.replace("\\", "/")

@@ -6,7 +6,7 @@ from nuke_runner.manifest import SCHEMA_VERSION, JobManifest, ManifestInput, Man
 
 # Canonical JSON from PRD §7.4
 PRD_CANONICAL_JSON = """{
-  "schema": "griptape-nuke-runner/1.0",
+  "schema": "griptape-nuke-runner/1.1",
   "script": "/path/to/my_comp.nk",
   "frame_range": [1001, 1001],
   "inputs": {
@@ -82,6 +82,19 @@ def test_manifest_from_json_rejects_wrong_schema_version() -> None:
         JobManifest.from_json(bad_json)
 
 
+def test_manifest_from_json_rejects_v1_0_schema() -> None:
+    """schema 1.0 used list[str] paths; 1.1 reader must reject it cleanly."""
+    old_json = PRD_CANONICAL_JSON.replace(SCHEMA_VERSION, "griptape-nuke-runner/1.0")
+    with pytest.raises(ValueError, match="Unsupported manifest schema"):
+        JobManifest.from_json(old_json)
+
+
+def test_manifest_output_raises_type_error_for_list_path() -> None:
+    """Direct construction with a list raises TypeError, not AttributeError."""
+    with pytest.raises(TypeError, match="must be str"):
+        ManifestOutput(path=["/tmp/f.0001.exr", "/tmp/f.0002.exr"], node="Write1")  # type: ignore[arg-type]
+
+
 def test_manifest_default_output_format_is_png() -> None:
     output = ManifestOutput(path="/tmp/out.png", node="WriteNode")
     assert output.format == "png"
@@ -101,34 +114,14 @@ def test_bake_output_path_defaults_empty() -> None:
     assert restored.bake_output_path == ""
 
 
-def test_manifest_output_path_accepts_list() -> None:
-    output = ManifestOutput(path=["/tmp/f.0001.exr", "/tmp/f.0002.exr"], node="Write1", type="ImageSequenceArtifact")
-    assert isinstance(output.path, list)
-    assert output.path == ["/tmp/f.0001.exr", "/tmp/f.0002.exr"]
-
-
-def test_manifest_output_list_path_round_trips_json() -> None:
+def test_manifest_output_sequence_pattern_path_round_trips() -> None:
     m = JobManifest(
         script="/tmp/test.nk",
-        outputs={
-            "frames": ManifestOutput(
-                path=["/tmp/f.0001.exr", "/tmp/f.0002.exr"],
-                node="Write1",
-                type="ImageSequenceArtifact",
-            )
-        },
+        outputs={"frames": ManifestOutput(path="/out/frame_####.png", node="Write1", type="Sequence")},
     )
     restored = JobManifest.from_json(m.to_json())
-    assert restored.outputs["frames"].path == ["/tmp/f.0001.exr", "/tmp/f.0002.exr"]
-
-
-def test_manifest_output_list_path_normalises_backslashes() -> None:
-    output = ManifestOutput(
-        path=["C:\\tmp\\f.0001.exr", "C:\\tmp\\f.0002.exr"],
-        node="Write1",
-        type="ImageSequenceArtifact",
-    )
-    assert output.path == ["C:/tmp/f.0001.exr", "C:/tmp/f.0002.exr"]
+    assert restored.outputs["frames"].path == "/out/frame_####.png"
+    assert restored.outputs["frames"].type == "Sequence"
 
 
 def test_manifest_output_str_path_normalisation_unchanged() -> None:

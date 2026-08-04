@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = "griptape-nuke-runner/1.0"
+SCHEMA_VERSION = "griptape-nuke-runner/1.1"
 
 
 @dataclass
@@ -18,16 +18,18 @@ class ManifestInput:
 
 @dataclass
 class ManifestOutput:
-    path: str | list[str]
+    path: str
     node: str
     format: str = "png"
     type: str = "ImageArtifact"
 
     def __post_init__(self) -> None:
-        if isinstance(self.path, list):
-            self.path = [p.replace("\\", "/") for p in self.path]
-        else:
-            self.path = self.path.replace("\\", "/")
+        if not isinstance(self.path, str):
+            raise TypeError(
+                f"ManifestOutput.path must be str (schema {SCHEMA_VERSION} removed list support); "
+                f"got {type(self.path).__name__!r}"
+            )
+        self.path = self.path.replace("\\", "/")
 
 
 @dataclass

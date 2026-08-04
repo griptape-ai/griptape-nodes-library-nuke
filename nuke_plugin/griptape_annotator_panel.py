@@ -36,7 +36,7 @@ _TILE_COLOR_EXPOSE = 0x9B59B6FF
 _INPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact"]
 
 # Artifact types available when marking a node as an output.
-_OUTPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "ImageSequenceArtifact", "ThreeDUrlArtifact"]
+_OUTPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "Sequence", "ThreeDUrlArtifact"]
 
 # Knobs that are never useful to expose — purely internal Nuke state
 _INTERNAL_KNOBS = frozenset(

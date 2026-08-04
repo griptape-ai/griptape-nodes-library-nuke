@@ -10,9 +10,7 @@ Logs go to stderr; the final output manifest JSON is written to --output-manifes
 from __future__ import annotations
 
 import argparse
-import glob as _glob
 import json
-import re
 import sys
 
 import nuke  # type: ignore[import-not-found]
@@ -20,7 +18,7 @@ import nuke  # type: ignore[import-not-found]
 # Artifact types whose output is written by a Nuke execute call on a file-knob node.
 _EXECUTE_TYPES = {
     "ImageArtifact",
-    "ImageSequenceArtifact",
+    "Sequence",
     "ImageUrlArtifact",
     "VideoArtifact",
     "VideoUrlArtifact",
@@ -35,7 +33,7 @@ def main() -> None:
     # parse_known_args: nuke -t may inject extra positional args
     args, _ = parser.parse_known_args()
 
-    outputs: dict[str, str | list[str]] = {}
+    outputs: dict[str, str] = {}
     errors: list[str] = []
 
     try:
@@ -102,12 +100,7 @@ def main() -> None:
             print(f"executing {spec['node']} frames {first}-{last} → {out_path}", file=sys.stderr)
             try:
                 nuke.execute(spec["node"], first, last)
-                if artifact_type == "ImageSequenceArtifact":
-                    glob_pattern = re.sub(r"%0?\d*d", "*", out_path)
-                    frame_paths = sorted(_glob.glob(glob_pattern))
-                    outputs[gt_name] = frame_paths
-                else:
-                    outputs[gt_name] = out_path
+                outputs[gt_name] = out_path
             except Exception as exc:
                 msg = f"ERROR: execute failed for {spec['node']!r}: {exc}"
                 print(msg, file=sys.stderr)
