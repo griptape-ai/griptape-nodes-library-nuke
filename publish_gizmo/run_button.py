@@ -24,9 +24,11 @@ packages available). ``nuke`` is already in scope when exec'd from the gizmo.
 Qt (PySide2 or PySide6) is bundled with Nuke and available here.
 """
 
+import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -54,14 +56,37 @@ except ImportError:
     _SENTINEL = ""
 
 
-def _build_child_env(companion: str, base_env: dict) -> dict:
-    """Return a subprocess env with XDG_CONFIG_HOME redirected into the bundle.
+def _gizmo_local_dir(companion: str, workflow_stem: str) -> str:
+    """Return the per-machine base dir for this gizmo's venv and config.
 
-    Keeps all engine config writes (e.g. projects_to_register) inside the
-    throwaway companion directory instead of the user's global ~/.config.
-    companion must already be an absolute forward-slashed path.
+    The gizmo (and its pyproject.toml) live on a shared drive, but each artist's
+    venv/config must be created locally — a venv built for one artist's machine
+    crashes on another's. Deriving a per-machine path keyed on the shared
+    companion location keeps distinct gizmos separate and the same gizmo stable
+    across sessions on a given machine. companion must already be an absolute
+    forward-slashed path so the hash is stable regardless of the OS that stored
+    it. Returns an absolute forward-slashed path.
     """
-    return {**base_env, "XDG_CONFIG_HOME": companion + "/.gtn_config"}
+    slug = re.sub(r"[^a-z0-9]+", "-", workflow_stem.lower()).strip("-") or "gizmo"
+    digest = hashlib.sha256(companion.encode("utf-8")).hexdigest()[:8]
+    base = os.path.join(os.path.expanduser("~"), ".local", "share", "griptape_nodes", "venvs")
+    return os.path.join(base, f"{slug}-{digest}").replace("\\", "/")
+
+
+def _build_child_env(companion: str, local_dir: str, base_env: dict) -> dict:
+    """Return a subprocess env pointing config and the uv venv at the local dir.
+
+    XDG_CONFIG_HOME keeps engine config writes (e.g. projects_to_register) out of
+    the user's global ~/.config, and UV_PROJECT_ENVIRONMENT redirects uv's venv
+    away from <companion>/.venv (which would be shared-drive) to a per-machine
+    location. companion is still passed for signature stability; local_dir must
+    already be an absolute forward-slashed path.
+    """
+    return {
+        **base_env,
+        "XDG_CONFIG_HOME": local_dir + "/.gtn_config",
+        "UV_PROJECT_ENVIRONMENT": local_dir + "/.venv",
+    }
 
 
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).
@@ -278,11 +303,20 @@ if not companion or not os.path.isdir(companion):
 companion = companion.replace("\\", "/")
 node["_companion_dir"].setValue(companion)
 
-# Build the child-process environment once.  Redirecting XDG_CONFIG_HOME into a
-# bundle-local subdir ensures the engine's user config writes (e.g. the
-# projects_to_register list) stay inside the throwaway bundle directory and never
-# pollute the user's global ~/.config/griptape_nodes.
-_child_env = _build_child_env(companion, os.environ)
+# -- Resolve the per-machine local dir (venv + config) --
+# The companion (and its pyproject.toml) may live on a shared drive; the venv
+# and engine config must be created on THIS machine, not shared, or a venv built
+# for one artist crashes on another's. Keyed on the normalized companion path so
+# it is stable across sessions and unique per gizmo.
+_workflow_stem = os.path.splitext(_config.get("workflow_name", "") or _workflow_filename)[0]
+_local_dir = _gizmo_local_dir(companion, _workflow_stem)
+os.makedirs(_local_dir, exist_ok=True)
+
+# Build the child-process environment once.  XDG_CONFIG_HOME keeps the engine's
+# user config writes (e.g. the projects_to_register list) out of the user's
+# global ~/.config, and UV_PROJECT_ENVIRONMENT redirects uv's venv off the
+# (possibly shared) companion dir onto this machine's local dir.
+_child_env = _build_child_env(companion, _local_dir, os.environ)
 
 # -- Resolve workflow file from version subdir --
 
@@ -417,7 +451,7 @@ else:
                     uv = _p
                     break
 
-    if not os.path.isdir(os.path.join(companion, ".venv")):
+    if not os.path.isdir(os.path.join(_local_dir, ".venv")):
         _pre_dialog_logs.append(
             "Building your gizmo python environment...\n"
             "This will take a few minutes the first gizmo run, but will be faster on subsequent gizmo runs."
