@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -93,6 +95,12 @@ class NukeGizmoPublisher:
             # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
             self._packager.package_to_folder(companion_base, workflow)
 
+            # Generate a uv.lock so the shared companion carries a pinned lockfile.
+            # At run time the gizmo sets UV_FROZEN, so uv never writes back to the
+            # (possibly read-only) shared drive.
+            self._packager.emit_progress(5.0, "Locking dependencies...")
+            self._write_lockfile(companion_base)
+
             # Override the bundled project.yml with Nuke-specific output conventions
             # so outputs land next to the .nk file, not inside the companion bundle.
             self._customize_project_yml(companion_base)
@@ -163,6 +171,36 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    # -- Dependency locking --
+
+    @staticmethod
+    def _write_lockfile(companion_base: Path) -> None:
+        """Generate a uv.lock in the companion from its pyproject.toml.
+
+        Best-effort: a missing uv or a lock failure is logged and swallowed so
+        publishing still succeeds — the run button installs uv and resolves on
+        first run if no lock ships.
+        """
+        uv = shutil.which("uv")
+        if not uv:
+            logger.warning("uv not found on PATH; skipping uv.lock generation. Gizmo will resolve deps at run time.")
+            return
+        try:
+            result = subprocess.run(  # noqa: S603
+                [uv, "lock", "--project", str(companion_base)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as err:
+            logger.warning("uv lock failed (%s); gizmo will resolve deps at run time.", err)
+            return
+        if result.returncode != 0:
+            logger.warning(
+                "uv lock exited %d; gizmo will resolve deps at run time.\n%s", result.returncode, result.stderr
+            )
 
     # -- File copy helpers --
 

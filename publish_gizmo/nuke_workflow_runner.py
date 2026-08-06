@@ -22,13 +22,18 @@ import os
 import sys
 from pathlib import Path
 
-# Redirect the engine's USER config into a throwaway dir inside the bundle so
-# per-run project paths (and any other engine writes) never pollute the user's
-# global ~/.config/griptape_nodes.  Must be set before any griptape_nodes import
-# because xdg_config_home() is evaluated once at config_manager import time.
-# The guard lets run_button.py's explicit env= take precedence when set by the parent.
+# Redirect the engine's USER config off the user's global ~/.config/griptape_nodes
+# so per-run project paths (and any other engine writes) never pollute it.  Must
+# be set before any griptape_nodes import because xdg_config_home() is evaluated
+# once at config_manager import time.  The guard lets run_button.py's explicit
+# env= take precedence — in normal gizmo runs the parent always sets this to a
+# per-machine dir.  This fallback only fires for standalone/debug invocations of
+# this script; it points at a per-machine path (never the possibly-shared bundle)
+# so a bundle on a read-only or shared drive can't break the run.
 if not os.environ.get("XDG_CONFIG_HOME"):
-    os.environ["XDG_CONFIG_HOME"] = str(Path(__file__).resolve().parent / ".gtn_config").replace("\\", "/")
+    _data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    _config_home = Path(_data_home) / "griptape_nodes" / "gizmo_standalone_config"
+    os.environ["XDG_CONFIG_HOME"] = str(_config_home).replace("\\", "/")
 
 import argparse  # noqa: E402
 import importlib.util  # noqa: E402

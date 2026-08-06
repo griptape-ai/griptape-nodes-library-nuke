@@ -56,6 +56,16 @@ except ImportError:
     _SENTINEL = ""
 
 
+def _venv_root() -> str:
+    """Return the per-machine base dir under which gizmo venvs/configs live.
+
+    Honors XDG_DATA_HOME so sites with roaming home directories can relocate the
+    venv root onto machine-local storage; falls back to ~/.local/share.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(data_home, "griptape_nodes", "venvs")
+
+
 def _gizmo_local_dir(companion: str, workflow_stem: str) -> str:
     """Return the per-machine base dir for this gizmo's venv and config.
 
@@ -63,29 +73,31 @@ def _gizmo_local_dir(companion: str, workflow_stem: str) -> str:
     venv/config must be created locally — a venv built for one artist's machine
     crashes on another's. Deriving a per-machine path keyed on the shared
     companion location keeps distinct gizmos separate and the same gizmo stable
-    across sessions on a given machine. companion must already be an absolute
-    forward-slashed path so the hash is stable regardless of the OS that stored
-    it. Returns an absolute forward-slashed path.
+    across sessions on a given machine. Returns an absolute forward-slashed path.
     """
     slug = re.sub(r"[^a-z0-9]+", "-", workflow_stem.lower()).strip("-") or "gizmo"
-    digest = hashlib.sha256(companion.encode("utf-8")).hexdigest()[:8]
-    base = os.path.join(os.path.expanduser("~"), ".local", "share", "griptape_nodes", "venvs")
-    return os.path.join(base, f"{slug}-{digest}").replace("\\", "/")
+    # normcase(realpath(...)) collapses case- and symlink-variant companion paths
+    # (e.g. C:/ vs c:/, relative vs absolute) so one gizmo keeps one venv.
+    normalized = os.path.normcase(os.path.realpath(companion))
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8]
+    return os.path.join(_venv_root(), f"{slug}-{digest}").replace("\\", "/")
 
 
-def _build_child_env(companion: str, local_dir: str, base_env: dict) -> dict:
+def _build_child_env(local_dir: str, base_env: dict) -> dict:
     """Return a subprocess env pointing config and the uv venv at the local dir.
 
     XDG_CONFIG_HOME keeps engine config writes (e.g. projects_to_register) out of
-    the user's global ~/.config, and UV_PROJECT_ENVIRONMENT redirects uv's venv
-    away from <companion>/.venv (which would be shared-drive) to a per-machine
-    location. companion is still passed for signature stability; local_dir must
-    already be an absolute forward-slashed path.
+    the user's global ~/.config, UV_PROJECT_ENVIRONMENT redirects uv's venv away
+    from <companion>/.venv (which would be shared-drive) to a per-machine
+    location, and UV_FROZEN stops uv from writing uv.lock back to the (possibly
+    read-only) shared companion dir. local_dir must already be an absolute
+    forward-slashed path.
     """
     return {
         **base_env,
         "XDG_CONFIG_HOME": local_dir + "/.gtn_config",
         "UV_PROJECT_ENVIRONMENT": local_dir + "/.venv",
+        "UV_FROZEN": "1",
     }
 
 
@@ -308,7 +320,9 @@ node["_companion_dir"].setValue(companion)
 # and engine config must be created on THIS machine, not shared, or a venv built
 # for one artist crashes on another's. Keyed on the normalized companion path so
 # it is stable across sessions and unique per gizmo.
-_workflow_stem = os.path.splitext(_config.get("workflow_name", "") or _workflow_filename)[0]
+# workflow_name is already a stem (the publisher passes workflow_file_path.stem);
+# only the workflow_filename fallback carries an extension to strip.
+_workflow_stem = _config.get("workflow_name", "") or os.path.splitext(_workflow_filename)[0]
 _local_dir = _gizmo_local_dir(companion, _workflow_stem)
 os.makedirs(_local_dir, exist_ok=True)
 
@@ -316,7 +330,7 @@ os.makedirs(_local_dir, exist_ok=True)
 # user config writes (e.g. the projects_to_register list) out of the user's
 # global ~/.config, and UV_PROJECT_ENVIRONMENT redirects uv's venv off the
 # (possibly shared) companion dir onto this machine's local dir.
-_child_env = _build_child_env(companion, _local_dir, os.environ)
+_child_env = _build_child_env(_local_dir, os.environ)
 
 # -- Resolve workflow file from version subdir --
 
