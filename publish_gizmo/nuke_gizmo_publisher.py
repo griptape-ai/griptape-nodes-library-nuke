@@ -246,14 +246,12 @@ class NukeGizmoPublisher:
         * ``outputs`` directory is set to ``griptape_outputs`` (relative) so that
           outputs resolve next to the ``.nk`` file when a Nuke script directory
           is passed as the workspace at runtime.
-        * ``save_node_output`` uses a naming convention compatible with Nuke conventions.
-          The workflow name is hardcoded as a literal subdirectory (companion_base.name)
-          rather than using the ``{workflow_name}`` builtin variable, which resolves to
-          the workflow's full absolute path when the gizmo's companion directory is outside
-          the user's workspace (i.e. always, since outputs go next to the .nk file).
-          ``node_name`` is optional so that utility callers that omit it
-          (e.g. pillow_nodes_library, video_utils, audio_utils) do not cause errors:
-          ``{outputs}/<workflow_name>/{node_name?:_}{file_name_base}_v{_index?:04}.{file_extension}``
+        * ``save_node_output`` uses a versioned naming convention so each gizmo
+          run produces a new numbered file Nuke can detect and load:
+          ``{outputs}/{sub_dirs?:/}{file_name_base}_v{_index?:04}.{file_extension}``
+          ``{sub_dirs?:/}`` passes through any relative subdirectory; when absent
+          the whole token (including its separator) is dropped.
+          ``CREATE_NEW`` collision policy auto-increments the index on each run.
         """
         project_yml = companion_base / "project.yml"
         read_result = GriptapeNodes.handle_request(
@@ -287,9 +285,9 @@ class NukeGizmoPublisher:
             # so the result is "{outputs}/comp.exr" (single slash, no "//").
             # sub_dirs carries no trailing slash, so "{sub_dirs?}" alone would yield
             # "renderscomp.exr".
-            macro="{outputs}/{sub_dirs?:/}{file_name_base}.{file_extension}",
+            macro="{outputs}/{sub_dirs?:/}{file_name_base}_v{_index?:04}.{file_extension}",
             policy=SituationPolicy(
-                on_collision=SituationFilePolicy.OVERWRITE,
+                on_collision=SituationFilePolicy.CREATE_NEW,
                 create_dirs=True,
             ),
             fallback="save_file",
