@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -98,10 +99,10 @@ class NukeGizmoPublisher:
             self._packager.package_to_folder(companion_base, workflow)
 
             # Generate a uv.lock so the shared companion carries a pinned lockfile.
-            # At run time the gizmo sets UV_FROZEN, so uv never writes back to the
-            # (possibly read-only) shared drive.
+            # When one is present the gizmo runs frozen, so uv never writes back to
+            # the (possibly read-only) shared drive.
             self._packager.emit_progress(5.0, "Locking dependencies...")
-            self._write_lockfile(companion_base)
+            lock_error = self._write_lockfile(companion_base)
 
             # Override the bundled project.yml with Nuke-specific output conventions
             # so outputs land next to the .nk file, not inside the companion bundle.
@@ -166,10 +167,19 @@ class NukeGizmoPublisher:
             self._save_publish_config(gizmo_path, version)
 
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
+            details = f"Gizmo v{version} installed to: {gizmo_path}"
+            if lock_error:
+                # Surface the skipped lock in the publish result, not just the log:
+                # without it the artist running the gizmo is the first to find out.
+                details += (
+                    f"\n\nWarning: dependencies were not pinned ({lock_error}). "
+                    "The gizmo will resolve them on the machine that runs it, which is slower "
+                    "and may pick up different versions. Install uv and re-publish to pin them."
+                )
             return PublishWorkflowResultSuccess(
                 published_workflow_file_path=str(gizmo_path),
                 skip_published_workflow_registration=True,
-                result_details=f"Gizmo v{version} installed to: {gizmo_path}",
+                result_details=details,
             )
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
@@ -178,17 +188,37 @@ class NukeGizmoPublisher:
     # -- Dependency locking --
 
     @staticmethod
-    def _write_lockfile(companion_base: Path) -> None:
-        """Generate a uv.lock in the companion from its pyproject.toml.
-
-        Best-effort: a missing uv or a lock failure is logged and swallowed so
-        publishing still succeeds — the run button installs uv and resolves on
-        first run if no lock ships.
-        """
+    def _find_uv() -> str | None:
+        """Locate the uv binary, falling back to the paths run_button.py installs into."""
         uv = shutil.which("uv")
+        if uv:
+            return uv
+        ext = ".exe" if platform.system() == "Windows" else ""
+        # The engine process may not inherit the shell PATH that has uv on it
+        # (notably a GUI-launched app on macOS), so check the known install dirs.
+        candidates = [
+            Path.home() / ".local" / "share" / "griptape_nodes" / "bin" / f"uv{ext}",
+            Path.home() / ".local" / "bin" / f"uv{ext}",
+            Path.home() / ".cargo" / "bin" / f"uv{ext}",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    @classmethod
+    def _write_lockfile(cls, companion_base: Path) -> str | None:
+        """Generate a uv.lock in the companion; return a reason string on failure.
+
+        Best-effort: a missing uv or a lock failure is never fatal to publishing —
+        the gizmo resolves deps at run time when no lock ships. The reason is
+        returned so the publish result can say so instead of only logging it.
+        """
+        uv = cls._find_uv()
         if not uv:
-            logger.warning("uv not found on PATH; skipping uv.lock generation. Gizmo will resolve deps at run time.")
-            return
+            reason = "uv not found on PATH"
+            logger.warning("%s; skipping uv.lock generation. Gizmo will resolve deps at run time.", reason)
+            return reason
         try:
             result = subprocess.run(  # noqa: S603
                 [uv, "lock", "--project", str(companion_base)],
@@ -199,11 +229,20 @@ class NukeGizmoPublisher:
             )
         except (OSError, subprocess.SubprocessError) as err:
             logger.warning("uv lock failed (%s); gizmo will resolve deps at run time.", err)
-            return
+            return f"uv lock failed: {err}"
         if result.returncode != 0:
             logger.warning(
                 "uv lock exited %d; gizmo will resolve deps at run time.\n%s", result.returncode, result.stderr
             )
+            return f"uv lock exited {result.returncode}"
+        if not (companion_base / "uv.lock").is_file():
+            # uv can exit 0 without producing a lock next to the project (e.g. an
+            # inherited UV_* setting redirecting it), and the run button keys off
+            # the file's presence, so verify rather than trust the exit code.
+            reason = "uv lock reported success but no uv.lock was written"
+            logger.warning("%s; gizmo will resolve deps at run time.", reason)
+            return reason
+        return None
 
     # -- File copy helpers --
 

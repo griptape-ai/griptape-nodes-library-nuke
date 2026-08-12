@@ -30,12 +30,13 @@ def _func_source(func_name: str) -> str:
 # Load the pure helpers into one shared namespace so _gizmo_local_dir can call
 # _venv_root, without running run_button.py's module-scope Nuke/Qt code.
 _NS: dict = {"os": os, "re": re, "hashlib": hashlib}
-for _name in ("_venv_root", "_gizmo_local_dir", "_build_child_env"):
+for _name in ("_venv_root", "_gizmo_local_dir", "_has_lockfile", "_build_child_env"):
     exec(_func_source(_name), _NS)  # noqa: S102
 
 _venv_root = _NS["_venv_root"]
 _build_child_env = _NS["_build_child_env"]
 _gizmo_local_dir = _NS["_gizmo_local_dir"]
+_has_lockfile = _NS["_has_lockfile"]
 
 
 class TestGizmoLocalDir:
@@ -110,10 +111,21 @@ class TestBuildChildEnv:
         env = _build_child_env(self._LOCAL, {})
         assert env["UV_PROJECT_ENVIRONMENT"] == self._LOCAL + "/.venv"
 
-    def test_sets_uv_frozen(self) -> None:
+    def test_sets_uv_frozen_when_frozen(self) -> None:
         """UV_FROZEN stops uv writing uv.lock back to the shared companion dir."""
-        env = _build_child_env(self._LOCAL, {})
+        env = _build_child_env(self._LOCAL, {}, frozen=True)
         assert env["UV_FROZEN"] == "1"
+
+    def test_omits_uv_frozen_when_not_frozen(self) -> None:
+        """Without a shipped uv.lock, UV_FROZEN would make uv refuse to run at all."""
+        env = _build_child_env(self._LOCAL, {}, frozen=False)
+        assert "UV_FROZEN" not in env
+
+    def test_clears_inherited_uv_frozen_when_not_frozen(self) -> None:
+        """A site-wide UV_FROZEN export must not reintroduce the no-lockfile failure."""
+        env = _build_child_env(self._LOCAL, {"UV_FROZEN": "1", "UV_LOCKED": "1"}, frozen=False)
+        assert "UV_FROZEN" not in env
+        assert "UV_LOCKED" not in env
 
     def test_config_and_venv_not_in_companion(self) -> None:
         env = _build_child_env(self._LOCAL, {})
@@ -138,6 +150,30 @@ class TestBuildChildEnv:
         original_base = dict(base)
         _build_child_env(self._LOCAL, base)
         assert base == original_base
+
+    def test_does_not_mutate_base_env_when_clearing_uv_frozen(self) -> None:
+        base = {"PATH": "/usr/bin", "UV_FROZEN": "1"}
+        original_base = dict(base)
+        _build_child_env(self._LOCAL, base, frozen=False)
+        assert base == original_base
+
+
+class TestHasLockfile:
+    """Presence of the companion's uv.lock decides whether the run is frozen."""
+
+    def test_true_when_lock_present(self, tmp_path) -> None:
+        (tmp_path / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+        assert _has_lockfile(str(tmp_path)) is True
+
+    def test_false_when_lock_absent(self, tmp_path) -> None:
+        assert _has_lockfile(str(tmp_path)) is False
+
+    def test_false_when_companion_missing(self, tmp_path) -> None:
+        assert _has_lockfile(str(tmp_path / "nope")) is False
+
+    def test_false_when_lock_is_a_directory(self, tmp_path) -> None:
+        (tmp_path / "uv.lock").mkdir()
+        assert _has_lockfile(str(tmp_path)) is False
 
 
 class TestRunnerXdgConfigHomeImportOrder:
