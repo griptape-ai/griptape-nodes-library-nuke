@@ -42,12 +42,33 @@ import logging  # noqa: E402
 import subprocess  # noqa: E402
 import tempfile  # noqa: E402
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from griptape_nodes.common.project_templates.directory import DirectoryDefinition
 from output_paths import build_macro_map, load_project_template, resolve_output_dir, serialize_output
 from output_protocol import emit_payload
 
 logger = logging.getLogger(__name__)
+
+
+def _load_bundled_env(env_path: Path) -> None:
+    """Apply the bundled .env, letting a meaningful parent value win but never a blank one.
+
+    The bundled .env only fills variables the parent Nuke process did not already
+    set, so a pipeline/farm job can supply its own credentials (e.g. a per-job
+    GT_CLOUD_API_KEY) without being clobbered.  ``load_dotenv(override=False)``
+    cannot express that on its own: python-dotenv defers on key *presence*, so a
+    blank ``GT_CLOUD_API_KEY=""`` inherited from Nuke's environment shadows a
+    valid key in the bundle and the published gizmo fails as if no credential
+    were configured.  A blank carries no credential to defer to, so treat it the
+    same as absent -- on both sides.  Blanks in the bundle are dropped rather than
+    exported, because the engine's own secret lookup checks os.environ first and a
+    blank there reads as a configured empty credential; bundles published before
+    blank-valued secrets were filtered out still carry them.
+    """
+    for key, value in dotenv_values(env_path).items():
+        if not value or os.environ.get(key):
+            continue
+        os.environ[key] = value
 
 
 def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
@@ -61,13 +82,9 @@ def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
     """
     script_dir = Path(__file__).parent
 
-    # Load .env with python-dotenv (handles quoted values correctly).
-    # override=False: the bundled .env only fills env vars the parent Nuke
-    # process did not already set, so a pipeline/farm job can supply its own
-    # credentials (e.g. per-job GT_CLOUD_API_KEY) without being clobbered.
     env_path = script_dir / ".env"
     if env_path.exists():
-        load_dotenv(env_path, override=False)
+        _load_bundled_env(env_path)
 
     # When a Nuke script directory is available, use it as the workspace so
     # that relative directory macros in project.yml (like ``outputs``) resolve

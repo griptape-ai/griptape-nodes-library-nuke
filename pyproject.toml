@@ -7,6 +7,9 @@ readme = "README.md"
 requires-python = "~=3.12.0"
 dependencies = [
     "griptape-nodes>=0.93.0",
+    # Declared directly, not left to griptape-nodes to pull in: the publisher
+    # imports WorkflowPackager.staged_publish, which lands in engine 0.98.0.
+    "griptape-nodes-engine>=0.98.0",
 ]
 
 [build-system]

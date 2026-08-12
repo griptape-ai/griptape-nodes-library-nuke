@@ -16,6 +16,10 @@ from publish_gizmo.nuke_publish_options import get_nuke_publish_options
 
 logger = logging.getLogger("griptape_nodes")
 
+# Same icon reference the library JSON gives every Nuke node, so the publish target
+# reads as belonging to this library rather than picking a generic Lucide glyph.
+PUBLISH_TARGET_ICON = "logos/nuke.png"
+
 
 def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
     if not isinstance(request, PublishWorkflowRequest):
@@ -47,5 +51,8 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
                 end_flow_node_type="NukeEndFlow",
                 end_flow_node_library_name=library_data.name,
                 get_publish_options=get_nuke_publish_options,
+                display_name="Publish to Nuke Gizmo",
+                description="Package the workflow as a versioned .gizmo installed into a Nuke plugin directory.",
+                icon=PUBLISH_TARGET_ICON,
             ),
         )
