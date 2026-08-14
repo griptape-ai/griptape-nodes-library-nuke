@@ -79,7 +79,8 @@ _TCL_HINT_TOOLTIP = (
     "Expressions are evaluated when the workflow runs."
 )
 _OUTPUT_DIR_TOOLTIP = (
-    "Directory for workflow outputs. Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
+    "Directory for workflow outputs. A relative path is resolved against the folder containing this .nk script. "
+    "Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
 )
 _LINK_BUTTON_TOOLTIP = (
     "Link this field to the gizmo name, script folder, script name, frame, or any node.knob. "

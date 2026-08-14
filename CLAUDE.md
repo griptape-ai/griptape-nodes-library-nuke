@@ -17,6 +17,7 @@ publish_gizmo/           Gizmo publisher — packages workflows as versioned .gi
   nuke_discovery.py        Nuke installation auto-discovery (macOS/Windows/Linux)
   nuke_gizmo_builder.py    Generates .gizmo TCL from a workflow shape
   run_button.py            Executes inside Nuke's Python; PySide6/PySide2 progress dialog
+  output_paths.py          Output Directory resolution + macro/artifact → Nuke-openable paths
 nuke_runner/             Headless runner — scripts that run inside nuke -t (stdlib only)
   runner.py                Entry point; reads manifest, runs Write nodes, collects outputs
   introspect.py            Knob schema introspection; writes JSON to temp file

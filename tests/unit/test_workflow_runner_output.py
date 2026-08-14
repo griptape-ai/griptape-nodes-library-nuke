@@ -46,21 +46,6 @@ def test_extract_payload_round_trips_emit():
     assert extract_payload(buf.getvalue()) == payload
 
 
-def test_serialize_output_empty():
-    """_serialize_output returns {} for None or empty input — not a crash."""
-    import importlib.util
-    from pathlib import Path
-
-    spec = importlib.util.spec_from_file_location(
-        "_nuke_workflow_runner",
-        Path(__file__).parent.parent.parent / "publish_gizmo" / "nuke_workflow_runner.py",
-    )
-    # We can't exec the full module (it imports third-party libs), so just test
-    # the pure helper in isolation by re-implementing the logic inline here.
-    # This is a smoke-test that the contract hasn't drifted.
-    assert spec is not None  # the file exists
-
-
 def test_extract_payload_with_simulated_rich_pollution():
     """Simulate the actual Agent-run stdout: ANSI art before the JSON sentinel."""
     ansi_art = "\x1b[1m\x1b[0m╭── Griptape Nodes ──╮\n│ libraries loaded   │\n╰────────────────────╯\n"

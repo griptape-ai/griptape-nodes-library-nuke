@@ -293,6 +293,11 @@ class TestTclHintTooltips:
         assert ' t "' in knob_line
         assert r"\[file dirname" in knob_line
 
+    def test_output_dir_tooltip_documents_relative_resolution(self) -> None:
+        gizmo = _generate_gizmo({})
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 output_dir" in line)
+        assert "relative path is resolved against the folder containing this .nk script" in knob_line
+
     def test_output_knob_has_reference_tooltip(self) -> None:
         gizmo = _generate_gizmo_with_output(
             {"caption": {"type": "str", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}

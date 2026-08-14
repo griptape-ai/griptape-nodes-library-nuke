@@ -39,15 +39,15 @@ import argparse  # noqa: E402
 import importlib.util  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
-import re  # noqa: E402
 import subprocess  # noqa: E402
 import tempfile  # noqa: E402
 
 from dotenv import load_dotenv
-from griptape_nodes.common.project_templates import load_project_template_from_yaml
 from griptape_nodes.common.project_templates.directory import DirectoryDefinition
-from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
+from output_paths import build_macro_map, load_project_template, resolve_output_dir, serialize_output
 from output_protocol import emit_payload
+
+logger = logging.getLogger(__name__)
 
 
 def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
@@ -99,100 +99,6 @@ def _load_workflow_module(workflow_file: str):
     return module
 
 
-def _build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dict[str, str]:
-    """Build a map of macro names to absolute paths from the project.yml.
-
-    The project system stores output values in macro form (e.g. {outputs}/file.jpg).
-    This map lets us resolve those macros to real paths that Nuke can open.
-
-    Args:
-        script_dir: The companion bundle directory (where project.yml lives).
-        workspace_dir: If provided, relative directory macros are resolved
-            against this directory instead of *script_dir*.  This is used when
-            the Nuke script directory was passed as the workspace so that
-            ``{outputs}`` etc. point next to the ``.nk`` file.
-    """
-    project_yml = script_dir / "project.yml"
-    if not project_yml.exists():
-        return {}
-
-    validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
-    template = load_project_template_from_yaml(project_yml.read_text(encoding="utf-8"), validation_info)
-    if template is None:
-        return {}
-
-    base_dir = workspace_dir if workspace_dir is not None else script_dir
-
-    # Resolve relative macros against base_dir so the companion bundle is portable.
-    # Absolute path_macros (e.g. from a legacy publish) are kept as-is.
-    result = {}
-    for dir_def in template.directories.values():
-        raw = dir_def.path_macro
-        value: str | None = raw if isinstance(raw, str) else raw.select() if hasattr(raw, "select") else None
-        if not value:
-            continue
-        if not Path(value).is_absolute():
-            value = str(base_dir / value)
-        # Normalize to forward slashes: Nuke/TCL treats backslashes as escape
-        # characters when saving .nk files, which silently mangles Windows paths.
-        result[dir_def.name] = value.replace("\\", "/")
-    return result
-
-
-def _resolve_macro_path(value: str, macro_map: dict[str, str]) -> str:
-    """Replace {outputs}, {inputs}, etc. in a path string with their resolved values."""
-    if "{" not in value:
-        return value
-
-    def _replace(match: re.Match[str]) -> str:
-        value = macro_map.get(match.group(1))
-        return value if value is not None else match.group(0)
-
-    return re.sub(r"\{([\w-]+)\}", _replace, value)
-
-
-def _serialize_output(output: dict | None, macro_map: dict[str, str]) -> dict[str, str]:
-    """Flatten and serialize the workflow output dict for JSON printing.
-
-    The executor returns a nested dict: {node_name: {param_name: value}}.
-    We flatten it to {param_name: str(value)} for the gizmo to consume.
-    Image artifacts expose a .url or .value attribute that contains the path.
-    Macro paths like {outputs}/file.jpg are resolved to absolute paths.
-    """
-    if not output:
-        return {}
-
-    result: dict[str, str] = {}
-    for _node_name, params in output.items():
-        if not isinstance(params, dict):
-            continue
-        for param_name, value in params.items():
-            if value is None:
-                result[param_name] = ""
-            elif hasattr(value, "url"):
-                # ImageUrlArtifact — convert file:// URI to a plain path for Nuke.
-                # file:///C:/path (Windows) and file:///unix/path both have three
-                # slashes; stripping only "file://" leaves "/C:/path" on Windows
-                # which is invalid.  Strip the third slash only when followed by a
-                # drive letter (e.g. /C:/) so Unix absolute paths are unchanged.
-                url = str(value.url)
-                if url.startswith("file://"):
-                    url = url[7:]  # -> /C:/... on Windows, /unix/... on Unix
-                    if len(url) >= 3 and url[0] == "/" and url[1].isalpha() and url[2] == ":":
-                        url = url[1:]  # -> C:/... on Windows
-                result[param_name] = _resolve_macro_path(url, macro_map)
-            elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
-                raw = value.value
-                if isinstance(raw, bytes):
-                    result[param_name] = f"<binary {len(raw)} bytes>"
-                else:
-                    result[param_name] = _resolve_macro_path(raw, macro_map)
-            else:
-                result[param_name] = _resolve_macro_path(str(value), macro_map)
-
-    return result
-
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -230,6 +136,14 @@ def main() -> None:
 
     # Bootstrap environment before loading workflow (needs .env for API keys etc.)
     _bootstrap_environment(nk_script_dir=args.nk_script_dir)
+
+    # Resolve the requested output directory once, up front.  Both the engine's
+    # save path and the path reported back to Nuke are derived from this single
+    # absolute value, so a relative knob value can't be resolved two different
+    # ways (which left Nuke's Read node unable to open a file that was written).
+    output_dir = resolve_output_dir(args.output_dir, args.nk_script_dir, str(Path(__file__).parent))
+    if output_dir:
+        logger.info("Output directory: %s", output_dir)
 
     # Eagerly register the bundled libraries before the workflow module loads.
     # The workflow uses name-based RegisterLibraryFromFileRequest, which only
@@ -283,13 +197,12 @@ def main() -> None:
     temp_project_file = None
     project_file_path: str | None = str(bundle_project_file) if bundle_project_file.exists() else None
 
-    if args.output_dir and bundle_project_file.exists():
-        validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
-        template = load_project_template_from_yaml(bundle_project_file.read_text(encoding="utf-8"), validation_info)
+    if output_dir:
+        template = load_project_template(bundle_project_file)
         if template is not None:
             template.directories["outputs"] = DirectoryDefinition(
                 name="outputs",
-                path_macro=args.output_dir,
+                path_macro=output_dir,
             )
             tmp = tempfile.NamedTemporaryFile(
                 mode="w",
@@ -319,10 +232,10 @@ def main() -> None:
                 pass
 
     workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
-    macro_map = _build_macro_map(Path(__file__).parent, workspace_dir=workspace_dir)
-    if args.output_dir:
-        macro_map["outputs"] = args.output_dir
-    result = _serialize_output(output, macro_map)
+    macro_map = build_macro_map(script_dir, workspace_dir=workspace_dir)
+    if output_dir:
+        macro_map["outputs"] = output_dir
+    result = serialize_output(output, macro_map)
     emit_payload(result)
 
 
