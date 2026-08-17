@@ -41,6 +41,7 @@ from griptape_nodes.retained_mode.publishing import WorkflowPackager
 from publish_gizmo.constants import (
     GRIPTAPE_DIR_NAME,
     INIT_MARKER,
+    OUTPUTS_DIR_NAME,
     versioned_gizmo_filename,
 )
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
@@ -269,7 +270,7 @@ class NukeGizmoPublisher:
 
         template.directories["outputs"] = DirectoryDefinition(
             name="outputs",
-            path_macro="griptape_outputs",
+            path_macro=OUTPUTS_DIR_NAME,
         )
 
         template.situations["save_node_output"] = SituationTemplate(

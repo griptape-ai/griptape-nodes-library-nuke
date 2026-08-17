@@ -4,6 +4,7 @@ import ast
 
 import pytest
 
+from publish_gizmo.constants import OUTPUTS_DIR_NAME
 from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder, _build_knob_changed_code
 
 
@@ -307,6 +308,29 @@ class TestTclHintTooltips:
         gizmo = _generate_gizmo({"count": {"type": "int", "default_value": 1}})
         knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {3 count" in line)
         assert ' t "' not in knob_line
+
+
+class TestOutputDirDefaultDocumented:
+    """The Run tab must say where outputs land when Output Directory is blank (issue #98)."""
+
+    def test_run_tab_help_text_names_default_output_folder(self) -> None:
+        gizmo = _generate_gizmo({})
+        help_line = next(line for line in gizmo.splitlines() if "addUserKnob {26 _output_dir_help" in line)
+        assert OUTPUTS_DIR_NAME in help_line
+        assert ".nk script" in help_line
+
+    def test_help_text_sits_between_output_dir_knob_and_run_button(self) -> None:
+        gizmo = _generate_gizmo({})
+        lines = gizmo.splitlines()
+        knob_idx = next(i for i, line in enumerate(lines) if "addUserKnob {1 output_dir" in line)
+        help_idx = next(i for i, line in enumerate(lines) if "addUserKnob {26 _output_dir_help" in line)
+        button_idx = next(i for i, line in enumerate(lines) if "addUserKnob {22 run_workflow" in line)
+        assert knob_idx < help_idx < button_idx
+
+    def test_output_dir_tooltip_states_blank_default(self) -> None:
+        gizmo = _generate_gizmo({})
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 output_dir" in line)
+        assert OUTPUTS_DIR_NAME in knob_line
 
 
 class TestExpressionLinkButtons:

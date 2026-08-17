@@ -1,8 +1,8 @@
-"""Tests for gizmo_writer TCL literal escaping."""
+"""Tests for gizmo_writer TCL literal escaping and knob emission."""
 
 from __future__ import annotations
 
-from publish_gizmo.gizmo_writer import _tcl_escape_literal
+from publish_gizmo.gizmo_writer import GizmoWriter, _tcl_escape_literal
 
 
 class TestTclEscapeLiteral:
@@ -29,3 +29,21 @@ class TestTclEscapeLiteral:
 
     def test_newline_preserved(self) -> None:
         assert _tcl_escape_literal("line1\nline2") == "line1\nline2"
+
+
+class TestAddTextKnob:
+    def test_text_knob_emits_type_26_with_text_content(self) -> None:
+        w = GizmoWriter()
+        w.add_text_knob("_help", text="Saved next to the script.")
+        line = w.render().splitlines()[0]
+        assert line.startswith(" addUserKnob {26 _help")
+        assert 'l ""' in line
+        assert 'T "Saved next to the script."' in line
+        assert "+STARTLINE" in line
+
+    def test_text_knob_escapes_tcl_specials(self) -> None:
+        w = GizmoWriter()
+        w.add_text_knob("_help", text='use [value root.name] or "quotes"')
+        line = w.render().splitlines()[0]
+        assert r"\[value root.name]" in line
+        assert r"\"quotes\"" in line

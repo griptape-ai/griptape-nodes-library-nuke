@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 
-from publish_gizmo.constants import GT_EXPR_PREFIX, RUN_BUTTON_FILENAME, versioned_node_name
+from publish_gizmo.constants import GT_EXPR_PREFIX, OUTPUTS_DIR_NAME, RUN_BUTTON_FILENAME, versioned_node_name
 from publish_gizmo.gizmo_validator import validate_gizmo
 from publish_gizmo.gizmo_writer import GizmoWriter, NukeKnobType
 
@@ -79,8 +79,12 @@ _TCL_HINT_TOOLTIP = (
     "Expressions are evaluated when the workflow runs."
 )
 _OUTPUT_DIR_TOOLTIP = (
-    "Directory for workflow outputs. Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
+    f"Directory for workflow outputs. Leave blank to save to a '{OUTPUTS_DIR_NAME}' folder next to the .nk script. "
+    "Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
 )
+# Static Run-tab text under the Output Directory field. The blank-field default is
+# otherwise invisible until the user hovers the tooltip or finds the Outputs tab.
+_OUTPUT_DIR_HELP_TEXT = f"When blank, outputs are saved to a '{OUTPUTS_DIR_NAME}' folder next to this .nk script."
 _LINK_BUTTON_TOOLTIP = (
     "Link this field to the gizmo name, script folder, script name, frame, or any node.knob. "
     "The field shows the linked value; editing it by hand removes the link."
@@ -306,6 +310,7 @@ class NukeGizmoBuilder:
         w.add_tab("run_tab", label="Run")
         w.add_string_knob("output_dir", label="Output Directory", tooltip=_OUTPUT_DIR_TOOLTIP)
         self._write_link_button(w, "output_dir")
+        w.add_text_knob("_output_dir_help", text=_OUTPUT_DIR_HELP_TEXT)
         run_code = self._build_run_button_bootstrap(
             input_params,
             list(output_params.keys()),

@@ -41,7 +41,9 @@ class NukeKnobType:
     DOUBLE = 7
     PYSCRIPT = 22
     TAB = 20
-    DIVIDER = 26
+    # Nuke's Text_Knob: renders its T content as static text, or a horizontal
+    # divider when there is no content.
+    TEXT = 26
     MULTILINE_STRING = 28
 
 
@@ -125,11 +127,19 @@ class GizmoWriter:
 
     def add_divider(self, knob_name: str, label: str, flags: str = "+STARTLINE") -> None:
         """Add a horizontal divider / section label."""
-        self._knobs.append((NukeKnobType.DIVIDER, knob_name))
+        self._knobs.append((NukeKnobType.TEXT, knob_name))
         if flags:
-            self._lines.append(f' addUserKnob {{{NukeKnobType.DIVIDER} {knob_name} l "{label}" {flags}}}')
+            self._lines.append(f' addUserKnob {{{NukeKnobType.TEXT} {knob_name} l "{label}" {flags}}}')
         else:
-            self._lines.append(f' addUserKnob {{{NukeKnobType.DIVIDER} {knob_name} l "{label}"}}')
+            self._lines.append(f' addUserKnob {{{NukeKnobType.TEXT} {knob_name} l "{label}"}}')
+
+    def add_text_knob(self, knob_name: str, text: str, label: str = "", flags: str = "+STARTLINE") -> None:
+        """Add a static text knob (inline help text rendered in the panel)."""
+        self._knobs.append((NukeKnobType.TEXT, knob_name))
+        flag_suffix = f" {flags}" if flags else ""
+        self._lines.append(
+            f' addUserKnob {{{NukeKnobType.TEXT} {knob_name} l "{label}" T "{_tcl_escape_literal(text)}"{flag_suffix}}}'
+        )
 
     # -- Value knobs --
 
