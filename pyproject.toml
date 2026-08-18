@@ -6,9 +6,10 @@ authors = [{ name = "Dan Hutchinson", email = "dan.hutchinson@foundry.com" }]
 readme = "README.md"
 requires-python = "~=3.12.0"
 dependencies = [
-    "griptape-nodes>=0.93.0",
-    # Declared directly, not left to griptape-nodes to pull in: the publisher
-    # imports WorkflowPackager.staged_publish, which lands in engine 0.98.0.
+    # The engine ships the griptape_nodes package this library imports; the
+    # griptape-nodes distribution only ships the app. 0.98.0 is the release that
+    # adds WorkflowPackager.staged_publish, and no griptape-nodes release floors
+    # the engine that high, so the floor has to be declared here.
     "griptape-nodes-engine>=0.98.0",
 ]
 

@@ -430,24 +430,6 @@ wheels = [
 ]
 
 [[package]]
-name = "griptape-nodes"
-version = "0.93.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "griptape-nodes-engine" },
-    { name = "websockets" },
-    { name = "xdg-base-dirs" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8c/4a/dc51722e591173c36f1558e194b8bb1c9943e84c2dc6704fb90e79f6435c/griptape_nodes-0.93.0.tar.gz", hash = "sha256:dddfca94bd477f72fcab853e3b19b828ae71f1d01a61558e2e9b3036359f3391", size = 505557, upload-time = "2026-07-17T00:08:55.714Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/4c/003b101f2f862d3ed8b37743fc81dcb142c34ad43d380fd593b94b8b37ed/griptape_nodes-0.93.0-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:171a8aa830abe6ff5999e882f6b065a1492c9dabb8aae2326a6f9a9e1f3917c9", size = 7289576, upload-time = "2026-07-17T00:08:43.724Z" },
-    { url = "https://files.pythonhosted.org/packages/98/64/6333d62a4f4cb9d9caac07b6f7c2769389ae59a9df39116ae07371be7ef7/griptape_nodes-0.93.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:dc2dca6cda2d5af8754fad4543353a4421cdeb4c22c88a26295bdf308758112c", size = 7192720, upload-time = "2026-07-17T00:08:46.134Z" },
-    { url = "https://files.pythonhosted.org/packages/51/bc/36df8f6ddd8af5c39c0d06377e376b7e531b6695cf09f3dcf4bb22758506/griptape_nodes-0.93.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a2ddcb65742fd063f2394ffda0a800f25d98f77003568e717dc95271577201d5", size = 10592286, upload-time = "2026-07-17T00:08:48.59Z" },
-    { url = "https://files.pythonhosted.org/packages/09/b1/7dca0873ebac99dba23d5572eb3d3a55e2ddb14b1789bb1e65010a60ab2c/griptape_nodes-0.93.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a6a798c48eefe58775a9f70eb48e1f4f5dab65ec069bad70c3e02f286761bc91", size = 10115369, upload-time = "2026-07-17T00:08:51.584Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/6b/6421439512478066819df48d786135de629f7d08a7949d861422a48a2174/griptape_nodes-0.93.0-cp312-cp312-win_amd64.whl", hash = "sha256:7f1538d1c8fc4389e14baa6c58a0b9170f9ffd4090b8a5a95ad7b1e4b65403c4", size = 6659671, upload-time = "2026-07-17T00:08:54.094Z" },
-]
-
-[[package]]
 name = "griptape-nodes-engine"
 version = "0.98.0"
 source = { registry = "https://pypi.org/simple" }
@@ -496,7 +478,6 @@ name = "griptape-nodes-library-nuke"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "griptape-nodes" },
     { name = "griptape-nodes-engine" },
 ]
 
@@ -509,10 +490,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "griptape-nodes", specifier = ">=0.93.0" },
-    { name = "griptape-nodes-engine", specifier = ">=0.98.0" },
-]
+requires-dist = [{ name = "griptape-nodes-engine", specifier = ">=0.98.0" }]
 
 [package.metadata.requires-dev]
 dev = [
