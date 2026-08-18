@@ -107,6 +107,53 @@ class TestFrozenSurface:
                     problems.append(f"{payload_name}.{field_name}")
         assert not problems, f"Optional fields became required, which rejects older plugins: {problems}. {RECORD_HINT}"
 
+    def test_no_optional_field_default_changed(self, snapshot_path: Path, current: dict) -> None:
+        """An old plugin that omits an optional field is judged by this default, not today's.
+
+        A default swap leaves `required` untouched, so it is invisible to the check above.
+        """
+        frozen = self._frozen(snapshot_path)
+        problems = []
+        for payload_name, frozen_fields in frozen["payloads"].items():
+            current_fields = current["payloads"].get(payload_name, {})
+            for field_name, frozen_field in frozen_fields.items():
+                if frozen_field["required"]:
+                    continue
+                current_field = current_fields.get(field_name)
+                if current_field is None or current_field["required"]:
+                    continue
+                if current_field["default"] != frozen_field["default"]:
+                    problems.append(
+                        f"{payload_name}.{field_name}: default changed from "
+                        f"{frozen_field['default']!r} to {current_field['default']!r}"
+                    )
+        assert not problems, f"Optional field defaults changed under old plugins: {problems}. {RECORD_HINT}"
+
+    def test_no_field_type_changed(self, snapshot_path: Path, current: dict) -> None:
+        """A field surviving a rename check can still change what a plugin must send.
+
+        Only checked where both sides carry a "type" key, which `host_api_surface.py`
+        omits for a field inherited from the engine's own RequestPayload/ResultPayload base
+        classes. A cosmetic restyle of an annotation in a file this package does not
+        control must not fail this guard the way a real type change on an owned field should.
+        """
+        frozen = self._frozen(snapshot_path)
+        problems = []
+        for payload_name, frozen_fields in frozen["payloads"].items():
+            current_fields = current["payloads"].get(payload_name, {})
+            for field_name, frozen_field in frozen_fields.items():
+                if "type" not in frozen_field:
+                    continue
+                current_field = current_fields.get(field_name)
+                if current_field is None or "type" not in current_field:
+                    continue
+                if current_field["type"] != frozen_field["type"]:
+                    problems.append(
+                        f"{payload_name}.{field_name}: type changed from "
+                        f"{frozen_field['type']!r} to {current_field['type']!r}"
+                    )
+        assert not problems, f"Field types changed: {problems}. {RECORD_HINT}"
+
     @pytest.mark.parametrize(
         "key",
         ["value_types", "source_kinds", "node_states", "execution_states"],

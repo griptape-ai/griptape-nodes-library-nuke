@@ -12,10 +12,18 @@ listeners and would never reach the host.
 Eight engine event types collapse into four node states. That ratio is the point: the
 engine is free to add a ninth without the host learning anything new.
 
-Stateless by design. The bridge holds no execution state, only its own subscription
-flag, and it never issues engine requests from a callback. Values a host wants are read
-from the engine on demand via NukeGetExecutionStateRequest, so there is no copy of engine
-state here to go stale.
+Stateless by design. The bridge holds no execution state beyond its own subscription
+flag. Values a host wants are read from the engine on demand via
+NukeGetExecutionStateRequest, so there is no copy of engine state here to go stale.
+
+One callback is not request-free. ``_on_parameter_value`` normalizes every streamed
+value through the same ``normalize_value`` used everywhere else, and that normalizer
+issues a synchronous ``GetPathForMacroRequest`` for any macro-bearing value. A
+macro-templated Write path streams on every frame during a render, so this is a common
+case, not an edge one, and it runs on the thread emitting the execution event. This is
+accepted rather than avoided: skipping macro resolution on this path would hand a host a
+MACRO source on the live update and a PATH source from NukeGetExecutionStateRequest for
+the same value, breaking the single-value-format promise the normalizer exists to keep.
 """
 
 from __future__ import annotations
@@ -154,18 +162,25 @@ class ExecutionBridge:
         )
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:
-        """Report that execution finished, without reading any values.
+        """Report that the engine finished the flow, without reading any values or claiming an outcome.
 
         Values are deliberately not gathered here. The engine asks listeners to stay
         cheap and non-blocking, and issuing engine requests from inside an execution
         event callback would violate that. A host reads outputs with
         NukeGetExecutionStateRequest instead.
+
+        ControlFlowResolvedEvent fires on both a clean run and an errored one, and carries
+        no status field, so COMPLETED is all this layer actually knows. It must not infer
+        success or failure from anything else observed here: NodeErrorEvent fires from
+        several sites in the engine's resolution machine, and paths exist where it fires
+        with no ControlFlowResolvedEvent following it (a cancel, a single-node-resolution
+        exception), so latching on it would misreport the next run instead of this one.
         """
         self._emit(
             NukeExecutionStateEvent(
-                state=ExecutionState.SUCCEEDED,
+                state=ExecutionState.COMPLETED,
                 terminal_node=event.end_node_name,
-                detail="Workflow completed.",
+                detail="The engine reported the flow finished. It did not report an outcome.",
             )
         )
 

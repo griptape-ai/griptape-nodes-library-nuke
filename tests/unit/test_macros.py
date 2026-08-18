@@ -121,8 +121,26 @@ def test_a_plain_path_never_reaches_the_macro_resolver(resolving_engine) -> None
 
 
 def test_prose_containing_braces_does_not_become_a_path(resolving_engine) -> None:  # noqa: ANN001
-    """Text is a legitimate value; a stray brace must not turn it into a locator."""
+    """Text is a legitimate value; a stray brace with no extension must not turn it into a locator."""
     resolving_engine(None)
     descriptor = value_types.normalize_value("render {frame} of the shot", "str")
+    assert descriptor["value_type"] == ValueType.TEXT
+    assert descriptor["sources"] == []
+
+
+def test_an_unresolved_macro_with_a_real_extension_still_keeps_its_source(resolving_engine) -> None:  # noqa: ANN001
+    """An extension makes an unresolved macro a genuine locator even though the variable never filled in."""
+    resolving_engine(None)
+    descriptor = value_types.normalize_value("{VAR}/out.exr", "str")
+    assert descriptor["value_type"] == ValueType.IMAGE
     assert descriptor["sources"][0]["kind"] == SourceKind.MACRO
-    assert descriptor["sources"][0]["value"] == "render {frame} of the shot"
+    assert descriptor["sources"][0]["value"] == "{VAR}/out.exr"
+
+
+def test_a_resolved_macro_path_uses_forward_slashes(resolving_engine) -> None:  # noqa: ANN001
+    """Nuke's TCL layer treats backslashes as escapes, so a resolved path must not carry one."""
+    resolving_engine("C:\\workspace\\outputs\\render.png")
+    descriptor = value_types.normalize_value("{outputs}/render.png", "ImageUrlArtifact")
+    source = descriptor["sources"][0]
+    assert source["value"] == "C:/workspace/outputs/render.png"
+    assert "\\" not in source["value"]

@@ -7,29 +7,26 @@ binary, so it is the slowest-moving artifact in the system. The engine ships wee
 This library sits between them: it owns a small set of verbs and value types that the
 plugin binds to, and absorbs engine churn behind them.
 
-Runs today against a live engine with no engine or app changes. `13/13 checks passed`.
-
-
 ```
-library/
-  griptape_nodes_library.json    library registration
-  advanced_library.py            registers verbs, installs/tears down the event bridge
-  nodes.py                       NukeApiInfo, a canvas-visible diagnostics node
-  nuke_host_api/
-    protocol.py                  THE FROZEN SURFACE. versions, verbs, host types
-    events.py                    request/result/notification payloads
-    handlers.py                  host verb in, engine request out
-    execution_bridge.py          engine execution events -> host notifications
-    runs.py                      run id tracking
-    value_types.py               value normalizer
-client/
-  nuke_host_client.py            reference client and conformance check
-tests/
-  test_protocol.py               the frozen surface cannot drift from its classes
-  test_value_types.py            value mapping table and descriptor shape
-  test_macros.py                 macro resolution, patterns, unresolved tokens
-  test_handlers.py               shape parsing, port narrowing, negotiation
-  test_execution_bridge.py       subscription symmetry, event translation
+griptape-nodes-library.json       library registration
+nuke_nodes/
+  nuke_library_advanced.py         registers verbs, installs/tears down the event bridge
+  nuke_api_info.py                 NukeApiInfo, a canvas-visible diagnostics node
+nuke_host_api/
+  protocol.py                      THE FROZEN SURFACE. versions, verbs, host types
+  events.py                        request/result/notification payloads
+  handlers.py                      host verb in, engine request out
+  execution_bridge.py              engine execution events -> host notifications
+  value_types.py                   value normalizer
+scripts/
+  nuke_host_client.py              reference client and conformance check
+tests/unit/
+  test_protocol.py                 verb/notification names resolve to real payload classes
+  test_frozen_surface.py           the frozen surface cannot drift from a recorded snapshot
+  test_value_types.py              value mapping table and descriptor shape
+  test_macros.py                   macro resolution, patterns, unresolved tokens
+  test_handlers.py                 shape parsing, port narrowing, negotiation
+  test_execution_bridge.py         subscription symmetry, event translation
 ```
 
 `protocol.py` is the file to read first and the file to change most carefully. It is
@@ -48,7 +45,7 @@ The reference client needs this library installed in a running engine with the
 `GetConfigValueRequest(category_and_key="ipc_drivers")` and set `WS_URL` to match.
 
 ```bash
-uv run python scripts/nuke_host_client.py       # 13/13 checks passed
+uv run python scripts/nuke_host_client.py
 ```
 
 ## The four capabilities
@@ -93,9 +90,6 @@ engine can add a ninth event type without the host learning anything.
 The same normalizer that types ports in `describe_workflow` shapes every live update, so
 a host has one value format rather than two.
 
-A verified execution produced 43 node state events and 57 parameter value events, every value
-inside the closed type set, all arriving with no request sent.
-
 ### Push, with a recovery path
 
 Notifications are real pushes, not polling: the bridge subscribes in-process, translates,
@@ -109,9 +103,14 @@ plugin must use it.
 - **Subscription is explicit.** Miss the `{"type":"subscribe","topic":...}` step and you
   get replies but silently no notifications.
 
-`NukeGetExecutionStateRequest` is therefore the recovery path: it reads flow state and the
-declared output values straight from the engine, so a reconnecting host that missed
-everything can still get current truth. It holds no cache, which is why it cannot drift.
+`NukeGetExecutionStateRequest` is therefore the recovery path for running state and output
+values: it reads flow state and the declared output values straight from the engine, so a
+reconnecting host that missed everything can still get current truth about what is
+running and what a workflow's output ports currently hold. It holds no cache, which is why
+it cannot drift. It is **not** a recovery path for a run's outcome: the engine exposes no
+flow-level success/failure field anywhere, on this request or any other, so a host that
+misses the live `NukeNodeStateEvent` with `state: "failed"` has no way to learn afterward
+that a run failed.
 
 **Outputs have exactly one meaning:** the ports `NukeDescribeWorkflowRequest` declared.
 The engine's terminal event reports values for whichever node control flow ended on, which
@@ -141,7 +140,7 @@ library already consumes are not in the SDK at all: `ThreeDUrlArtifact`,
 `BlobArtifact`, and `GenericArtifact` are structurally identical, all carrying a single
 `value`, so the class name is the only discriminator.
 
-19 representative shapes, all landing in the seven-member set:
+13 representative shapes, all landing in the seven-member set:
 
 ```
 GTImage    <- ImageUrlArtifact, static server URL          [url/png]
