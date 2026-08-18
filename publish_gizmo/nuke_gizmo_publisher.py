@@ -409,7 +409,6 @@ class NukeGizmoPublisher:
         if start_flow is None:
             return
         start_flow.metadata["publish_config"] = {
-            "nuke": self._metadata.get("nuke"),
             "gizmo_install_path": self._metadata.get("gizmo_install_path"),
             "custom_gizmo_path": self._metadata.get("custom_gizmo_path"),
             "gizmo_path": str(gizmo_path),
