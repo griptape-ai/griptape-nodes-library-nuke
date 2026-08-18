@@ -1,0 +1,352 @@
+{
+  "execution_states": [
+    "cancelled",
+    "failed",
+    "running",
+    "succeeded"
+  ],
+  "node_states": [
+    "failed",
+    "resolved",
+    "running",
+    "unresolved"
+  ],
+  "notifications": [
+    "NukeExecutionStateEvent",
+    "NukeNodeStateEvent",
+    "NukeParameterValueEvent"
+  ],
+  "payloads": {
+    "NukeCancelExecutionRequest": {
+      "broadcast_result": {
+        "required": false
+      },
+      "failure_log_level": {
+        "required": false
+      },
+      "fields": {
+        "required": false
+      },
+      "request_id": {
+        "required": false
+      }
+    },
+    "NukeCancelExecutionResultFailure": {
+      "exception": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      }
+    },
+    "NukeCancelExecutionResultSuccess": {
+      "result_details": {
+        "required": true
+      }
+    },
+    "NukeConnectRequest": {
+      "broadcast_result": {
+        "required": false
+      },
+      "client_name": {
+        "required": false
+      },
+      "client_protocol_versions": {
+        "required": false
+      },
+      "failure_log_level": {
+        "required": false
+      },
+      "fields": {
+        "required": false
+      },
+      "request_id": {
+        "required": false
+      }
+    },
+    "NukeConnectResultFailure": {
+      "exception": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      },
+      "supported_protocol_versions": {
+        "required": true
+      }
+    },
+    "NukeConnectResultSuccess": {
+      "engine_version": {
+        "required": true
+      },
+      "event_topic": {
+        "required": true
+      },
+      "library_version": {
+        "required": true
+      },
+      "protocol_version": {
+        "required": true
+      },
+      "result_details": {
+        "required": true
+      },
+      "supported_protocol_versions": {
+        "required": true
+      },
+      "value_types": {
+        "required": true
+      }
+    },
+    "NukeDescribeWorkflowRequest": {
+      "broadcast_result": {
+        "required": false
+      },
+      "failure_log_level": {
+        "required": false
+      },
+      "fields": {
+        "required": false
+      },
+      "request_id": {
+        "required": false
+      },
+      "workflow_id": {
+        "required": true
+      }
+    },
+    "NukeDescribeWorkflowResultFailure": {
+      "exception": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      },
+      "workflow_id": {
+        "required": true
+      }
+    },
+    "NukeDescribeWorkflowResultSuccess": {
+      "description": {
+        "required": true
+      },
+      "inputs": {
+        "required": true
+      },
+      "name": {
+        "required": true
+      },
+      "outputs": {
+        "required": true
+      },
+      "result_details": {
+        "required": true
+      },
+      "workflow_id": {
+        "required": true
+      }
+    },
+    "NukeExecuteWorkflowRequest": {
+      "broadcast_result": {
+        "required": false
+      },
+      "failure_log_level": {
+        "required": false
+      },
+      "fields": {
+        "required": false
+      },
+      "inputs": {
+        "required": false
+      },
+      "request_id": {
+        "required": false
+      },
+      "workflow_id": {
+        "required": true
+      }
+    },
+    "NukeExecuteWorkflowResultFailure": {
+      "exception": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      },
+      "workflow_id": {
+        "required": true
+      }
+    },
+    "NukeExecuteWorkflowResultSuccess": {
+      "applied_inputs": {
+        "required": true
+      },
+      "rejected_inputs": {
+        "required": true
+      },
+      "result_details": {
+        "required": true
+      },
+      "state": {
+        "required": true
+      },
+      "workflow_id": {
+        "required": true
+      }
+    },
+    "NukeExecutionStateEvent": {
+      "detail": {
+        "required": false
+      },
+      "state": {
+        "required": true
+      },
+      "terminal_node": {
+        "required": false
+      }
+    },
+    "NukeGetExecutionStateRequest": {
+      "broadcast_result": {
+        "required": false
+      },
+      "failure_log_level": {
+        "required": false
+      },
+      "fields": {
+        "required": false
+      },
+      "include_outputs": {
+        "required": false
+      },
+      "request_id": {
+        "required": false
+      }
+    },
+    "NukeGetExecutionStateResultFailure": {
+      "exception": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      }
+    },
+    "NukeGetExecutionStateResultSuccess": {
+      "active_nodes": {
+        "required": true
+      },
+      "involved_nodes": {
+        "required": true
+      },
+      "outputs": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      },
+      "running": {
+        "required": true
+      },
+      "workflow_id": {
+        "required": false
+      }
+    },
+    "NukeListWorkflowsRequest": {
+      "broadcast_result": {
+        "required": false
+      },
+      "failure_log_level": {
+        "required": false
+      },
+      "fields": {
+        "required": false
+      },
+      "request_id": {
+        "required": false
+      },
+      "runnable_only": {
+        "required": false
+      }
+    },
+    "NukeListWorkflowsResultFailure": {
+      "exception": {
+        "required": false
+      },
+      "result_details": {
+        "required": true
+      }
+    },
+    "NukeListWorkflowsResultSuccess": {
+      "result_details": {
+        "required": true
+      },
+      "workflows": {
+        "required": true
+      }
+    },
+    "NukeNodeStateEvent": {
+      "detail": {
+        "required": false
+      },
+      "node_name": {
+        "required": true
+      },
+      "state": {
+        "required": true
+      }
+    },
+    "NukeParameterValueEvent": {
+      "node_name": {
+        "required": true
+      },
+      "parameter_name": {
+        "required": true
+      },
+      "value": {
+        "required": true
+      }
+    }
+  },
+  "protocol_version": 1,
+  "source_kinds": [
+    "inline",
+    "macro",
+    "path",
+    "url"
+  ],
+  "supported_protocol_versions": [
+    1
+  ],
+  "value_descriptor_keys": [
+    "colorspace",
+    "engine_type",
+    "sources",
+    "value_type"
+  ],
+  "value_source_keys": [
+    "byte_count",
+    "format",
+    "height",
+    "is_pattern",
+    "kind",
+    "raw",
+    "value",
+    "width"
+  ],
+  "value_types": [
+    "GTBoolean",
+    "GTFile",
+    "GTImage",
+    "GTNull",
+    "GTNumber",
+    "GTText",
+    "GTVideo"
+  ],
+  "verbs": [
+    "NukeCancelExecutionRequest",
+    "NukeConnectRequest",
+    "NukeDescribeWorkflowRequest",
+    "NukeExecuteWorkflowRequest",
+    "NukeGetExecutionStateRequest",
+    "NukeListWorkflowsRequest"
+  ]
+}
