@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import pytest
 from griptape_nodes.common.project_templates.directory import DirectoryDefinition
 from griptape_nodes.common.project_templates.project import ProjectTemplate
 
@@ -49,11 +51,32 @@ class TestResolveOutputDir:
         expected = str(Path.home() / "renders").replace("\\", "/")
         assert resolve_output_dir("~/renders", _NK_DIR, _COMPANION) == expected
 
-    def test_engine_macro_value_is_passed_through_unchanged(self) -> None:
-        assert resolve_output_dir("{outputs}/renders", _NK_DIR, _COMPANION) == "{outputs}/renders"
-
     def test_dot_relative_dir_resolves_against_nk_script_dir(self) -> None:
         assert resolve_output_dir("./renders", _NK_DIR, _COMPANION) == f"{_NK_DIR}/renders"
+
+    def test_directory_macro_is_resolved_and_absolutized(self) -> None:
+        macro_map = {"inputs": f"{_NK_DIR}/griptape_inputs"}
+        resolved = resolve_output_dir("{inputs}/renders", _NK_DIR, _COMPANION, macro_map)
+        assert resolved == f"{_NK_DIR}/griptape_inputs/renders"
+
+    def test_self_referential_outputs_macro_resolves_to_bundle_outputs(self) -> None:
+        macro_map = {"outputs": f"{_NK_DIR}/griptape_outputs"}
+        resolved = resolve_output_dir("{outputs}/renders", _NK_DIR, _COMPANION, macro_map)
+        assert resolved == f"{_NK_DIR}/griptape_outputs/renders"
+
+    def test_relative_macro_result_is_anchored_to_nk_script_dir(self) -> None:
+        macro_map = {"outputs": "griptape_outputs"}
+        resolved = resolve_output_dir("{outputs}/renders", _NK_DIR, _COMPANION, macro_map)
+        assert resolved == f"{_NK_DIR}/griptape_outputs/renders"
+
+    def test_unresolvable_macro_is_passed_through_for_the_engine(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING):
+            resolved = resolve_output_dir("{workflow_name}/out", _NK_DIR, _COMPANION, {})
+        assert resolved == "{workflow_name}/out"
+        assert "cannot resolve" in caplog.text
+
+    def test_macro_value_without_macro_map_is_passed_through(self) -> None:
+        assert resolve_output_dir("{outputs}/renders", _NK_DIR, _COMPANION) == "{outputs}/renders"
 
 
 class TestBuildMacroMap:

@@ -108,7 +108,11 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Override for the {outputs} directory macro (absolute path at runtime)",
+        help=(
+            "Override for the {outputs} directory macro. An absolute path is used as-is; a relative path is "
+            "anchored to --nk-script-dir (the companion bundle when the script is unsaved); project directory "
+            "macros such as {inputs} are resolved against the bundle's project.yml"
+        ),
     )
     parser.add_argument(
         "--nk-script-dir",
@@ -141,7 +145,13 @@ def main() -> None:
     # save path and the path reported back to Nuke are derived from this single
     # absolute value, so a relative knob value can't be resolved two different
     # ways (which left Nuke's Read node unable to open a file that was written).
-    output_dir = resolve_output_dir(args.output_dir, args.nk_script_dir, str(Path(__file__).parent))
+    # The macro map is built from the bundle's project.yml before any override is
+    # installed, so a {outputs}-relative knob value resolves against the authored
+    # directory instead of becoming a self-reference the engine reads as a cycle.
+    script_dir = Path(__file__).parent
+    workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
+    macro_map = build_macro_map(script_dir, workspace_dir=workspace_dir)
+    output_dir = resolve_output_dir(args.output_dir, args.nk_script_dir, str(script_dir), macro_map)
     if output_dir:
         logger.info("Output directory: %s", output_dir)
 
@@ -186,7 +196,6 @@ def main() -> None:
         emit_payload({"error": "Workflow module has no execute_workflow() function"})
         sys.exit(1)
 
-    script_dir = Path(__file__).parent
     bundle_project_file = script_dir / "project.yml"
 
     # When an output directory is specified, build a per-run temp project.yml that
@@ -231,8 +240,6 @@ def main() -> None:
             except OSError:
                 pass
 
-    workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
-    macro_map = build_macro_map(script_dir, workspace_dir=workspace_dir)
     if output_dir:
         macro_map["outputs"] = output_dir
     result = serialize_output(output, macro_map)

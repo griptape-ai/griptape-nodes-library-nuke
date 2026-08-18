@@ -12,6 +12,7 @@ and callers can't drift apart on how a relative path is anchored.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -22,6 +23,8 @@ from griptape_nodes.common.project_templates.validation import ProjectValidation
 
 if TYPE_CHECKING:
     from griptape_nodes.common.project_templates.project import ProjectTemplate
+
+logger = logging.getLogger(__name__)
 
 
 def load_project_template(project_yml: Path) -> ProjectTemplate | None:
@@ -45,7 +48,12 @@ def absolutize(value: str, base_dir: str) -> str:
     return os.path.normpath(expanded).replace("\\", "/")
 
 
-def resolve_output_dir(raw: str | None, nk_script_dir: str | None, companion_dir: str) -> str | None:
+def resolve_output_dir(
+    raw: str | None,
+    nk_script_dir: str | None,
+    companion_dir: str,
+    macro_map: dict[str, str] | None = None,
+) -> str | None:
     """Resolve the gizmo's Output Directory knob value to an absolute path.
 
     A relative value is anchored to the Nuke script's directory — the engine
@@ -54,16 +62,31 @@ def resolve_output_dir(raw: str | None, nk_script_dir: str | None, companion_dir
     here, rather than letting the engine and Nuke each resolve the same relative
     string against their own working directory, is what keeps the path reported
     back to Nuke openable by the gizmo's internal Read node.
+
+    Project directory macros are expanded against *macro_map* for the same
+    reason: left raw, ``{outputs}/renders`` reaches the engine as a
+    self-referential ``outputs`` definition, and any macro reaches Nuke as an
+    unresolved ``{...}`` literal.
     """
     if not raw:
         return None
 
-    # Engine path macros ({outputs}, {workflow_name}, ...) must keep their
-    # engine-level meaning; joining them onto a base dir would break them.
-    if "{" in raw:
-        return raw
+    base_dir = nk_script_dir or companion_dir
 
-    return absolutize(raw, nk_script_dir or companion_dir)
+    if "{" in raw:
+        expanded = resolve_macro_path(raw, macro_map or {})
+        # Builtins ({workflow_name}, ...) and env-var macros aren't in the map;
+        # only the engine can resolve those, so hand it the value untouched.
+        if "{" in expanded:
+            logger.warning(
+                "Output directory %r contains macros this runner cannot resolve; "
+                "the path reported back to Nuke may not be openable.",
+                raw,
+            )
+            return raw
+        return absolutize(expanded, base_dir)
+
+    return absolutize(raw, base_dir)
 
 
 def build_macro_map(script_dir: Path, workspace_dir: Path | None = None) -> dict[str, str]:

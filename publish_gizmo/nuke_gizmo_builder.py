@@ -80,6 +80,7 @@ _TCL_HINT_TOOLTIP = (
 )
 _OUTPUT_DIR_TOOLTIP = (
     f"Directory for workflow outputs. Leave blank to save to a '{OUTPUTS_DIR_NAME}' folder next to the .nk script. "
+    "A relative path is resolved against the folder containing this .nk script. "
     "Supports TCL expressions, e.g. [file dirname [value root.name]]/griptape."
 )
 # Static Run-tab text under the Output Directory field. The blank-field default is
