@@ -13,6 +13,12 @@ INIT_MARKER = "# griptape-plugin-path"
 # Filename of the run-button script copied into each companion directory
 RUN_BUTTON_FILENAME = "run_button.py"
 
+# Directory name (relative to the .nk script) where workflow outputs land when the
+# gizmo's Output Directory knob is left blank. Stamped into the bundled project.yml
+# at publish time and quoted in the gizmo's Run tab help text — shared here so the
+# documented default and the actual default cannot drift apart.
+OUTPUTS_DIR_NAME = "griptape_outputs"
+
 # Prefix for the hidden companion knob that stores a Link button's TCL expression
 # (the visible knob shows the evaluated value). Kept in sync with the local copy
 # in the bundled tcl_utils.py, which cannot import this module at runtime.

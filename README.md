@@ -10,7 +10,7 @@ A Griptape Nodes library for building workflows that run inside [Foundry Nuke](h
 - **NukeScriptNode** – runs a `.nk` script headlessly via `nuke -t`, surfaces annotated Read/Write nodes as typed input/output ports on the canvas, and supports per-knob value overrides. Inputs accept images, video, and raw file paths; outputs can be images, image sequences, video, or 3D geometry.
 - **Griptape Annotator** – a dockable panel that runs inside the Nuke GUI for tagging I/O nodes and promoting knobs to the Griptape interface.
 - **Gizmo publisher** (`publish_gizmo/`): packages a workflow into a versioned `.gizmo` alongside a runner script and installs it into a Nuke plugin directory (default: `~/.nuke`).
-- **Auto-discovery** of Nuke installations on macOS, Windows, and Linux, plus `NUKE_PATH` segment detection for picking an install target.
+- **`NUKE_PATH` detection**: extra plugin directories from `NUKE_PATH` are surfaced as gizmo install targets in the publish dialog, alongside the default `~/.nuke`.
 - **Griptape menu integration**: publishing writes a `menu.py` that adds a `Griptape` submenu to Nuke's Nodes toolbar and a `Refresh Griptape Gizmos` command on the main menu bar. Multiple published versions of the same workflow are grouped under a per-workflow submenu.
 - **Nuke-aware output paths**: the bundled `project.yml` is rewritten so workflow outputs land next to the `.nk` file (under `griptape_outputs/<workflow_name>/...`).
 
@@ -135,8 +135,7 @@ Set `foundry_LICENSE` in the Griptape Secrets panel. It is injected into the Nuk
 
 1. Build a workflow whose top-level flow starts with a `NukeStartFlow` node and ends with a `NukeEndFlow` node.
 2. Trigger *Publish Workflow*. In the dialog, pick:
-   - A **Nuke install** (auto-detected) to resolve plugin path candidates.
-   - A **gizmo install path** – either `~/.nuke`, a path from `NUKE_PATH`, a Nuke-install plugins directory, or a custom path.
+   - A **gizmo install path** – either `~/.nuke`, a path from `NUKE_PATH`, or a custom path.
    - An **update mode** to pick between creating a new version and overwriting the current one.
 3. The publisher writes, under the chosen install directory:
 

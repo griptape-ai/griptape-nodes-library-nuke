@@ -88,22 +88,35 @@ def _gizmo_local_dir(companion: str, workflow_stem: str) -> str:
     return os.path.join(_venv_root(), f"{slug}-{digest}").replace("\\", "/")
 
 
-def _build_child_env(local_dir: str, base_env: dict) -> dict:
+def _has_lockfile(companion: str) -> bool:
+    """Whether the companion bundle ships a uv.lock."""
+    return os.path.isfile(os.path.join(companion, "uv.lock"))
+
+
+def _build_child_env(local_dir: str, base_env: dict, *, frozen: bool = True) -> dict:
     """Return a subprocess env pointing config and the uv venv at the local dir.
 
     XDG_CONFIG_HOME keeps engine config writes (e.g. projects_to_register) out of
-    the user's global ~/.config, UV_PROJECT_ENVIRONMENT redirects uv's venv away
-    from <companion>/.venv (which would be shared-drive) to a per-machine
-    location, and UV_FROZEN stops uv from writing uv.lock back to the (possibly
-    read-only) shared companion dir. local_dir must already be an absolute
-    forward-slashed path.
+    the user's global ~/.config, and UV_PROJECT_ENVIRONMENT redirects uv's venv
+    away from <companion>/.venv (which would be shared-drive) to a per-machine
+    location. UV_FROZEN stops uv from writing uv.lock back to the (possibly
+    read-only) shared companion dir, but is only safe to set when a lock actually
+    shipped: publishing generates it best-effort, and with UV_FROZEN set and no
+    lock present uv refuses to run at all. When unfrozen, an inherited
+    UV_FROZEN/UV_LOCKED is cleared too, so a site-wide export can't reintroduce
+    the same failure. local_dir must already be an absolute forward-slashed path.
     """
-    return {
+    env = {
         **base_env,
         "XDG_CONFIG_HOME": local_dir + "/.gtn_config",
         "UV_PROJECT_ENVIRONMENT": local_dir + "/.venv",
-        "UV_FROZEN": "1",
     }
+    if frozen:
+        env["UV_FROZEN"] = "1"
+    else:
+        env.pop("UV_FROZEN", None)
+        env.pop("UV_LOCKED", None)
+    return env
 
 
 # Qt is bundled with Nuke. Try PySide6 first (Nuke 16+), fall back to PySide2 (Nuke 13–15).
@@ -335,7 +348,10 @@ os.makedirs(_local_dir, exist_ok=True)
 # user config writes (e.g. the projects_to_register list) out of the user's
 # global ~/.config, and UV_PROJECT_ENVIRONMENT redirects uv's venv off the
 # (possibly shared) companion dir onto this machine's local dir.
-_child_env = _build_child_env(_local_dir, os.environ)
+# Only run frozen when the companion actually carries a uv.lock — publishing
+# generates it best-effort, and UV_FROZEN with no lock makes uv refuse to run.
+_lock_present = _has_lockfile(companion)
+_child_env = _build_child_env(_local_dir, os.environ, frozen=_lock_present)
 
 # -- Resolve workflow file from version subdir --
 
@@ -426,6 +442,12 @@ else:
                 break
 
     _pre_dialog_logs: list = []
+
+    if not _lock_present:
+        _pre_dialog_logs.append(
+            "No uv.lock in the gizmo bundle — resolving dependencies on this machine.\n"
+            "Re-publish the gizmo from Griptape Nodes to pin them."
+        )
 
     if not uv:
         _install_env = os.environ.copy()

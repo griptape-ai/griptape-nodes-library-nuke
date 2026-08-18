@@ -22,42 +22,6 @@ def normalize_path_str(path_str: str) -> str:
         return str(p)
 
 
-def install_root_for_nuke_executable(exe: Path) -> Path:
-    """Return the version folder to show in the UI (e.g. /Applications/Nuke16.0v7)."""
-    try:
-        exe_r = exe.resolve()
-    except OSError:
-        exe_r = exe
-    if sys.platform == "darwin":
-        macos = exe_r.parent
-        if macos.name == "MacOS":
-            contents = macos.parent
-            inner = contents.parent
-            if inner.suffix == ".app":
-                outer = inner.parent
-                if outer == Path("/Applications"):
-                    return inner
-                return outer
-            return inner
-        return exe_r.parent
-    return exe_r.parent
-
-
-def pick_preferred_executable_for_root(root: Path, candidates: list[Path]) -> Path:
-    """Prefer e.g. Nuke16.0v7.app when root is folder Nuke16.0v7."""
-    root_name = root.name
-    sorted_cands = sorted(candidates, key=lambda p: str(p))
-    for c in sorted_cands:
-        try:
-            if c.parent.name == "MacOS":
-                bundle = c.parent.parent.parent
-                if bundle.suffix == ".app" and bundle.stem == root_name:
-                    return c
-        except (IndexError, OSError):
-            continue
-    return sorted_cands[0]
-
-
 def discover_nuke_executables() -> list[str]:
     """Return sorted unique paths to Nuke executables found on this machine."""
     paths: list[str] = []
@@ -136,27 +100,6 @@ def discover_nuke_executables() -> list[str]:
     return paths
 
 
-def discover_nuke_install_roots_and_map() -> tuple[list[str], dict[str, str]]:
-    """Return (sorted install root paths, root -> executable path map)."""
-    exes = discover_nuke_executables()
-    root_to_candidates: dict[str, list[Path]] = {}
-    for exe_str in exes:
-        exe = Path(exe_str)
-        root = install_root_for_nuke_executable(exe)
-        rk = normalize_path_str(str(root))
-        root_to_candidates.setdefault(rk, []).append(exe)
-
-    root_to_exe: dict[str, str] = {}
-    for rk, cands in root_to_candidates.items():
-        picked = pick_preferred_executable_for_root(Path(rk), cands)
-        try:
-            root_to_exe[rk] = str(picked.resolve())
-        except OSError:
-            root_to_exe[rk] = str(picked)
-
-    return sorted(root_to_exe.keys()), root_to_exe
-
-
 def nuke_path_env_segments() -> list[str]:
     """Return normalized paths from the NUKE_PATH environment variable."""
     raw = os.environ.get("NUKE_PATH", "").strip()
@@ -175,39 +118,7 @@ def nuke_path_env_segments() -> list[str]:
     return out
 
 
-def versioned_gizmo_paths_for_exe(nuke_exe: str) -> list[str]:
-    """Return OS-specific plugin paths relative to the selected Nuke install."""
-    exe_path = Path(nuke_exe)
-    try:
-        exe = exe_path.resolve()
-    except OSError:
-        exe = exe_path
-
-    paths: list[str] = []
-    if sys.platform == "darwin":
-        macos = exe.parent
-        if macos.name == "MacOS":
-            paths.append(str(macos / "plugins"))
-            contents = macos.parent
-            bundle_or_install = contents.parent
-            if bundle_or_install.suffix == ".app":
-                outer = bundle_or_install.parent
-                paths.append(str(outer / "plugins" / "nukescripts"))
-            else:
-                paths.append(str(bundle_or_install / "plugins" / "nukescripts"))
-        else:
-            root = exe.parent
-            paths.extend([str(root / "plugins" / "nukescripts"), str(root / "plugins")])
-    elif sys.platform == "win32":
-        root = exe.parent
-        paths.extend([str(root / "plugins" / "nukescripts"), str(root / "plugins")])
-    else:
-        root = exe.parent
-        paths.extend([str(root / "plugins" / "nukescripts"), str(root / "plugins")])
-    return paths
-
-
-def compute_gizmo_install_path_choices(selected_nuke: str | None, root_to_exe: dict[str, str]) -> list[str]:
+def compute_gizmo_install_path_choices() -> list[str]:
     """Return candidate gizmo install directories (excluding 'Custom path…').
 
     ``~/.nuke`` is always listed first as it is the most common install target.
@@ -228,13 +139,6 @@ def compute_gizmo_install_path_choices(selected_nuke: str | None, root_to_exe: d
 
     for seg in nuke_path_env_segments():
         add_path(seg)
-
-    if selected_nuke:
-        norm = normalize_path_str(selected_nuke)
-        exe = root_to_exe.get(norm)
-        if exe and Path(exe).is_file():
-            for p in versioned_gizmo_paths_for_exe(exe):
-                add_path(p)
 
     return candidates
 

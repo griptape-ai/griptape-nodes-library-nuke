@@ -23,7 +23,6 @@ from publish_gizmo.nuke_discovery import (
     GIZMO_INSTALL_CUSTOM,
     compute_gizmo_install_path_choices,
     default_gizmo_path,
-    discover_nuke_install_roots_and_map,
     normalize_path_str,
 )
 
@@ -55,19 +54,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
             if saved and isinstance(saved, dict):
                 current = saved
 
-    nuke_roots, root_to_exe = discover_nuke_install_roots_and_map()
-
-    # Resolve the currently selected nuke installation
-    saved_nuke = current.get("nuke")
-    if saved_nuke and normalize_path_str(saved_nuke) in nuke_roots:
-        selected_nuke: str | None = normalize_path_str(saved_nuke)
-    else:
-        selected_nuke = nuke_roots[0] if nuke_roots else None
-
-    nuke_choices = nuke_roots if nuke_roots else ["No Nuke installations found"]
-
-    # Compute gizmo path choices based on the selected nuke
-    gizmo_candidates = compute_gizmo_install_path_choices(selected_nuke, root_to_exe)
+    gizmo_candidates = compute_gizmo_install_path_choices()
     gizmo_choices = gizmo_candidates + [GIZMO_INSTALL_CUSTOM]
 
     # Resolve the saved gizmo install path selection
@@ -90,18 +77,6 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
 
     fields = [
         PublishOptionField(
-            name="nuke",
-            label="Nuke Installation",
-            field_type=PublishFieldType.DROPDOWN,
-            tooltip=(
-                "Nuke install location (version folder under /Applications, Program Files, etc.). "
-                "The main Nuke binary for that install is used automatically."
-            ),
-            choices=nuke_choices,
-            default_value=selected_nuke,
-            depends_on=None,
-        ),
-        PublishOptionField(
             name="gizmo_install_path",
             label="Gizmo Install Path",
             field_type=PublishFieldType.DROPDOWN,
@@ -110,7 +85,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
             ),
             choices=gizmo_choices,
             default_value=selected_gizmo,
-            depends_on="nuke",
+            depends_on=None,
         ),
         PublishOptionField(
             name="custom_gizmo_path",
