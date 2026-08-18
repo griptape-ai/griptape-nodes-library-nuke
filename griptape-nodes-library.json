@@ -56,6 +56,15 @@
                 "display_name": "Nuke Script",
                 "icon": "logos/nuke.png"
             }
+        },
+        {
+            "class_name": "NukeApiInfo",
+            "file_path": "nuke_nodes/nuke_api_info.py",
+            "metadata": {
+                "category": "FoundryNuke",
+                "description": "Reports the Nuke host API protocol version, notification topic, and value type set",
+                "display_name": "Nuke API Info"
+            }
         }
     ],
     "workflows": [
