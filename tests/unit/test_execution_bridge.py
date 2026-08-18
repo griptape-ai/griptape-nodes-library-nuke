@@ -163,9 +163,23 @@ class TestTranslation:
         )
         payload = event_manager.payloads()[-1]
         assert isinstance(payload, NukeExecutionStateEvent)
-        assert payload.state == ExecutionState.SUCCEEDED
+        assert payload.state == ExecutionState.COMPLETED
         assert payload.terminal_node == "Execute Python_1"
         assert not hasattr(payload, "outputs")
+
+    def test_flow_resolved_never_reports_failed_or_succeeded(self, event_manager: FakeEventManager) -> None:
+        """ControlFlowResolvedEvent fires on both a clean run and an errored one.
+
+        The engine gives this callback no status to report, so it must not guess one,
+        including by inferring from a NodeErrorEvent seen earlier in the same run.
+        """
+        bridge = ExecutionBridge()
+        bridge.install()
+        bridge._on_node_error(NodeErrorEvent(node_name="Blur", error_message="kaboom"))
+        bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="Blur", parameter_output_values={}))
+        payload = event_manager.payloads()[-1]
+        assert payload.state not in {ExecutionState.FAILED, "succeeded"}
+        assert payload.state == ExecutionState.COMPLETED
 
     def test_flow_cancelled_reports_cancelled(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()

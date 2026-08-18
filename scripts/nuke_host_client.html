@@ -293,7 +293,7 @@ are only presentation.
         color: #ffd782;
       }
       .chip.resolved,
-      .chip.succeeded {
+      .chip.completed {
         background: #2f5326;
         color: #b6e0a6;
       }
@@ -633,7 +633,7 @@ are only presentation.
         EXECUTION_STATE: "NukeExecutionStateEvent",
       };
       const CLIENT_PROTOCOL_VERSIONS = [1];
-      const TERMINAL_EXECUTION_STATES = ["succeeded", "failed", "cancelled"];
+      const TERMINAL_EXECUTION_STATES = ["completed", "failed", "cancelled"];
       const KNOWN_NODE_STATES = ["unresolved", "running", "resolved", "failed"];
       const KNOWN_VALUE_TYPES = [
         "GTImage",

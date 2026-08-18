@@ -21,6 +21,7 @@ from nuke_host_api.events import (
     NukeListWorkflowsRequest,
 )
 from nuke_host_api.execution_bridge import ExecutionBridge
+from nuke_host_api.handlers import _library_version as _host_api_library_version
 from nuke_host_api.handlers import (
     handle_cancel_execution,
     handle_connect,
@@ -87,6 +88,11 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
         # listeners are ours to remove. Skipping this leaves the previous bridge subscribed
         # after a reload, and a host then receives every notification twice.
         _HOST_API_BRIDGE.uninstall()
+        # _library_version() is cached for the process lifetime, but a library reload without
+        # a process restart is a real, handled scenario in this same lifecycle (that is why
+        # the bridge above needs an explicit uninstall). An in-place library upgrade must not
+        # keep serving the pre-upgrade version to a host that connects after the reload.
+        _host_api_library_version.cache_clear()
 
     def get_request_handlers(
         self,

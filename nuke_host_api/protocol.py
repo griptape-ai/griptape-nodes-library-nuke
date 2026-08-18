@@ -27,6 +27,13 @@ Bumps the version:
 ``SUPPORTED_PROTOCOL_VERSIONS`` is the support window. Studios keep old plugin
 binaries in service for years, so entries leave this list on a stated schedule and
 not before.
+
+One rename happened without a version bump: ``ExecutionState``'s ``SUCCEEDED`` became
+``COMPLETED``, both a rename and a meaning change, which the rule above says should bump
+the version. It did not, because it happened before this protocol's first release: no
+compiled plugin has ever spoken ``PROTOCOL_VERSION`` 1, so none depends on the old name.
+This is a one-time exception for a value that never shipped, not a precedent. A rename
+after release, of this or anything else in this file, MUST bump ``PROTOCOL_VERSION``.
 """
 
 from __future__ import annotations
@@ -35,8 +42,6 @@ PROTOCOL_VERSION = 1
 
 # Oldest first. A host offers the versions it knows; the highest mutual one wins.
 SUPPORTED_PROTOCOL_VERSIONS = (1,)
-
-LIBRARY_VERSION = "0.1.0"
 
 
 # Verbs. A host sends these as `request_type` on the wire.
@@ -82,10 +87,29 @@ class ExecutionState:
     When the engine grows an execution id, adding it to the execute-workflow result and to
     these notifications is an additive change and does not bump the protocol version. So
     there is no versioning reason to fake one now.
+
+    ``COMPLETED`` reports only that the engine finished the flow, not that it succeeded.
+    The engine's ``ControlFlowResolvedEvent`` fires on both a clean run and an errored one
+    (there is no ``ControlFlowErroredEvent``, and the event carries no status field), so
+    this layer has no flow-level outcome to report on the event stream and must not invent
+    one. ``FAILED`` is reserved for the day the engine exposes that outcome on an event; it
+    is not emitted today. A host detects an actual failure only by catching the live
+    ``NukeNodeStateEvent`` with ``state="failed"`` as it is pushed.
+    ``NukeGetExecutionStateRequest`` cannot recover a missed one after the fact: its result
+    carries running state, active/involved nodes, and output values, never a flow-level
+    outcome, because the engine exposes none. A host that drops its connection or
+    subscribes late and misses that push has no way to learn, after the fact, that a run
+    failed.
+
+    ``CANCELLED`` may be followed by ``COMPLETED`` for the same run: the engine's cancel and
+    error paths both end in the same completion event, and whether a host observes both for
+    one run is a timing question this layer cannot settle by reading engine source. A host
+    should treat the first terminal state it receives as authoritative and ignore a later
+    one for the same run.
     """
 
     RUNNING = "running"
-    SUCCEEDED = "succeeded"
+    COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
 

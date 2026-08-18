@@ -35,6 +35,8 @@ def main() -> int:
         print(f"Protocol v{version} is already recorded. To make a breaking change, bump")
         print("PROTOCOL_VERSION in protocol.py and run this again, keeping the old snapshot")
         print("so plugins speaking the old version stay covered.")
+        # Deleting this file to get past the check is not a loophole, it is removing the
+        # guard. The snapshot exists to fail loudly on exactly that kind of change.
         return 1
 
     FROZEN_DIR.mkdir(parents=True, exist_ok=True)
