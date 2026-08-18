@@ -33,7 +33,7 @@ Defined in `nuke_host_api/protocol.py`, pinned by
 | Value types | `GTImage`, `GTVideo`, `GTFile`, `GTText`, `GTNumber`, `GTBoolean`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
-| Execution states | `running`, `succeeded`, `failed`, `cancelled` |
+| Execution states | `running`, `completed`, `failed`, `cancelled` |
 
 Binding rules:
 
@@ -214,7 +214,7 @@ Subscribe to a reply topic first, then connect. Required before anything else.
   "protocol_version": 1,
   "supported_protocol_versions": [1],
   "engine_version": "0.97.0",
-  "library_version": "0.1.0",
+  "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
   "value_types": ["GTImage", "GTVideo", "GTFile", "GTText", "GTNumber", "GTBoolean", "GTNull"]
 }
@@ -487,17 +487,32 @@ Terminal notification.
 
 | Field | Type | Notes |
 |---|---|---|
-| `state` | `str` | `running`, `succeeded`, `failed`, `cancelled` |
+| `state` | `str` | In practice only `completed` or `cancelled` arrive on this notification. `running` is reported on `NukeExecuteWorkflowResultSuccess` instead, and `failed` is reserved (see below) |
 | `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node |
 | `detail` | `str` | Human-readable reason |
 
 ```json
 {
-  "state": "succeeded",
+  "state": "completed",
   "terminal_node": "End Flow",
-  "detail": "Workflow completed."
+  "detail": "The engine reported the flow finished. It did not report an outcome."
 }
 ```
+
+`completed` means only that the engine finished the flow, not that it succeeded. The
+engine's `ControlFlowResolvedEvent` fires on both a clean run and an errored one and
+carries no status field, so this layer has nothing else to report. `failed` is reserved
+for the day the engine exposes that outcome on an event; it is not emitted today. The
+only way to detect an actual failure is to catch the live `NukeNodeStateEvent` with
+`state: "failed"` as it is pushed. `NukeGetExecutionStateRequest` cannot recover a missed
+one after the fact: its result carries running state, active/involved nodes, and output
+values, never a flow-level outcome, because the engine exposes none. A host that drops
+its connection or subscribes late has no way to learn, after the fact, that a run failed.
+
+May also receive `cancelled` followed by `completed` for one run: the engine's cancel and
+error paths both end in the same completion event, and whether a host observes both for a
+single run is a timing question this layer cannot settle by reading engine source. Treat
+the first terminal state received as authoritative and ignore a later one for the same run.
 
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the ports
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetExecutionStateRequest`.

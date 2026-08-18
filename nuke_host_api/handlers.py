@@ -1,12 +1,13 @@
 """Translation: host verbs in, engine requests out.
 
-The only module that knows both vocabularies. Above it, a host sees the seven verbs
+The only module that knows both vocabularies. Above it, a host sees the six verbs
 and the closed value type set. Below it is the engine's current retained-mode API,
 free to churn.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from pathlib import Path
@@ -69,7 +70,6 @@ from nuke_host_api.events import (
     NukeListWorkflowsResultSuccess,
 )
 from nuke_host_api.protocol import (
-    LIBRARY_VERSION,
     PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
     VALUE_TYPES,
@@ -81,6 +81,28 @@ logger = logging.getLogger("griptape_nodes")
 
 # Control-flow parameters are execution wiring, not data. Hosts never see them.
 CONTROL_PARAM_TYPE = "parametercontroltype"
+
+# Resolved relative to this file, not the process working directory, since a host may
+# launch the engine from anywhere.
+_LIBRARY_MANIFEST_PATH = Path(__file__).resolve().parent.parent / "griptape-nodes-library.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _library_version() -> str:
+    """Return the version this library actually ships, read from its own manifest.
+
+    protocol.py previously carried a hardcoded LIBRARY_VERSION, a third copy of this value
+    alongside pyproject.toml's, and the two had already drifted (0.1.0 vs the manifest's
+    0.3.0). The manifest is what the engine registers and what a user actually installs, so
+    it is the one authoritative source. Read once and cached, since the manifest does not
+    change while the process is running.
+    """
+    try:
+        manifest = json.loads(_LIBRARY_MANIFEST_PATH.read_text())
+        return str(manifest["metadata"]["library_version"])
+    except (OSError, ValueError, KeyError, TypeError):
+        logger.warning("Could not read library_version from %s", _LIBRARY_MANIFEST_PATH)
+        return "unknown"
 
 
 def event_topic() -> str:
@@ -227,7 +249,7 @@ def handle_connect(request: RequestPayload) -> ResultPayload:
         protocol_version=mutual[0],
         supported_protocol_versions=list(SUPPORTED_PROTOCOL_VERSIONS),
         engine_version=_engine_version(),
-        library_version=LIBRARY_VERSION,
+        library_version=_library_version(),
         event_topic=event_topic(),
         value_types=list(VALUE_TYPES),
         result_details=f"Connected {client} on host API protocol version {mutual[0]}.",
