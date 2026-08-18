@@ -55,6 +55,8 @@ def test_engine_type_names_map_into_the_closed_set(engine_type: str | None, expe
         ("/mnt/show/plate.mov", "str", ValueType.VIDEO),
         ("/mnt/show/notes.txt", "str", ValueType.FILE),
         ("a hazy afternoon", "str", ValueType.TEXT),
+        ("3/4 cup", "str", ValueType.TEXT),
+        ("aspect 16/9", "str", ValueType.TEXT),
         (BlobArtifact(value=b"\x00\x01"), "BlobArtifact", ValueType.FILE),
         (None, "ImageUrlArtifact", ValueType.NULL),
         (True, "bool", ValueType.BOOLEAN),
@@ -131,6 +133,14 @@ def test_locator_kinds_are_explicit() -> None:
     assert inline["sources"][0]["byte_count"] == 4
 
 
+def test_a_literal_windows_path_is_slash_normalized_without_going_through_a_macro() -> None:
+    """CLAUDE.md's forward-slash rule applies to a plain path string, not only a macro-resolved one."""
+    descriptor = value_types.normalize_value("C:\\workspace\\outputs\\render.png", "str")
+    source = descriptor["sources"][0]
+    assert source["value"] == "C:/workspace/outputs/render.png"
+    assert "\\" not in source["value"]
+
+
 def test_a_frame_list_is_one_image_with_many_sources() -> None:
     """Sequences are source count, not a value type, so they cost no version bump."""
     frames = ListArtifact([ImageUrlArtifact(f"http://x/frame.{n:04d}.exr") for n in (1, 2, 3)])
@@ -147,6 +157,91 @@ def test_a_mixed_list_degrades_rather_than_picking_a_winner() -> None:
 
 def test_an_empty_list_is_null_not_an_empty_image() -> None:
     assert value_types.normalize_value(ListArtifact([]))["value_type"] == ValueType.NULL
+
+
+def test_a_slash_alone_does_not_make_prose_a_file() -> None:
+    """A slash proves nothing about media type; without an extension the declared type wins, and no fake source is attached."""
+    assert value_types.normalize_value("3/4 cup", "str")["value_type"] == ValueType.TEXT
+    assert value_types.normalize_value("3/4 cup", "str")["sources"] == []
+    assert value_types.normalize_value("aspect 16/9", "str")["value_type"] == ValueType.TEXT
+    assert value_types.normalize_value("aspect 16/9", "str")["sources"] == []
+
+
+@pytest.mark.parametrize(
+    ("value", "declared", "expected_type", "expect_source"),
+    [
+        # Genuine locator shapes: extension known or not, the source is real and is kept.
+        ("/mnt/show/plate.exr", "str", ValueType.IMAGE, True),
+        ("/mnt/show/notes.txt", "str", ValueType.FILE, True),
+        ("/mnt/show/renders", "str", ValueType.FILE, True),
+        ("https://host/asset", "str", ValueType.FILE, True),
+        ("/render/mix_final", "AudioUrlArtifact", ValueType.FILE, True),
+        # A relative path is the ordinary form in a Nuke script, so an extension alongside a
+        # separator is enough to make it a locator.
+        ("shots/plate.exr", "str", ValueType.IMAGE, True),
+        ("renders/out.mov", "str", ValueType.VIDEO, True),
+        ("notes/readme.txt", "str", ValueType.FILE, True),
+        # Prose that merely contains a slash: no locator shape, so the declared type wins
+        # and no source is manufactured.
+        ("3/4 cup", "str", ValueType.TEXT, False),
+        ("aspect 16/9", "str", ValueType.TEXT, False),
+        ("plain prose here", "str", ValueType.TEXT, False),
+        # A separator with no extension and no absolute shape stays prose.
+        ("shots/plate", "str", ValueType.TEXT, False),
+    ],
+)
+def test_locator_fallback_matrix(value: str, declared: str, expected_type: str, expect_source: bool) -> None:
+    """Only a genuine locator shape keeps a source: a URL, an absolute path, or a relative path carrying an extension."""
+    descriptor = value_types.normalize_value(value, declared)
+    assert descriptor["value_type"] == expected_type
+    if expect_source:
+        assert len(descriptor["sources"]) == 1
+        assert descriptor["sources"][0]["value"] == value
+    else:
+        assert descriptor["sources"] == []
+
+
+SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.NUMBER, ValueType.BOOLEAN, ValueType.NULL}
+
+
+@pytest.mark.parametrize(
+    "declared",
+    ["str", "int", "ImageUrlArtifact", "VideoUrlArtifact", "AudioUrlArtifact", "GenericArtifact", None],
+)
+@pytest.mark.parametrize(
+    "value",
+    [
+        "just prose",
+        "",
+        "3/4 cup",
+        "render {frame} of the shot",
+        "shots/plate",
+        "/mnt/show/plate.exr",
+        "shots/plate.exr",
+        "https://host/asset",
+        None,
+        7,
+        True,
+        ["note one", "note two"],
+        ["/a/one.exr", "/a/two.exr"],
+        object(),
+    ],
+)
+def test_a_media_or_file_type_never_arrives_without_a_source(value: Any, declared: str | None) -> None:
+    """GTImage, GTVideo and GTFile promise a host somewhere to get bytes, so they must carry a source.
+
+    Both docs publish the inverse rule too: only GTText, GTNumber, GTBoolean and GTNull arrive
+    sourceless. A declared media type describes what a port is for, not what a value turned out
+    to be, so prose on an image port must not be announced as an image a host can open.
+    """
+    descriptor = value_types.normalize_value(value, declared)
+    value_type = descriptor["value_type"]
+    has_source = bool(descriptor["sources"])
+
+    if value_type in SOURCELESS_VALUE_TYPES:
+        assert not has_source, f"{value_type} carried a source for {value!r} declared {declared!r}"
+    else:
+        assert has_source, f"{value_type} carried no source for {value!r} declared {declared!r}"
 
 
 def test_colorspace_is_present_and_reserved() -> None:

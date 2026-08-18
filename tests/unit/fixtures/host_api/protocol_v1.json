@@ -1,9 +1,9 @@
 {
   "execution_states": [
     "cancelled",
+    "completed",
     "failed",
-    "running",
-    "succeeded"
+    "running"
   ],
   "node_states": [
     "failed",
@@ -19,290 +19,454 @@
   "payloads": {
     "NukeCancelExecutionRequest": {
       "broadcast_result": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "failure_log_level": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "int | None"
       },
       "fields": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "list[str] | None"
       },
       "request_id": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "str | None"
       }
     },
     "NukeCancelExecutionResultFailure": {
       "exception": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "Exception | None"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       }
     },
     "NukeCancelExecutionResultSuccess": {
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       }
     },
     "NukeConnectRequest": {
       "broadcast_result": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "client_name": {
-        "required": false
+        "default": "",
+        "required": false,
+        "type": "str"
       },
       "client_protocol_versions": {
-        "required": false
+        "default": [],
+        "required": false,
+        "type": "list[int]"
       },
       "failure_log_level": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "int | None"
       },
       "fields": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "list[str] | None"
       },
       "request_id": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "str | None"
       }
     },
     "NukeConnectResultFailure": {
       "exception": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "Exception | None"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "supported_protocol_versions": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[int]"
       }
     },
     "NukeConnectResultSuccess": {
       "engine_version": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "event_topic": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "library_version": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "protocol_version": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "int"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "supported_protocol_versions": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[int]"
       },
       "value_types": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[str]"
       }
     },
     "NukeDescribeWorkflowRequest": {
       "broadcast_result": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "failure_log_level": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "int | None"
       },
       "fields": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "list[str] | None"
       },
       "request_id": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "str | None"
       },
       "workflow_id": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeDescribeWorkflowResultFailure": {
       "exception": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "Exception | None"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "workflow_id": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeDescribeWorkflowResultSuccess": {
       "description": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "inputs": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[dict[str, str]]"
       },
       "name": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "outputs": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[dict[str, str]]"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "workflow_id": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeExecuteWorkflowRequest": {
       "broadcast_result": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "failure_log_level": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "int | None"
       },
       "fields": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "list[str] | None"
       },
       "inputs": {
-        "required": false
+        "default": {},
+        "required": false,
+        "type": "dict[str, dict[str, Any]]"
       },
       "request_id": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "str | None"
       },
       "workflow_id": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeExecuteWorkflowResultFailure": {
       "exception": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "Exception | None"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "workflow_id": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeExecuteWorkflowResultSuccess": {
       "applied_inputs": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[dict[str, str]]"
       },
       "rejected_inputs": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[dict[str, str]]"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "state": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "workflow_id": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeExecutionStateEvent": {
       "detail": {
-        "required": false
+        "default": "",
+        "required": false,
+        "type": "str"
       },
       "state": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "terminal_node": {
-        "required": false
+        "default": "",
+        "required": false,
+        "type": "str"
       }
     },
     "NukeGetExecutionStateRequest": {
       "broadcast_result": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "failure_log_level": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "int | None"
       },
       "fields": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "list[str] | None"
       },
       "include_outputs": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "request_id": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "str | None"
       }
     },
     "NukeGetExecutionStateResultFailure": {
       "exception": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "Exception | None"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       }
     },
     "NukeGetExecutionStateResultSuccess": {
       "active_nodes": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[str]"
       },
       "involved_nodes": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[str]"
       },
       "outputs": {
-        "required": false
+        "default": {},
+        "required": false,
+        "type": "dict[str, dict[str, Any]]"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "running": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "bool"
       },
       "workflow_id": {
-        "required": false
+        "default": "",
+        "required": false,
+        "type": "str"
       }
     },
     "NukeListWorkflowsRequest": {
       "broadcast_result": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       },
       "failure_log_level": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "int | None"
       },
       "fields": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "list[str] | None"
       },
       "request_id": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "str | None"
       },
       "runnable_only": {
-        "required": false
+        "default": true,
+        "required": false,
+        "type": "bool"
       }
     },
     "NukeListWorkflowsResultFailure": {
       "exception": {
-        "required": false
+        "default": null,
+        "required": false,
+        "type": "Exception | None"
       },
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       }
     },
     "NukeListWorkflowsResultSuccess": {
       "result_details": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "ResultDetails | str"
       },
       "workflows": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "list[dict[str, Any]]"
       }
     },
     "NukeNodeStateEvent": {
       "detail": {
-        "required": false
+        "default": "",
+        "required": false,
+        "type": "str"
       },
       "node_name": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "state": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       }
     },
     "NukeParameterValueEvent": {
       "node_name": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "parameter_name": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "str"
       },
       "value": {
-        "required": true
+        "default": null,
+        "required": true,
+        "type": "dict[str, Any]"
       }
     }
   },
