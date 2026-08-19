@@ -1,0 +1,30 @@
+#! /mnt/storage/workspace/nuke/releases/Nuke16.0v8/libnuke-16.0.8.so -nx
+version 16.0 v8
+Root {
+ inputs 0
+ gsv  {
+  __default__ {
+  }
+}
+ format "2048 1556 0 0 2048 1556 1 2K_Super_35(full-ap)"
+ proxy_type scale
+ proxy_format "1024 778 0 0 1024 778 1 1K_Super_35(full-ap)"
+ colorManagement Nuke
+ workingSpaceLUT 0
+ monitorLut sRGB
+ monitorOutLUT rec709
+ int8Lut 0
+ int16Lut 0
+ logLut 0
+ floatLut 0
+}
+canary_workflow_v01 {
+ inputs 0
+ name canary_workflow_v01_1
+ selected true
+ output_dir ""
+ _gt_expr_output_dir ""
+ _companion_dir ""
+ _gt_running ""
+ result_out ""
+}

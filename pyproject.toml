@@ -48,6 +48,13 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
+[tool.pytest.ini_options]
+# publish_gizmo/ is not an installable package, but several tests import its
+# modules flat (e.g. `import nuke_workflow_runner`), matching how the companion
+# bundle imports its own siblings at runtime. See extraPaths below for pyright's
+# equivalent.
+pythonpath = ["publish_gizmo"]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
@@ -56,6 +63,11 @@ include = ["."]
 extraPaths = ["publish_gizmo"]
 # run_button.py is exec'd inside Nuke's Python interpreter where `nuke` and `_config`
 # are injected into the global scope at runtime. It is not a regular importable module.
-exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows", "publish_gizmo/run_button.py", "scripts/generate_test_fixtures.py", "nuke_runner/runner.py", "nuke_runner/baker.py", "nuke_runner/introspect.py", "nuke_runner/exporter.py"]
+exclude = [
+  ".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates", "workflows",
+  "publish_gizmo/run_button.py", "scripts/generate_test_fixtures.py", "nuke_runner/runner.py",
+  "nuke_runner/baker.py", "nuke_runner/introspect.py", "nuke_runner/exporter.py",
+  "tests/integration/fixtures/canary/nuke_driver.py"
+]
 pythonVersion = "3.12"
 reportIncompatibleMethodOverride = false
