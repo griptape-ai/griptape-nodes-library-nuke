@@ -40,15 +40,18 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.publishing import WorkflowPackager
 
 from publish_gizmo.constants import (
+    BUNDLED_SCRIPTS,
     GRIPTAPE_DIR_NAME,
     INIT_MARKER,
     OUTPUTS_DIR_NAME,
+    PRESERVED_ON_REPUBLISH,
     versioned_gizmo_filename,
 )
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
 from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder
 
 if TYPE_CHECKING:
+    from griptape_nodes.node_library.workflow_registry import Workflow
     from griptape_nodes.retained_mode.events.base_events import ResultPayload
 
 logger = logging.getLogger(__name__)
@@ -93,57 +96,18 @@ class NukeGizmoPublisher:
             companion_base = griptape_dir / workflow_stem
 
             version = self._determine_version(companion_base)
-            version_dir = companion_base / f"v{version}"
-            version_dir.mkdir(parents=True, exist_ok=True)
 
-            # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
-            self._packager.package_to_folder(companion_base, workflow)
-
-            # Generate a uv.lock so the shared companion carries a pinned lockfile.
-            # When one is present the gizmo runs frozen, so uv never writes back to
-            # the (possibly read-only) shared drive.
-            self._packager.emit_progress(5.0, "Locking dependencies...")
-            lock_error = self._write_lockfile(companion_base)
-
-            # Override the bundled project.yml with Nuke-specific output conventions
-            # so outputs land next to the .nk file, not inside the companion bundle.
-            self._customize_project_yml(companion_base)
-
-            # Move the workflow file from companion base into the version subdir.
-            # Use copy+delete instead of rename so re-publishing over an existing
-            # version (where dest already exists) succeeds without error.
-            src_workflow = companion_base / workflow_file_path.name
-            dest_workflow = version_dir / workflow_file_path.name
-            if src_workflow.exists():
-                self._copy_file(src_workflow, dest_workflow, overwrite=True)
-                src_workflow.unlink()
-
-            # Copy the runner and button scripts (shared, overwrite on each publish)
-            self._packager.emit_progress(5.0, "Writing runner script...")
-            self._copy_file(
-                Path(__file__).parent / "nuke_workflow_runner.py",
-                companion_base / "run_workflow.py",
-                overwrite=True,
-            )
-            self._copy_file(
-                Path(__file__).parent / "run_button.py",
-                companion_base / "run_button.py",
-                overwrite=True,
-            )
-            self._copy_file(
-                Path(__file__).parent / "register_libraries_script.py",
-                companion_base / "register_libraries_script.py",
-                overwrite=True,
-            )
-            self._copy_file(
-                Path(__file__).parent / "output_protocol.py", companion_base / "output_protocol.py", overwrite=True
-            )
-            self._copy_file(Path(__file__).parent / "tcl_utils.py", companion_base / "tcl_utils.py", overwrite=True)
-            self._copy_file(
-                Path(__file__).parent / "output_paths.py", companion_base / "output_paths.py", overwrite=True
-            )
+            # Build the whole bundle in a staging directory that replaces companion_base
+            # only once every step has succeeded.  Writing straight into a persistent
+            # companion_base accumulates: each writer decides for itself whether it
+            # overwrites, so a re-publish can add and update artifacts but never remove
+            # one, and a publish that fails partway leaves a half-updated bundle.
+            with self._packager.staged_publish(companion_base, preserve=PRESERVED_ON_REPUBLISH) as staging_base:
+                dest_workflow, lock_error = self._build_bundle(staging_base, workflow, workflow_file_path, version)
 
             available_versions = self._collect_versions(companion_base)
+            # The gizmo records the final bundle path, not the staging one it was built in.
+            dest_workflow = companion_base / dest_workflow.relative_to(staging_base)
 
             # Generate the versioned gizmo (flat in griptape_dir, not inside companion)
             self._packager.emit_progress(10.0, "Generating gizmo...")
@@ -188,6 +152,53 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    # -- Bundle assembly --
+
+    def _build_bundle(
+        self, companion_base: Path, workflow: Workflow, workflow_file_path: Path, version: int
+    ) -> tuple[Path, str | None]:
+        """Write the full companion bundle into *companion_base*, returning the workflow path and lock reason.
+
+        Every step raises on failure so the caller's staging directory is discarded and
+        the previously published bundle is left in place. Locking is the exception: it
+        is best-effort, so its failure reason is returned for the caller to report.
+        """
+        version_dir = companion_base / f"v{version}"
+        version_dir.mkdir(parents=True, exist_ok=True)
+
+        # Package shared files (libraries, config, .env, pyproject.toml) into companion base.
+        self._packager.package_to_folder(companion_base, workflow)
+
+        # Generate a uv.lock so the shared companion carries a pinned lockfile.
+        # When one is present the gizmo runs frozen, so uv never writes back to
+        # the (possibly read-only) shared drive.
+        self._packager.emit_progress(5.0, "Locking dependencies...")
+        lock_error = self._write_lockfile(companion_base)
+
+        # Override the bundled project.yml with Nuke-specific output conventions
+        # so outputs land next to the .nk file, not inside the companion bundle.
+        self._customize_project_yml(companion_base)
+
+        # Move the workflow file from companion base into the version subdir.
+        # Use copy+delete instead of rename so re-publishing over an existing
+        # version (where dest already exists) succeeds without error.
+        src_workflow = companion_base / workflow_file_path.name
+        dest_workflow = version_dir / workflow_file_path.name
+        if src_workflow.exists():
+            self._copy_file(src_workflow, dest_workflow, overwrite=True)
+            src_workflow.unlink()
+
+        # Copy the runner and button scripts (shared, overwrite on each publish)
+        self._packager.emit_progress(5.0, "Writing runner script...")
+        for script_name, bundled_name in BUNDLED_SCRIPTS.items():
+            self._copy_file(
+                Path(__file__).parent / script_name,
+                companion_base / bundled_name,
+                overwrite=True,
+            )
+
+        return dest_workflow, lock_error
 
     # -- Dependency locking --
 
@@ -295,20 +306,28 @@ class NukeGizmoPublisher:
           ``{sub_dirs?:/}`` passes through any relative subdirectory; when absent
           the whole token (including its separator) is dropped.
           ``CREATE_NEW`` collision policy auto-increments the index on each run.
+
+        Fatal on failure. project.yml governs where a run's outputs land, so a bundle
+        carrying the engine's un-customized template writes them inside the companion
+        instead of next to the .nk file. Returning quietly was survivable when the
+        previous publish's customized file stayed behind; a rebuilt bundle has no
+        earlier version to fall back on.
         """
         project_yml = companion_base / "project.yml"
         read_result = GriptapeNodes.handle_request(
             ReadFileRequest(file_path=str(project_yml), workspace_only=False, encoding="utf-8")
         )
-        if not isinstance(read_result, ReadFileResultSuccess):
-            return
-        if not isinstance(read_result.content, str):
-            return
+        if not isinstance(read_result, ReadFileResultSuccess) or not isinstance(read_result.content, str):
+            msg = f"Failed to read the bundled project.yml at '{project_yml}'."
+            logger.error(msg)
+            raise TypeError(msg)
 
         validation_info = ProjectValidationInfo(status=ProjectValidationStatus.GOOD)
         template = load_project_template_from_yaml(read_result.content, validation_info)
         if template is None:
-            return
+            msg = f"Failed to parse the bundled project.yml at '{project_yml}'."
+            logger.error(msg)
+            raise TypeError(msg)
 
         template.directories["outputs"] = DirectoryDefinition(
             name="outputs",
@@ -340,7 +359,9 @@ class NukeGizmoPublisher:
             WriteFileRequest(file_path=str(project_yml), content=template.to_yaml(), encoding="utf-8")
         )
         if not isinstance(write_result, WriteFileResultSuccess):
-            logger.warning("Could not write customized project.yml to '%s'.", project_yml)
+            msg = f"Failed to write the customized project.yml to '{project_yml}'."
+            logger.error(msg)
+            raise TypeError(msg)
 
     # -- Validation and path helpers --
 

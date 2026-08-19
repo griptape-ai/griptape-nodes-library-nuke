@@ -19,6 +19,33 @@ RUN_BUTTON_FILENAME = "run_button.py"
 # documented default and the actual default cannot drift apart.
 OUTPUTS_DIR_NAME = "griptape_outputs"
 
+# Publisher-source filename -> companion-bundle filename, for the scripts copied
+# into every companion directory at publish time.
+BUNDLED_SCRIPTS = {
+    "nuke_workflow_runner.py": "run_workflow.py",
+    RUN_BUTTON_FILENAME: RUN_BUTTON_FILENAME,
+    "register_libraries_script.py": "register_libraries_script.py",
+    "output_protocol.py": "output_protocol.py",
+    "tcl_utils.py": "tcl_utils.py",
+    "output_paths.py": "output_paths.py",
+}
+
+# Matches the per-version subdirectories (v1, v2, ...) inside a companion directory.
+# The digit class keeps it from also matching a future non-version entry starting
+# with "v".
+VERSION_DIR_GLOB = "v[0-9]*"
+
+# Entries a re-publish must carry across the staged rebuild rather than discard.
+#
+# The version subdirs are meant to accumulate -- each published version keeps its
+# own workflow file. The other two are run artifacts, not publish artifacts: for a
+# gizmo driven from an unsaved .nk there is no script directory to use as the
+# workspace, so the runner falls back to the companion and the engine writes
+# griptape_outputs/ and staticfiles/ inside the bundle. Deleting an artist's
+# generated frames on re-publish would be worse than the staleness the rebuild
+# fixes, so they survive it.
+PRESERVED_ON_REPUBLISH = [VERSION_DIR_GLOB, OUTPUTS_DIR_NAME, "staticfiles"]
+
 # Prefix for the hidden companion knob that stores a Link button's TCL expression
 # (the visible knob shows the evaluated value). Kept in sync with the local copy
 # in the bundled tcl_utils.py, which cannot import this module at runtime.
