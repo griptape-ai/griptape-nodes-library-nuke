@@ -104,6 +104,10 @@ test: ## Run tests.
 test/unit: ## Run unit tests.
 	@uv run pytest tests/unit
 
+.PHONY: test/integration
+test/integration: ## Run integration tests. Nuke-gated tests skip cleanly if NUKE_EXECUTABLE is unset.
+	@uv run pytest tests/integration
+
 .PHONY: check
 check: check/format check/lint check/types check/json ## Run all checks.
 
