@@ -93,6 +93,34 @@ def _has_lockfile(companion: str) -> bool:
     return os.path.isfile(os.path.join(companion, "uv.lock"))
 
 
+# Host Python env vars must not leak into the gizmo's uv venv.  Nuke is often
+# launched through a wrapper (rez, modules, conda, an activated venv) that exports
+# PYTHONPATH pointing at that wrapper's own site-packages -- and PYTHONPATH is
+# placed *ahead* of the venv's site-packages in sys.path, so the child 3.12
+# interpreter imports the wrapper's copy of a dependency instead of the version the
+# engine pinned.  Pure-Python packages import fine across minor versions, so this
+# shows up as a wrong-version ImportError rather than a missing module.  Mirrors the
+# desktop app's list in griptape-nodes-desktop/src/common/config/env.ts -- keep the
+# two in sync.  UV_PYTHON/UV_SYSTEM_PYTHON are stripped as well because an
+# inherited value fights the bundle's pinned requires-python.
+_LEAKED_PYTHON_VARS = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+    "PYTHONUSERBASE",
+    "PYTHONEXECUTABLE",
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
+    "UV_PYTHON",
+    "UV_SYSTEM_PYTHON",
+)
+
+# Deliberately NOT stripped: PATH, LD_LIBRARY_PATH, DYLD_LIBRARY_PATH.  A rez/studio
+# environment uses those to supply GPU, driver and system libraries that nodes in the
+# child process legitimately need; clearing them breaks far more than it fixes.
+_KEEP_PYTHONPATH_VAR = "GTN_GIZMO_KEEP_PYTHONPATH"
+
+
 def _build_child_env(local_dir: str, base_env: dict, *, frozen: bool = True) -> dict:
     """Return a subprocess env pointing config and the uv venv at the local dir.
 
@@ -105,12 +133,25 @@ def _build_child_env(local_dir: str, base_env: dict, *, frozen: bool = True) -> 
     lock present uv refuses to run at all. When unfrozen, an inherited
     UV_FROZEN/UV_LOCKED is cleared too, so a site-wide export can't reintroduce
     the same failure. local_dir must already be an absolute forward-slashed path.
+
+    Host Python vars are dropped (see _LEAKED_PYTHON_VARS) so the child resolves
+    imports only against its own venv. A site that deliberately injects packages
+    via PYTHONPATH can opt out by exporting GTN_GIZMO_KEEP_PYTHONPATH=1 in the
+    environment Nuke is launched with; every other var is still stripped.
     """
     env = {
         **base_env,
         "XDG_CONFIG_HOME": local_dir + "/.gtn_config",
         "UV_PROJECT_ENVIRONMENT": local_dir + "/.venv",
+        # A host ~/.local/lib/pythonX.Y/site-packages would shadow the venv the
+        # same way PYTHONPATH does, and no env var points at it to strip.
+        "PYTHONNOUSERSITE": "1",
     }
+    keep_pythonpath = str(base_env.get(_KEEP_PYTHONPATH_VAR, "")).strip().lower() not in ("", "0", "false", "no")
+    for _var in _LEAKED_PYTHON_VARS:
+        if _var == "PYTHONPATH" and keep_pythonpath:
+            continue
+        env.pop(_var, None)
     if frozen:
         env["UV_FROZEN"] = "1"
     else:

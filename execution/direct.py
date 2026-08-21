@@ -17,6 +17,18 @@ if TYPE_CHECKING:
 
 _CANCEL_GRACE_SECONDS = 5
 
+# Qt plugin paths inherited from the engine's venv (e.g. cv2 ships its own) shadow
+# Nuke's bundled Qt plugins and crash the headless process on Linux.
+_STRIPPED_QT_VARS = ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH")
+
+# The engine runs in a Python 3.12 venv; `nuke -t` runs Nuke's own bundled
+# interpreter (3.10/3.11 depending on the release). Leaking the engine's Python
+# vars puts 3.12 site-packages -- including compiled extensions built against a
+# different ABI -- ahead of Nuke's own, which crashes it rather than failing to
+# import. Same leak in the opposite direction as _LEAKED_PYTHON_VARS in
+# publish_gizmo/run_button.py.
+_STRIPPED_PYTHON_VARS = ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE", "VIRTUAL_ENV")
+
 
 class DirectSubprocessProvider:
     """Runs Nuke as a direct child process. Default provider for local dev."""
@@ -63,11 +75,11 @@ class DirectSubprocessProvider:
         out_manifest = tmp.name + ".out.json"
         self._output_manifest_paths[handle] = out_manifest
         env = os.environ.copy()
-        # Strip inherited Qt plugin paths (e.g. cv2 ships its own) that would
-        # shadow Nuke's bundled Qt plugins and crash the headless process on Linux.
+        # Strip inherited Qt plugin paths and the engine's own Python vars, which would
+        # otherwise shadow what Nuke's bundled interpreter and Qt need.
         # Done before manifest overrides so callers can explicitly set these if needed.
-        for _qt_var in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
-            env.pop(_qt_var, None)
+        for _var in (*_STRIPPED_QT_VARS, *_STRIPPED_PYTHON_VARS):
+            env.pop(_var, None)
         if self._installation is not None:
             env.update(self._installation.env_overrides)
         env.update(manifest.env)
