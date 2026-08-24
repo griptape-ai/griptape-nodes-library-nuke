@@ -38,6 +38,8 @@ nuke_plugin/             Griptape Annotator — dockable panel that runs inside 
   panel.py                 PySide2 panel: Annotate tab, Overview tab, expose-knob UI
   installer.py             get_plugin_path() — resolves versioned plugin directory
   nuke14/ … nuke17/        Version-specific menu.py registrations
+tests/integration/fixtures/canary/  Shared canary-workflow builder used by tests/integration
+  canary_workflow_builder.py  Registers canary_library, builds/saves/publishes the canary gizmo bundle
 presets/                 (planned) Bundled preset .nk scripts
 griptape-nodes-library.json   Library manifest — register nodes here
 pyproject.toml           Dependencies and tool config

@@ -25,8 +25,6 @@ from griptape_nodes.retained_mode.events.os_events import (
     CopyFileResultSuccess,
     ReadFileRequest,
     ReadFileResultSuccess,
-    RenameFileRequest,
-    RenameFileResultSuccess,
     WriteFileRequest,
     WriteFileResultSuccess,
 )
@@ -43,7 +41,6 @@ from publish_gizmo.constants import (
     BUNDLED_SCRIPTS,
     GRIPTAPE_DIR_NAME,
     INIT_MARKER,
-    OUTPUTS_DIR_NAME,
     PRESERVED_ON_REPUBLISH,
     versioned_gizmo_filename,
 )
@@ -56,6 +53,10 @@ if TYPE_CHECKING:
     from griptape_nodes.retained_mode.events.base_events import ResultPayload
 
 logger = logging.getLogger(__name__)
+
+# Env var used to redirect `{outputs}` path macro, configured in project.yml. The
+# runner calculates and exports this before executing the workflow.
+OUTPUTS_DIR_ENV_VAR = "GTN_NUKE_GIZMO_OUTPUTS_DIR"
 
 
 class NukeGizmoPublisher:
@@ -318,30 +319,14 @@ class NukeGizmoPublisher:
             logger.error(details)
             raise TypeError(details)
 
-    @classmethod
-    def _move_file(cls, source_path: str | Path, destination_path: str | Path) -> None:
-        """Moves a file from source to destination using OS events for cross-platform compatibility."""
-        rename_result = GriptapeNodes.handle_request(
-            RenameFileRequest(
-                old_path=str(source_path),
-                new_path=str(destination_path),
-                workspace_only=False,
-            )
-        )
-        if not isinstance(rename_result, RenameFileResultSuccess):
-            details = f"Failed to move file from '{source_path}' to '{destination_path}'."
-            logger.error(details)
-            raise TypeError(details)
-
     # -- Project template customisation --
 
     @staticmethod
     def _customize_project_yml(companion_base: Path) -> None:
         """Override the bundled project.yml with Nuke-specific output conventions.
 
-        * ``outputs`` directory is set to ``griptape_outputs`` (relative) so that
-          outputs resolve next to the ``.nk`` file when a Nuke script directory
-          is passed as the workspace at runtime.
+        * ``outputs`` directory's ``path_macro`` is the plain, single-token
+          ``{OUTPUTS_DIR_ENV_VAR}``: the runner always exports that variable.
         * ``save_node_output`` uses a versioned naming convention so each gizmo
           run produces a new numbered file Nuke can detect and load:
           ``{outputs}/{sub_dirs?:/}{file_name_base}_v{_index?:04}.{file_extension}``
@@ -373,7 +358,7 @@ class NukeGizmoPublisher:
 
         template.directories["outputs"] = DirectoryDefinition(
             name="outputs",
-            path_macro=OUTPUTS_DIR_NAME,
+            path_macro=f"{{{OUTPUTS_DIR_ENV_VAR}}}",
         )
 
         template.situations["save_node_output"] = SituationTemplate(
@@ -675,7 +660,7 @@ nuke.menu('Nuke').addMenu('Griptape').addCommand('Refresh Griptape Gizmos', _ref
 _refresh_griptape_menu()
 
 # Watch the griptape directory for new/removed gizmos and auto-refresh the menu.
-# Skipped silently when Qt is unavailable (e.g. nuke -t headless).
+# Skipped silently when Qt cannot be imported.
 if _QT_AVAILABLE:
     _GRIPTAPE_WATCHER = QFileSystemWatcher([_GRIPTAPE_DIR])
     _GRIPTAPE_WATCHER.directoryChanged.connect(lambda _path: _refresh_griptape_menu())

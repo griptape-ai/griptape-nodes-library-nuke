@@ -352,6 +352,12 @@ class TestTclHintTooltips:
         knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 output_dir" in line)
         assert "relative path is resolved against the folder containing this .nk script" in knob_line
 
+    def test_output_dir_tooltip_braces_stay_balanced(self) -> None:
+        """Nuke parses the addUserKnob line as a braced TCL word; an odd brace would truncate the knob."""
+        gizmo = _generate_gizmo({})
+        knob_line = next(line for line in gizmo.splitlines() if "addUserKnob {1 output_dir" in line)
+        assert knob_line.count("{") == knob_line.count("}")
+
     def test_output_knob_has_reference_tooltip(self) -> None:
         gizmo = _generate_gizmo_with_output(
             {"caption": {"type": "str", "default_value": "", "mode_allowed_output": True, "ui_options": {}}}

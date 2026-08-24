@@ -12,7 +12,7 @@ A Griptape Nodes library for building workflows that run inside [Foundry Nuke](h
 - **Gizmo publisher** (`publish_gizmo/`): packages a workflow into a versioned `.gizmo` alongside a runner script and installs it into a Nuke plugin directory (default: `~/.nuke`).
 - **`NUKE_PATH` detection**: extra plugin directories from `NUKE_PATH` are surfaced as gizmo install targets in the publish dialog, alongside the default `~/.nuke`.
 - **Griptape menu integration**: publishing writes a `menu.py` that adds a `Griptape` submenu to Nuke's Nodes toolbar and a `Refresh Griptape Gizmos` command on the main menu bar. Multiple published versions of the same workflow are grouped under a per-workflow submenu.
-- **Nuke-aware output paths**: the bundled `project.yml` is rewritten so workflow outputs land next to the `.nk` file (under `griptape_outputs/<workflow_name>/...`).
+- **Nuke-aware output paths**: the bundled `project.yml` is rewritten so workflow outputs land next to the `.nk` file, directly under `griptape_outputs/`. If the script has never been saved, outputs fall back to the gizmo's own bundle directory instead.
 
 ## Configuration
 

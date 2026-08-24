@@ -30,13 +30,15 @@ def _load_func(name: str, ns: dict):
     raise AssertionError(msg)
 
 
-def _load_write_lockfile(shutil_mod, subprocess_mod, logger):
+def _load_write_lockfile(shutil_mod, subprocess_mod, logger, home: Path):
     """Return _write_lockfile bound to a stub `cls` exposing the real _find_uv."""
     ns: dict = {
         "shutil": shutil_mod,
         "subprocess": subprocess_mod,
         "logger": logger,
-        "Path": Path,
+        # `home` must be an empty directory so `_find_uv`'s fallback probe never
+        # finds a real uv install.
+        "Path": SimpleNamespace(home=lambda: home),
         "platform": SimpleNamespace(system=lambda: "Linux"),
     }
     find_uv = _load_func("_find_uv", ns)
@@ -59,7 +61,7 @@ class TestWriteLockfile:
     def test_runs_uv_lock_with_project(self, tmp_path) -> None:
         run = _lock_writing_run()
         subprocess_mod = SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)
-        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, mock.Mock())
+        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, mock.Mock(), tmp_path)
         fn(tmp_path)
         cmd = run.call_args[0][0]
         assert cmd[:3] == ["/usr/bin/uv", "lock", "--project"]
@@ -69,7 +71,7 @@ class TestWriteLockfile:
         """No reason string means publish reports plain success."""
         subprocess_mod = SimpleNamespace(run=_lock_writing_run(), SubprocessError=subprocess.SubprocessError)
         logger = mock.Mock()
-        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger)
+        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger, tmp_path)
         assert fn(tmp_path) is None
         logger.warning.assert_not_called()
 
@@ -77,7 +79,7 @@ class TestWriteLockfile:
         run = mock.Mock()
         subprocess_mod = SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)
         logger = mock.Mock()
-        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: None), subprocess_mod, logger)
+        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: None), subprocess_mod, logger, tmp_path)
         reason = fn(tmp_path)
         run.assert_not_called()
         logger.warning.assert_called_once()
@@ -87,7 +89,7 @@ class TestWriteLockfile:
         run = mock.Mock(return_value=SimpleNamespace(returncode=1, stderr="boom"))
         subprocess_mod = SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)
         logger = mock.Mock()
-        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger)
+        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger, tmp_path)
         reason = fn(tmp_path)  # must not raise
         logger.warning.assert_called_once()
         assert reason is not None
@@ -98,7 +100,7 @@ class TestWriteLockfile:
 
         subprocess_mod = SimpleNamespace(run=_raise, SubprocessError=subprocess.SubprocessError)
         logger = mock.Mock()
-        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger)
+        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger, tmp_path)
         reason = fn(tmp_path)  # must not raise
         logger.warning.assert_called_once()
         assert reason is not None
@@ -108,7 +110,7 @@ class TestWriteLockfile:
         run = mock.Mock(return_value=SimpleNamespace(returncode=0, stderr=""))
         subprocess_mod = SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)
         logger = mock.Mock()
-        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger)
+        fn = _load_write_lockfile(SimpleNamespace(which=lambda _: "/usr/bin/uv"), subprocess_mod, logger, tmp_path)
         reason = fn(tmp_path)
         assert reason is not None
         logger.warning.assert_called_once()

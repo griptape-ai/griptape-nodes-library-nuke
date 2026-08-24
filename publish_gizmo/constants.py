@@ -14,9 +14,9 @@ INIT_MARKER = "# griptape-plugin-path"
 RUN_BUTTON_FILENAME = "run_button.py"
 
 # Directory name (relative to the .nk script) where workflow outputs land when the
-# gizmo's Output Directory knob is left blank. Stamped into the bundled project.yml
-# at publish time and quoted in the gizmo's Run tab help text — shared here so the
-# documented default and the actual default cannot drift apart.
+# gizmo's Output Directory knob is left blank. Quoted in the gizmo's Run tab help
+# text — shared here so the documented default and the actual default cannot drift
+# apart.
 OUTPUTS_DIR_NAME = "griptape_outputs"
 
 # Publisher-source filename -> companion-bundle filename, for the scripts copied

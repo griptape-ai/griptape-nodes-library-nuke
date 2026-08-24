@@ -17,8 +17,8 @@ except ImportError:  # unit tests / non-Nuke environments inject their own
     nuke = None  # type: ignore[assignment]
 
 # Prefix for the hidden companion knob that stores a Link button's TCL expression.
-# Must stay in sync with GT_EXPR_PREFIX in constants.py (which is not copied into
-# the bundle, so it cannot be imported here at runtime).
+# Kept as a local literal (not imported from constants.py); must stay in sync --
+# see tests/unit/test_duplicated_constants_sync.py.
 GT_EXPR_PREFIX = "_gt_expr_"
 
 

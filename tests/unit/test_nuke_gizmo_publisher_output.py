@@ -45,27 +45,44 @@ def _find_situation_template_call(func: ast.FunctionDef) -> ast.Call:
     raise AssertionError(msg)
 
 
-def _find_directory_definition_call(func: ast.FunctionDef) -> ast.Call:
-    for node in ast.walk(func):
-        if isinstance(node, ast.Call):
-            func_node = node.func
-            if isinstance(func_node, ast.Name) and func_node.id == "DirectoryDefinition":
-                return node
-            if isinstance(func_node, ast.Attribute) and func_node.attr == "DirectoryDefinition":
-                return node
-    msg = "DirectoryDefinition() call not found in _customize_project_yml"
-    raise AssertionError(msg)
-
-
 def _get_keyword_value(call: ast.Call, name: str) -> ast.expr:
     for kw in call.keywords:
         if kw.arg == name:
             return kw.value
-    msg = f"keyword '{name}' not found in SituationTemplate call"
+    msg = f"keyword '{name}' not found in call {ast.dump(call.func)}"
+    raise AssertionError(msg)
+
+
+def _find_directory_definition_call(func: ast.FunctionDef, *, name: str) -> ast.Call:
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        func_node = node.func
+        is_directory_definition = (isinstance(func_node, ast.Name) and func_node.id == "DirectoryDefinition") or (
+            isinstance(func_node, ast.Attribute) and func_node.attr == "DirectoryDefinition"
+        )
+        if not is_directory_definition:
+            continue
+        name_value = _get_keyword_value(node, "name")
+        if isinstance(name_value, ast.Constant) and name_value.value == name:
+            return node
+    msg = f"DirectoryDefinition(name={name!r}, ...) call not found in _customize_project_yml"
     raise AssertionError(msg)
 
 
 class TestCustomizeProjectYmlOutput:
+    def test_outputs_path_macro_references_outputs_dir_env_var(self) -> None:
+        """Outputs must resolve to wherever the runner exported OUTPUTS_DIR_ENV_VAR, and nothing else."""
+        func = _get_customize_project_yml_source()
+        call = _find_directory_definition_call(func, name="outputs")
+        path_macro_source = ast.unparse(_get_keyword_value(call, "path_macro"))
+        assert "OUTPUTS_DIR_ENV_VAR" in path_macro_source, (
+            f"Expected the outputs path_macro to reference OUTPUTS_DIR_ENV_VAR, got: {path_macro_source!r}"
+        )
+        assert "?:/" not in path_macro_source, (
+            f"Expected a plain single-token macro (no optional-segment degradation), got: {path_macro_source!r}"
+        )
+
     def test_save_node_output_macro_is_versioned(self) -> None:
         func = _get_customize_project_yml_source()
         call = _find_situation_template_call(func)
@@ -92,17 +109,6 @@ class TestCustomizeProjectYmlOutput:
         assert on_collision_node.attr == "CREATE_NEW", (
             f"Expected CREATE_NEW collision policy, got: {on_collision_node.attr!r}"
         )
-
-    def test_outputs_path_macro_uses_shared_constant(self) -> None:
-        """The gizmo's Run tab help text quotes OUTPUTS_DIR_NAME; the project.yml
-        must be stamped from the same constant or the two silently drift."""
-        func = _get_customize_project_yml_source()
-        call = _find_directory_definition_call(func)
-        path_macro_node = _get_keyword_value(call, "path_macro")
-        assert isinstance(path_macro_node, ast.Name), (
-            f"Expected path_macro to reference OUTPUTS_DIR_NAME, got: {ast.dump(path_macro_node)}"
-        )
-        assert path_macro_node.id == "OUTPUTS_DIR_NAME"
 
 
 # The publisher customizes the project.yml the engine's packager just wrote, so the
@@ -190,5 +196,7 @@ class TestCustomizeProjectYmlFailures:
             NukeGizmoPublisher._customize_project_yml(tmp_path)  # noqa: SLF001
 
         assert len(written) == 1
-        assert "griptape_outputs" in written[0]
+        # The outputs directory is redirected through the runner's env var rather than a
+        # literal folder name, so the macro -- not "griptape_outputs" -- is what lands here.
+        assert "GTN_NUKE_GIZMO_OUTPUTS_DIR" in written[0]
         assert "save_node_output" in written[0]
