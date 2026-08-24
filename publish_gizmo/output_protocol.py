@@ -13,9 +13,19 @@ OUTPUT_SENTINEL_END = "<<<GTN_OUTPUT_END>>>"
 
 
 def emit_payload(payload: dict) -> None:
-    """Write the sentinel-framed JSON payload to stdout and flush."""
+    """Write the sentinel-framed JSON payload to stdout, echoing any "error" text to stderr.
+
+    run_button.py discards stdout entirely when the runner exits non-zero, so an error
+    carried only in the payload would never reach the artist. It shows stderr instead, and
+    filters the sentinel line out of the log, so the echo is seen exactly once.
+    """
     sys.stdout.write(OUTPUT_SENTINEL_BEGIN + json.dumps(payload) + OUTPUT_SENTINEL_END + "\n")
     sys.stdout.flush()
+
+    error = payload.get("error")
+    if error:
+        sys.stderr.write(str(error) + "\n")
+        sys.stderr.flush()
 
 
 def extract_payload(stdout_text: str) -> dict:
