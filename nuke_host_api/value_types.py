@@ -66,13 +66,23 @@ _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 ENGINE_TYPE_TO_VALUE_TYPE = {
     "ImageArtifact": ValueType.IMAGE,
     "ImageUrlArtifact": ValueType.IMAGE,
-    "VideoUrlArtifact": ValueType.VIDEO,
+    # An image sequence is an image with many sources, so both names in use for one land on
+    # GTImage rather than degrading to GTFile or GTText. "Sequence" is what this library's
+    # own NukeScriptNode declares on a sequence port.
+    "ImageSequenceArtifact": ValueType.IMAGE,
+    "Sequence": ValueType.IMAGE,
+    "VideoUrlArtifact": ValueType.MOVIE,
     "str": ValueType.TEXT,
     "string": ValueType.TEXT,
     "int": ValueType.NUMBER,
     "float": ValueType.NUMBER,
-    "bool": ValueType.BOOLEAN,
+    "bool": ValueType.BOOL,
 }
+
+# A container port's declared name wraps its element type, as ``list[ImageUrlArtifact]``
+# (built in the engine's ``core_types.py``). The brackets defeat both the mapping table and
+# the ``Artifact`` suffix test, so the wrapper comes off before either one runs.
+_LIST_TYPE = re.compile(r"^list\[(.+)\]$")
 
 
 def value_type_for_engine_type(engine_type: str | None) -> str:
@@ -80,9 +90,26 @@ def value_type_for_engine_type(engine_type: str | None) -> str:
 
     Used for port metadata in describe_workflow, where only the type *name* is
     available and no value has been produced yet.
+
+    A declared name is a hint for building a knob; the runtime descriptor's ``value_type``
+    is what a host acts on. The two match exactly whenever the declared name carries media
+    or scalar information. They can differ, and only by narrowing, when it does not:
+
+    - A wildcard (``any``, ``all``) accepts anything, so this reports ``GTText`` and a host
+      builds its most permissive control.
+    - An artifact class this version does not map reports ``GTFile``. Its values may still
+      normalize to ``GTImage`` or ``GTMovie``, because ``_normalize_artifact`` classifies an
+      unrecognized class by the extension on the locator it turned out to carry, and a
+      ``GenericArtifact`` holding a ``.jpg`` really is an image. Nothing here can know that
+      before a value exists, and discarding it once one does would be worse.
     """
     if engine_type is None:
         return ValueType.TEXT
+
+    list_match = _LIST_TYPE.match(engine_type)
+    if list_match is not None:
+        return value_type_for_engine_type(list_match.group(1))
+
     mapped = ENGINE_TYPE_TO_VALUE_TYPE.get(engine_type)
     if mapped is not None:
         return mapped
@@ -109,7 +136,7 @@ def _value_type_for_extension(extension: str | None) -> str:
     if extension in IMAGE_EXTENSIONS:
         return ValueType.IMAGE
     if extension in VIDEO_EXTENSIONS:
-        return ValueType.VIDEO
+        return ValueType.MOVIE
     return ValueType.FILE
 
 
@@ -245,7 +272,7 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
         return _descriptor(ValueType.NULL, [], engine_type)
 
     if isinstance(value, bool):
-        return _descriptor(ValueType.BOOLEAN, [], engine_type)
+        return _descriptor(ValueType.BOOL, [], engine_type)
 
     if isinstance(value, (int, float)):
         return _descriptor(ValueType.NUMBER, [], engine_type)
@@ -279,24 +306,24 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
 
 # The types that only mean something alongside a source. A host reaches for bytes when it sees
 # one of these, so a descriptor that claims one while carrying no source is a broken promise.
-_SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.VIDEO, ValueType.FILE})
+_SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
 
 
 def _sourceless_descriptor(value_type: str, engine_type: str) -> dict[str, Any]:
     """Assemble a descriptor that carries no source, downgrading any media or file claim to text.
 
-    Nothing here can point a host at bytes, so ``GTImage``, ``GTVideo`` and ``GTFile`` are not
+    Nothing here can point a host at bytes, so ``GTImage``, ``GTMovie`` and ``GTFile`` are not
     honest answers: a declared media type describes what a port is *for*, not what this value
     turned out to be. Prose on an image-declared port is still prose. ``GTText`` is the one
     type that means something without a source, so that is what a host is told, keeping the
-    published rule that only GTText, GTNumber, GTBoolean and GTNull arrive sourceless.
+    published rule that only GTText, GTNumber, GTBool and GTNull arrive sourceless.
     """
     return _descriptor(ValueType.TEXT if value_type in _SOURCED_VALUE_TYPES else value_type, [], engine_type)
 
 
 def _classify_locator_source(source: dict[str, Any], declared_value_type: str, engine_type: str) -> dict[str, Any]:
     """Turn a confirmed locator source into a descriptor, letting a declared media type win over the extension."""
-    if declared_value_type in {ValueType.IMAGE, ValueType.VIDEO}:
+    if declared_value_type in {ValueType.IMAGE, ValueType.MOVIE}:
         return _descriptor(declared_value_type, [source], engine_type)
     return _descriptor(_value_type_for_extension(source["format"]), [source], engine_type)
 
