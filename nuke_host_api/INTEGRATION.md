@@ -2,7 +2,8 @@
 
 Wire-level reference for the host side of the protocol: a Nuke NDK plugin, a Python panel,
 or any process driving a Griptape Nodes engine. Assumes this library is installed in the
-engine. Every JSON frame below was captured off a live socket.
+engine. The JSON below is illustrative, not a captured transcript; field names and shapes
+are authoritative, values are examples.
 
 Design rationale lives in `nuke_host_api/README.md`. This document covers only what a host
 sends, receives, and must handle.
@@ -10,7 +11,7 @@ sends, receives, and must handle.
 ## Contents
 
 - [Bound surface](#bound-surface)
-- [Setup](#setup)
+- [Engine discovery and setup](#engine-discovery-and-setup)
 - [Frame formats](#frame-formats)
 - [Read loop](#read-loop)
 - [Verbs](#verbs)
@@ -19,18 +20,17 @@ sends, receives, and must handle.
 - [Errors](#errors)
 - [Transport limits](#transport-limits)
 - [Version compatibility](#version-compatibility)
-- [Reference client](#reference-client)
 
 ## Bound surface
 
-Defined in `nuke_host_api/protocol.py`, pinned by
-`tests/unit/fixtures/host_api/protocol_v1.json`.
+Defined in `nuke_host_api/protocol.py`. Not yet pinned by a recorded snapshot: no plugin
+has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
-| Value types | `GTImage`, `GTVideo`, `GTFile`, `GTText`, `GTNumber`, `GTBoolean`, `GTNull` |
+| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `running`, `completed`, `failed`, `cancelled` |
@@ -44,79 +44,104 @@ Binding rules:
 | Ignore unknown enum values, never treat as fatal | New value types and states may appear within a version |
 | Never branch on `engine_version` or `engine_type` | Both are diagnostic only |
 
-## Setup
+## Engine discovery and setup
 
-The engine's local WebSocket server is off by default. Query the driver config:
+Two files on disk answer "which engines exist" and "is one running", with no wire
+round-trip. `$XDG_DATA_HOME` is `~/.local/share` on Linux and macOS unless overridden.
 
-```
-GetConfigValueRequest(category_and_key="ipc_drivers")
-```
+### 1. Enable the driver, once per machine
 
-Require an entry with `"driver_type": "websocket_direct"` and `"enabled": true`, then read
-its `host` and `port`. Default is `127.0.0.1:18125`.
+`local_socket` ships disabled. Add it to the engine config at
+`$XDG_CONFIG_HOME/griptape_nodes/griptape_nodes_config.json`, then restart the engine:
 
 ```json
-[
-  {
-    "name": "websocket_direct",
-    "driver_type": "websocket_direct",
-    "enabled": true,
-    "host": "127.0.0.1",
-    "port": 18125
-  }
-]
+{
+  "ipc_drivers": [
+    { "name": "websocket_api", "driver_type": "websocket_api", "enabled": true },
+    { "name": "local_socket", "driver_type": "local_socket", "enabled": true }
+  ]
+}
 ```
 
-Connect to `ws://<host>:<port>`. Plain WebSocket, no TLS, no auth handshake.
+Leave `websocket_api` enabled. It is the engine's link to the hosted service, and dropping
+it from the list disables it.
+
+Do **not** try to read this config over the wire. A host has no connection yet, so
+`GetConfigValueRequest` cannot answer where to connect.
+
+### 2. Enumerate engines
+
+Read `$XDG_DATA_HOME/griptape_nodes/engines.json`:
+
+```json
+{
+  "engines": [
+    { "id": "9de4b2fe-9a6e-4253-a0b9-8677f46c9a34", "name": "honest-red-ant",
+      "created_at": "2026-08-24T22:02:19.397484+00:00" }
+  ],
+  "default_engine_id": "9de4b2fe-9a6e-4253-a0b9-8677f46c9a34"
+}
+```
+
+`name` is the label to show an artist, `id` addresses the socket. Use `default_engine_id`
+when the host offers no picker.
+
+### 3. Connect, and treat the socket as the liveness check
+
+| Platform | Path |
+|---|---|
+| macOS, Linux | `$XDG_DATA_HOME/griptape_nodes/ipc/<engine_id>.sock`, `AF_UNIX` stream |
+| Windows | `\\.\pipe\griptape_nodes_<engine_id>` |
+
+The path exists only while that engine is running with the driver enabled, so its presence
+is the liveness test. A registry entry with no socket is an engine installed and not
+running. A connection refused on a path that does exist is an engine that died without
+cleaning up.
+
+Frames are newline-delimited JSON, one object per line, both directions. No TLS, no auth
+handshake: anything that can open the socket can drive the engine. The engine creates the
+socket file mode `0600`, so on a single-user machine that is owner-only by construction;
+treat it as the only access control there is.
+
+`griptape_nodes_app/cli/request.py` in the app package implements steps 2 and 3. Step 1 is a
+manual config edit.
+
+### 4. Filter everything read from the socket
+
+The server writes every outbound frame to every connected client. No server-side topic
+filtering, no subscription step. A host therefore sees replies to requests the editor made,
+other libraries' events, and engine chatter unrelated to it. Discard any frame whose
+`request_id` is not one this host sent and whose `payload_type` does not begin with `Nuke`.
+
+One consequence worth stating: `event_topic` on `NukeConnectResultSuccess` is
+informational on this transport. There is nothing to subscribe to, so there is no way to
+miss notifications by forgetting to.
 
 ## Frame formats
 
-Four frame classes share one connection, discriminated by the top-level `type` field
+Three frame classes share one connection, discriminated by the top-level `type` field
 (absent on outbound requests).
 
 | `type` | Direction | Discriminator for dispatch |
 |---|---|---|
-| `subscribe`, `unsubscribe`, `ping` | host to engine | Handled by the transport, never reaches the engine |
-| `pong` | engine to host | Echoes the `id` from `ping` |
 | absent | host to engine | `payload.request_type` |
 | `success_result`, `failure_result` | engine to host | `payload.request_id`, then `payload.result_type` |
 | `app_event` | engine to host | `payload.payload_type` |
 
-### Control frames
+The `local_socket` driver has no control frames: no subscribe, no unsubscribe, no ping.
+Everything the engine sends outbound reaches every connected client, so a host's only
+responsibility is to discard what is not addressed to it.
 
-```json
-{
-  "type": "subscribe",
-  "topic": "nuke/reply"
-}
-```
-
-```json
-{
-  "type": "unsubscribe",
-  "topic": "nuke/reply"
-}
-```
-
-```json
-{
-  "type": "ping",
-  "id": "probe-1"
-}
-```
-
-```json
-{
-  "type": "pong",
-  "id": "probe-1"
-}
-```
+There is no protocol-level heartbeat either. Detect a dead engine from the socket closing,
+or by sending a cheap request such as `NukeGetExecutionStateRequest` with
+`include_outputs: false`.
 
 ### Requests
 
 `request_id` is host-generated and echoed back; any value unique per in-flight request
-works. `response_topic` is where the reply is published, and the host must already be
-subscribed to it.
+works. `response_topic` names the topic the reply is published on and the engine puts it on
+the reply envelope. On this transport a host receives the reply either way, so the value
+serves only as a label to filter on.
 
 ```json
 {
@@ -186,8 +211,8 @@ Required loop:
 3. If it carries the awaited `request_id`, it is the reply.
 4. Otherwise discard it.
 
-`NukeClient._pump` in `scripts/nuke_host_client.py` implements this. Port that structure
-rather than a request-response helper.
+Implement this as a pump that owns the socket, not as a request-response helper that
+returns after one read.
 
 ## Verbs
 
@@ -206,7 +231,7 @@ Subscribe to a reply topic first, then connect. Required before anything else.
 | `supported_protocol_versions` | `list[int]` | Full support window, diagnostic |
 | `engine_version` | `str` | Display only |
 | `library_version` | `str` | Display only |
-| `event_topic` | `str` | Subscribe immediately. Not derivable; without it, replies arrive and notifications silently do not |
+| `event_topic` | `str` | The topic notifications are labelled with. Informational on `local_socket`, where nothing needs subscribing |
 | `value_types` | `list[str]` | Closed value type set for this version |
 
 ```json
@@ -216,7 +241,7 @@ Subscribe to a reply topic first, then connect. Required before anything else.
   "engine_version": "0.97.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
-  "value_types": ["GTImage", "GTVideo", "GTFile", "GTText", "GTNumber", "GTBoolean", "GTNull"]
+  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTNumber", "GTBool", "GTNull"]
 }
 ```
 
@@ -289,6 +314,31 @@ Port descriptor fields:
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `name` | Pre-joined `node.parameter` label for display |
 | `type` | Always one of the seven value types |
+| `default` | The workflow author's default, as a value descriptor. Initialize the knob to this |
+| `tooltip` | Help text for the knob. Empty when the author wrote none |
+| `settable` | False means the engine will refuse a value. Build the knob read-only |
+
+`default` is a full value descriptor rather than a raw value, so a port's default and its
+live value are the same shape and one code path renders both. A port with no author default
+reports `GTNull` with no sources.
+
+Every field is always present. A port the engine gave no metadata for reports `GTNull`, an
+empty tooltip, and `settable: true` rather than omitting keys.
+
+**`type` can be narrower at runtime.** For a port whose declared type names a media type or
+a scalar, `type` and the value's `value_type` always match. For a port whose declared type
+carries no media information, they can differ, and only in one direction:
+
+| Declared type says | `type` reports | A value may arrive as |
+|---|---|---|
+| A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | the same type |
+| An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, or `GTMovie` |
+| A wildcard (`any`, `all`) | `GTText` | anything |
+
+A `GenericArtifact` port holding `https://cdn.example.com/still.jpg` is genuinely an image,
+and nothing at describe time can know that, because no value exists yet. So build the knob
+from `type` and always switch on the descriptor's `value_type` when a value actually
+arrives. Never branch on the declared type at runtime.
 
 ```json
 {
@@ -300,7 +350,15 @@ Port descriptor fields:
       "node": "Start Flow",
       "parameter": "topic",
       "name": "Start Flow.topic",
-      "type": "GTText"
+      "type": "GTText",
+      "default": {
+        "value_type": "GTText",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "str"
+      },
+      "tooltip": "What the shot is about.",
+      "settable": true
     }
   ],
   "outputs": [
@@ -308,7 +366,7 @@ Port descriptor fields:
       "node": "End Flow",
       "parameter": "was_successful",
       "name": "End Flow.was_successful",
-      "type": "GTBoolean"
+      "type": "GTBool"
     },
     {
       "node": "End Flow",
@@ -375,16 +433,24 @@ Check `rejected_inputs` on every execution. A rejection does not fail the execut
 workflow executes with whatever value was already present and returns plausible output
 computed from the wrong input. Surface rejections immediately.
 
-No execution identifier exists. The engine threads none through its execution events, so
-one minted here could not be correlated with the notifications that follow. One execution
-at a time is the current model. An execution id would arrive as an added field, which a
-tolerant parser already handles.
+A pair that is not a declared input port is rejected with
+`"Not a declared input port of this workflow."` and never reaches the engine. Address
+inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` returned.
+
+One execution at a time. Starting a run while one is in progress returns
+`NukeExecuteWorkflowResultFailure` rather than displacing it, because the engine threads no
+execution identifier through its execution events: a second run's notifications would be
+indistinguishable from the first's, and a cancel could not say which to stop. Poll
+`NukeGetExecutionStateRequest` for `running: false`, or wait for the terminal
+`NukeExecutionStateEvent`, before starting the next one. An execution id would arrive as an
+added field, which a tolerant parser already handles.
 
 ### NukeGetExecutionStateRequest
 
 The output-reading and recovery path. Notifications have no replay, so a host that
 connected mid-execution or dropped its socket has permanently missed events; this call returns
-current truth read live from the engine, with no cache that could disagree.
+current truth read live from the engine, with no cache that could disagree. It is also how a
+host checks whether it may start another run.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -407,7 +473,7 @@ current truth read live from the engine, with no cache that could disagree.
   "outputs": {
     "End Flow": {
       "was_successful": {
-        "value_type": "GTBoolean",
+        "value_type": "GTBool",
         "sources": [],
         "colorspace": null,
         "engine_type": "bool"
@@ -441,8 +507,8 @@ No arguments. Cancels whatever is running.
 
 ## Notifications
 
-Pushed to `event_topic` with no request. Eight engine execution event types collapse into
-these three notifications.
+Pushed without a request, labelled with `event_topic`. Eight engine execution event types
+collapse into these three notifications.
 
 ### NukeNodeStateEvent
 
@@ -473,7 +539,7 @@ these three notifications.
   "node_name": "End Flow",
   "parameter_name": "was_successful",
   "value": {
-    "value_type": "GTBoolean",
+    "value_type": "GTBool",
     "sources": [],
     "colorspace": null,
     "engine_type": "bool"
@@ -507,7 +573,7 @@ only way to detect an actual failure is to catch the live `NukeNodeStateEvent` w
 `state: "failed"` as it is pushed. `NukeGetExecutionStateRequest` cannot recover a missed
 one after the fact: its result carries running state, active/involved nodes, and output
 values, never a flow-level outcome, because the engine exposes none. A host that drops
-its connection or subscribes late has no way to learn, after the fact, that a run failed.
+its connection or connects late has no way to learn, after the fact, that a run failed.
 
 May also receive `cancelled` followed by `completed` for one run: the engine's cancel and
 error paths both end in the same completion event, and whether a host observes both for a
@@ -553,11 +619,11 @@ Every value, in a notification or in `outputs`, has this shape:
 | `value_type` | Meaning |
 |---|---|
 | `GTImage` | One or more images. Multiple sources means a sequence |
-| `GTVideo` | A movie file |
+| `GTMovie` | A movie file |
 | `GTFile` | A file this protocol version does not classify, including audio |
 | `GTText` | A string. No sources |
 | `GTNumber` | An int or float. No sources |
-| `GTBoolean` | A bool. No sources |
+| `GTBool` | A bool. No sources |
 | `GTNull` | Unset or empty. No sources |
 
 A sequence is one `GTImage` with several sources rather than its own type. Handle "many
@@ -605,9 +671,9 @@ Verified against the transport implementation.
 | Limit | Consequence for the host |
 |---|---|
 | Fire and forget | Outbound fan-out discards send errors. No acks, no backpressure, no delivery guarantee. A wedged or slow reader silently misses events |
-| No replay | No buffer, backlog, or resume cursor. Events reach only connections subscribed at that instant. Connect and subscribe before starting work |
-| Explicit subscription, silent when missed | Forgetting `event_topic` looks like a working integration with no progress reporting |
-| No continuity across reconnects | After a drop, re-issue `NukeConnectRequest`, re-subscribe to the returned `event_topic`, and re-read state |
+| No replay | No buffer, backlog, or resume cursor. Events reach only clients connected at that instant, so connect before starting work |
+| No filtering for you | Every outbound frame reaches every client. A host that does not filter will process the editor's replies as its own |
+| No continuity across reconnects | After a drop, reconnect, re-issue `NukeConnectRequest`, and re-read state |
 
 `NukeGetExecutionStateRequest` is the authority whenever state is uncertain.
 
