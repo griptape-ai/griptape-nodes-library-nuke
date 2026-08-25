@@ -48,6 +48,12 @@ logger = logging.getLogger("griptape_nodes")
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "exr", "tif", "tiff", "webp", "dpx", "tga", "hdr"})
 VIDEO_EXTENSIONS = frozenset({"mp4", "mov", "avi", "mkv", "webm", "m4v"})
 
+# The engine's type name for execution wiring. Control parameters carry no data, so they are
+# dropped on every path out of this library: describe never lists them and the event bridge
+# never streams them. Lives here because both of those need it and both are downstream of
+# this module's engine-type knowledge.
+CONTROL_PARAM_TYPE = "parametercontroltype"
+
 # Any brace token at all. Both project directory macros ({outputs}) and workflow
 # variables ({MY_VAR}) use this shape, so presence of braces alone proves nothing
 # about which system a token belongs to.
