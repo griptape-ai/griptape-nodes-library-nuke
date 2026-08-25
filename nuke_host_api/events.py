@@ -51,8 +51,9 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
         supported_protocol_versions: The full support window, for diagnostics.
         engine_version: Informational. A host must not branch on it.
         library_version: Informational.
-        event_topic: The topic a host must subscribe to in order to receive
-            notifications. Not guessable by the host, so it is handed over here.
+        event_topic: The topic notifications are labelled with. Informational on the
+            local_socket transport, where every frame reaches every client and there is
+            nothing to subscribe to.
         value_types: The closed value type set for this protocol version.
     """
 
