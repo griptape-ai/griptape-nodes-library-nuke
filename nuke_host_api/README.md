@@ -14,14 +14,29 @@ nuke_nodes/
 nuke_host_api/
   protocol.py                      THE FROZEN SURFACE. versions, verbs, host types
   events.py                        request/result/notification payloads
-  handlers.py                      host verb in, engine request out
+  handlers/                        host verb in, engine request out
+    __init__.py                      ROUTES: the only verb -> handler binding
+    connect.py                       version negotiation, event stream opening
+    workflows.py                     list, describe
+    execution.py                     execute, state, cancel
+  engine.py                        engine request narrowing and shared queries
+  shape.py                         workflow_shape -> host-visible ports
+  dispatch.py                      handler calling convention: request guard, failure wording
+  library_version.py               the shipped version, read from the manifest
   execution_bridge.py              engine execution events -> host notifications
   value_types.py                   value normalizer
 tests/unit/
   test_protocol.py                 verb/notification names resolve to real payload classes
   test_value_types.py              value mapping table and descriptor shape
   test_macros.py                   macro resolution, patterns, unresolved tokens
-  test_handlers.py                 shape parsing, port narrowing, negotiation
+  test_shape.py                    shape parsing, port narrowing, runnability
+  test_engine.py                   narrowing, event topic, shared queries
+  test_dispatch.py                 request guard, failure wording
+  test_library_version.py          manifest read and reload reset
+  test_handlers_routes.py          every declared verb is routed exactly once
+  test_handlers_connect.py         negotiation, event stream gating
+  test_handlers_workflows.py       discovery and port publication
+  test_handlers_execution.py       run guards, input allow-list, state, cancel
   test_execution_bridge.py         subscription symmetry, event translation
 ```
 
