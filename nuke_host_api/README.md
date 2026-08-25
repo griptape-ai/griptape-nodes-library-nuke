@@ -63,7 +63,9 @@ closed host type set, and the event topic. Offering an unsupported version gets 
 refusal naming the support window.
 
 Finding an engine to connect to happens off the wire, because a host has no connection yet:
-`engines.json` lists engines and a per-engine socket path doubles as the liveness check. See
+a host holds the `websocket_direct` URL as its own setting, defaulted to
+`ws://127.0.0.1:18125/`, and a completed handshake is the liveness check. The engine's
+`engines.json` is app-layer internal and deliberately not part of what a host reads. See
 `INTEGRATION.md`.
 
 ### 2. Execute workflows
@@ -118,22 +120,25 @@ plugin must use it.
 
 - **Fire and forget.** The Rust fan-out drops send errors on the floor. No acks, no
   backpressure, no delivery guarantee.
-- **A slow reader is dropped, and then looks like a mute engine.** The fan-out writes to every
-  client serially while holding one lock. A client that stops reading long enough to fill its
-  socket buffer is removed from the broadcast set on the first write error and receives
-  nothing further, replies included, while its read side stays open. Observed while running
-  the smoke tests: a single-threaded client that paused between requests hit a 60 second
-  reply timeout on a healthy socket. A plugin must read on a dedicated thread that never
-  blocks, and because that write is under a shared lock, a wedged plugin also delays
-  delivery to the editor.
 - **No replay.** There is no buffer or backlog, so a plugin that connects mid-execution or drops
-  its socket has permanently missed those events.
-- **No filtering.** On `local_socket` every outbound frame reaches every client, so a
-  plugin that does not filter will process the editor's replies as its own. There is no
-  subscription step to forget, which is the one failure mode this transport removes.
+  its connection has permanently missed those events.
+- **Topic routing is not filtering.** `event_topic` is the engine's default response topic,
+  shared with the editor and every other library, so a plugin filters on `request_id` and
+  `payload_type` as well as subscribing. Replies are isolated: a host picks its own
+  `response_topic` and only its subscribers see those.
 - **Notifications begin at connect.** The bridge installs on the first `NukeConnectRequest`,
   not at library load, so an engine no host has spoken to pays nothing for a feed nobody
   reads. A host that skips connect gets replies and no events.
+
+The transport a plugin uses is `websocket_direct`, not `local_socket`, and the slow-reader
+hazard is why. `local_socket` writes to every client serially under one lock, so a client
+that stops reading long enough to fill its socket buffer is dropped from the broadcast set
+on the first write error and receives nothing further, replies included, while its read side
+stays open. Observed while running the smoke tests: a single-threaded client that paused
+between requests hit a 60 second reply timeout on a healthy socket, and a wedged client also
+delays delivery to the editor. `websocket_direct` gives each connection its own unbounded
+queue and writer task, so a slow reader costs engine memory instead of frames and stalls
+nobody. A plugin still reads on a dedicated thread that never blocks.
 
 `NukeGetExecutionStateRequest` is therefore the recovery path for running state and output
 values: it reads flow state and the declared output values straight from the engine, so a
@@ -363,5 +368,5 @@ Load-bearing for the design, and documented nowhere obvious.
   Nuke subprocess that hangs, leaves that state set and every later execute refused. The
   escape is `NukeCancelExecutionRequest`, and whether cancel actually clears a node wedged
   inside `process()` is unverified. If it does not, only an engine restart recovers.
-- **`local_socket` ships disabled.** Every machine needs a config edit before a plugin can
+- **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
