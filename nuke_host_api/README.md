@@ -11,7 +11,6 @@ plugin binds to, and absorbs engine churn behind them.
 griptape-nodes-library.json       library registration
 nuke_nodes/
   nuke_library_advanced.py         registers verbs, installs/tears down the event bridge
-  nuke_api_info.py                 NukeApiInfo, a canvas-visible diagnostics node
 nuke_host_api/
   protocol.py                      THE FROZEN SURFACE. versions, verbs, host types
   events.py                        request/result/notification payloads
