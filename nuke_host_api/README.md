@@ -10,7 +10,7 @@ plugin binds to, and absorbs engine churn behind them.
 ```
 griptape-nodes-library.json       library registration
 nuke_nodes/
-  nuke_library_advanced.py         registers verbs, installs/tears down the event bridge
+  nuke_library_advanced.py         registers verbs, tears down the event bridge on unload
 nuke_host_api/
   protocol.py                      THE FROZEN SURFACE. versions, verbs, host types
   events.py                        request/result/notification payloads
@@ -103,11 +103,22 @@ plugin must use it.
 
 - **Fire and forget.** The Rust fan-out drops send errors on the floor. No acks, no
   backpressure, no delivery guarantee.
+- **A slow reader is dropped, and then looks like a mute engine.** The fan-out writes to every
+  client serially while holding one lock. A client that stops reading long enough to fill its
+  socket buffer is removed from the broadcast set on the first write error and receives
+  nothing further, replies included, while its read side stays open. Observed while running
+  the smoke tests: a single-threaded client that paused between requests hit a 60 second
+  reply timeout on a healthy socket. A plugin must read on a dedicated thread that never
+  blocks, and because that write is under a shared lock, a wedged plugin also delays
+  delivery to the editor.
 - **No replay.** There is no buffer or backlog, so a plugin that connects mid-execution or drops
   its socket has permanently missed those events.
 - **No filtering.** On `local_socket` every outbound frame reaches every client, so a
   plugin that does not filter will process the editor's replies as its own. There is no
   subscription step to forget, which is the one failure mode this transport removes.
+- **Notifications begin at connect.** The bridge installs on the first `NukeConnectRequest`,
+  not at library load, so an engine no host has spoken to pays nothing for a feed nobody
+  reads. A host that skips connect gets replies and no events.
 
 `NukeGetExecutionStateRequest` is therefore the recovery path for running state and output
 values: it reads flow state and the declared output values straight from the engine, so a
@@ -259,11 +270,18 @@ Load-bearing for the design, and documented nowhere obvious.
 
 3. **Execution event listeners are not cleaned up for you.** The engine deregisters
     request handlers on unload but not execution event listeners. Without
-    `before_library_unregistered` calling `ExecutionBridge.uninstall()`, a reload leaves
+    `before_library_unregistered` calling `execution_bridge.uninstall()`, a reload leaves
     the old bridge subscribed and a host receives every notification twice, then three
     times. Observed directly: notification counts were an exact 3x multiple of a
     single-bridge run with three copies loaded. After wiring teardown, counts are stable
     across repeated runs.
+
+    The subscription is also engine-global: listeners are keyed by event type, not by
+    library or node, so an installed bridge translates and re-emits for every workflow the
+    engine runs, including ones with no Nuke nodes driven from the editor. Hence installing
+    on first connect rather than at load. Latching on without ever counting back down is
+    deliberate, because the transport gives Python no disconnect signal; an idle timeout
+    would tear the feed down exactly when a host sits quietly waiting on a long render.
 
 4. **`broadcast_app_event` does not reach a host.** It only notifies in-process
     listeners. `put_event(AppEvent(payload=...))` is the path that reaches IPC.

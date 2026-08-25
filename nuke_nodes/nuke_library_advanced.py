@@ -20,7 +20,7 @@ from nuke_host_api.events import (
     NukeGetExecutionStateRequest,
     NukeListWorkflowsRequest,
 )
-from nuke_host_api.execution_bridge import ExecutionBridge
+from nuke_host_api.execution_bridge import uninstall as uninstall_host_api_bridge
 from nuke_host_api.handlers import _library_version as _host_api_library_version
 from nuke_host_api.handlers import (
     handle_cancel_execution,
@@ -38,11 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger("griptape_nodes")
-
-# Subscribes to the engine's execution event feed so host notifications flow outward.
-# Module-level so a library reload reuses the same instance and its install/uninstall
-# bookkeeping stays coherent.
-_HOST_API_BRIDGE = ExecutionBridge()
 
 
 def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
@@ -78,16 +73,17 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
             ),
         )
 
-        # Host API request types are wired by get_request_handlers() below. Outbound events
-        # have no equivalent hook, so the bridge subscribes itself here.
-        _HOST_API_BRIDGE.install()
+        # Host API request types are wired by get_request_handlers() below. The outbound
+        # event bridge is not installed here: its subscription is engine-global, so it waits
+        # for a host to actually connect. See execution_bridge.ensure_installed.
         logger.info("Nuke host API ready on protocol version %d", PROTOCOL_VERSION)
 
     def before_library_unregistered(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
         # The engine deregisters request handlers automatically, but execution event
         # listeners are ours to remove. Skipping this leaves the previous bridge subscribed
-        # after a reload, and a host then receives every notification twice.
-        _HOST_API_BRIDGE.uninstall()
+        # after a reload, and a host then receives every notification twice. A no-op when no
+        # host ever connected.
+        uninstall_host_api_bridge()
         # _library_version() is cached for the process lifetime, but a library reload without
         # a process restart is a real, handled scenario in this same lifecycle (that is why
         # the bridge above needs an explicit uninstall). An in-place library upgrade must not

@@ -234,6 +234,11 @@ Subscribe to a reply topic first, then connect. Required before anything else.
 | `event_topic` | `str` | The topic notifications are labelled with. Informational on `local_socket`, where nothing needs subscribing |
 | `value_types` | `list[str]` | Closed value type set for this version |
 
+**Connect before expecting notifications.** The outbound event bridge installs on the first
+`NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
+pay to translate and re-emit every execution event it runs. A host that skips connect and
+goes straight to executing gets replies and no events, with no error to explain it.
+
 ```json
 {
   "protocol_version": 1,
@@ -670,7 +675,9 @@ Verified against the transport implementation.
 
 | Limit | Consequence for the host |
 |---|---|
-| Fire and forget | Outbound fan-out discards send errors. No acks, no backpressure, no delivery guarantee. A wedged or slow reader silently misses events |
+| Fire and forget | Outbound fan-out discards send errors. No acks, no backpressure, no delivery guarantee |
+| A slow reader is dropped, silently | The engine writes to every client while holding one lock. A client that stops reading long enough to fill its socket buffer is removed from the broadcast set on the first write error, and then receives nothing further, **replies included**, while its read side stays open and healthy. It looks like the engine went mute. Reconnecting is the only recovery |
+| A slow reader stalls everyone | Because that write happens under a shared lock, a wedged client delays delivery to every other client, the editor included. Read on a dedicated thread and never block it |
 | No replay | No buffer, backlog, or resume cursor. Events reach only clients connected at that instant, so connect before starting work |
 | No filtering for you | Every outbound frame reaches every client. A host that does not filter will process the editor's replies as its own |
 | No continuity across reconnects | After a drop, reconnect, re-issue `NukeConnectRequest`, and re-read state |
