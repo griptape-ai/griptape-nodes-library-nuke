@@ -12,24 +12,9 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api.events import (
-    NukeCancelExecutionRequest,
-    NukeConnectRequest,
-    NukeDescribeWorkflowRequest,
-    NukeExecuteWorkflowRequest,
-    NukeGetExecutionStateRequest,
-    NukeListWorkflowsRequest,
-)
+from nuke_host_api import library_version
 from nuke_host_api.execution_bridge import uninstall as uninstall_host_api_bridge
-from nuke_host_api.handlers import _library_version as _host_api_library_version
-from nuke_host_api.handlers import (
-    handle_cancel_execution,
-    handle_connect,
-    handle_describe_workflow,
-    handle_execute_workflow,
-    handle_get_execution_state,
-    handle_list_workflows,
-)
+from nuke_host_api.handlers import ROUTES
 from nuke_host_api.protocol import PROTOCOL_VERSION
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 from publish_gizmo.nuke_publish_options import get_nuke_publish_options
@@ -84,11 +69,11 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
         # after a reload, and a host then receives every notification twice. A no-op when no
         # host ever connected.
         uninstall_host_api_bridge()
-        # _library_version() is cached for the process lifetime, but a library reload without
-        # a process restart is a real, handled scenario in this same lifecycle (that is why
-        # the bridge above needs an explicit uninstall). An in-place library upgrade must not
-        # keep serving the pre-upgrade version to a host that connects after the reload.
-        _host_api_library_version.cache_clear()
+        # The version read is cached for the process lifetime, but a library reload without a
+        # process restart is a real, handled scenario in this same lifecycle (that is why the
+        # bridge above needs an explicit uninstall). An in-place library upgrade must not keep
+        # serving the pre-upgrade version to a host that connects after the reload.
+        library_version.reset()
 
     def get_request_handlers(
         self,
@@ -103,12 +88,8 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
         Singleton per request type engine-wide, and registered in the orchestrator process
         only. A worker-mode library's handlers are not forwarded, and requests would fail
         with "No manager found".
+
+        The table itself lives beside the handlers, so adding a verb does not touch this
+        module.
         """
-        return [
-            (NukeConnectRequest, handle_connect),
-            (NukeListWorkflowsRequest, handle_list_workflows),
-            (NukeDescribeWorkflowRequest, handle_describe_workflow),
-            (NukeExecuteWorkflowRequest, handle_execute_workflow),
-            (NukeGetExecutionStateRequest, handle_get_execution_state),
-            (NukeCancelExecutionRequest, handle_cancel_execution),
-        ]
+        return list(ROUTES)
