@@ -108,6 +108,10 @@ test/unit: ## Run unit tests.
 test/integration: ## Run integration tests. Nuke-gated tests skip cleanly if NUKE_EXECUTABLE is unset.
 	@uv run pytest tests/integration
 
+.PHONY: test/integration/host-api
+test/integration/host-api: ## Smoke the host API against a running engine (needs local_socket enabled).
+	@uv run pytest tests/integration/test_host_api.py -v -rs
+
 .PHONY: check
 check: check/format check/lint check/types check/json ## Run all checks.
 
