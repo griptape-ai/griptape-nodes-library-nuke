@@ -50,7 +50,7 @@ from nuke_host_api.events import (
     NukeParameterValueEvent,
 )
 from nuke_host_api.protocol import ExecutionState, NodeState
-from nuke_host_api.value_types import normalize_value
+from nuke_host_api.value_types import CONTROL_PARAM_TYPE, normalize_value
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -146,12 +146,20 @@ class ExecutionBridge:
         self._emit_node_state(event.node_name, NodeState.FAILED, event.error_message)
 
     def _on_parameter_value(self, event: ParameterValueUpdateEvent) -> None:
-        """Normalize the value before it leaves the process.
+        """Normalize the value before it leaves the process, and drop execution wiring.
 
         This is where the value contract earns its keep on the live path: the same
         normalizer that powers describe_workflow also shapes every streamed update, so
         a host has one value format rather than two.
+
+        Control parameters are skipped. The engine streams a value update for ``exec_in``
+        like any other parameter, and forwarding it would contradict describe_workflow,
+        which never lists control ports, and would type execution wiring as GTText because
+        the normalizer has no case for a control type.
         """
+        if event.data_type == CONTROL_PARAM_TYPE:
+            return
+
         descriptor = normalize_value(event.value, event.data_type)
         self._emit(
             NukeParameterValueEvent(

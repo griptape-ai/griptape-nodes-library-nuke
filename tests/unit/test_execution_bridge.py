@@ -29,6 +29,7 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.execution_bridge import ExecutionBridge
 from nuke_host_api.protocol import ExecutionState, NodeState, ValueType
+from nuke_host_api.value_types import CONTROL_PARAM_TYPE
 
 
 class FakeEventManager:
@@ -148,6 +149,27 @@ class TestTranslation:
         assert isinstance(payload, NukeParameterValueEvent)
         assert payload.value["value_type"] == ValueType.IMAGE
         assert payload.value["sources"][0]["format"] == "png"
+
+    def test_a_control_flow_parameter_update_is_not_forwarded(self, event_manager: FakeEventManager) -> None:
+        """The engine streams a value update for exec_in like any other parameter.
+
+        Forwarding it would contradict describe_workflow, which never lists control ports,
+        and would type execution wiring as GTText, since the normalizer has no case for a
+        control type. Observed live before this was filtered: a host received
+        'End Flow.exec_in' as a GTText value.
+        """
+        bridge = ExecutionBridge()
+        bridge.install()
+        before = len(event_manager.payloads())
+        bridge._on_parameter_value(
+            ParameterValueUpdateEvent(
+                node_name="End Flow",
+                parameter_name="exec_in",
+                data_type=CONTROL_PARAM_TYPE,
+                value=None,
+            )
+        )
+        assert len(event_manager.payloads()) == before, "execution wiring must not reach a host"
 
     def test_flow_resolved_reports_the_terminal_node_and_no_values(self, event_manager: FakeEventManager) -> None:
         """Values are read on demand, not gathered inside a callback.
