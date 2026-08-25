@@ -11,7 +11,7 @@ sends, receives, and must handle.
 ## Contents
 
 - [Bound surface](#bound-surface)
-- [Engine discovery and setup](#engine-discovery-and-setup)
+- [Connecting](#connecting)
 - [Frame formats](#frame-formats)
 - [Read loop](#read-loop)
 - [Verbs](#verbs)
@@ -44,21 +44,27 @@ Binding rules:
 | Ignore unknown enum values, never treat as fatal | New value types and states may appear within a version |
 | Never branch on `engine_version` or `engine_type` | Both are diagnostic only |
 
-## Engine discovery and setup
+## Connecting
 
-Two files on disk answer "which engines exist" and "is one running", with no wire
-round-trip. `$XDG_DATA_HOME` is `~/.local/share` on Linux and macOS unless overridden.
+A host connects over `websocket_direct`, a WebSocket server the engine binds on loopback.
+The engine has two other IPC drivers and neither is the one to build a plugin on:
+`websocket_api` is its outbound link to the hosted service and accepts no local
+connections, and `local_socket` (Unix socket, named pipe on Windows) fans every frame out
+to every client with no topic routing, drops a slow reader permanently, and serializes that
+fan-out under one lock.
 
 ### 1. Enable the driver, once per machine
 
-`local_socket` ships disabled. Add it to the engine config at
-`$XDG_CONFIG_HOME/griptape_nodes/griptape_nodes_config.json`, then restart the engine:
+`websocket_direct` ships disabled. Add it to the engine config at
+`$XDG_CONFIG_HOME/griptape_nodes/griptape_nodes_config.json` (`~/.config` on macOS and
+Linux unless overridden), then restart the engine:
 
 ```json
 {
   "ipc_drivers": [
     { "name": "websocket_api", "driver_type": "websocket_api", "enabled": true },
-    { "name": "local_socket", "driver_type": "local_socket", "enabled": true }
+    { "name": "websocket_direct", "driver_type": "websocket_direct", "enabled": true,
+      "host": "127.0.0.1", "port": 18125 }
   ]
 }
 ```
@@ -66,82 +72,105 @@ round-trip. `$XDG_DATA_HOME` is `~/.local/share` on Linux and macOS unless overr
 Leave `websocket_api` enabled. It is the engine's link to the hosted service, and dropping
 it from the list disables it.
 
+`host` and `port` are the defaults, spelled out because a second engine on one machine
+needs a second port: the engine refuses to start when the port is already bound. Keep
+`host` on loopback. There is no TLS and no auth handshake, so anything that can reach the
+port can drive the engine, and a routable bind address publishes that to the network.
+
 Do **not** try to read this config over the wire. A host has no connection yet, so
 `GetConfigValueRequest` cannot answer where to connect.
 
-### 2. Enumerate engines
+### 2. Open the connection
 
-Read `$XDG_DATA_HOME/griptape_nodes/engines.json`:
-
-```json
-{
-  "engines": [
-    { "id": "9de4b2fe-9a6e-4253-a0b9-8677f46c9a34", "name": "honest-red-ant",
-      "created_at": "2026-08-24T22:02:19.397484+00:00" }
-  ],
-  "default_engine_id": "9de4b2fe-9a6e-4253-a0b9-8677f46c9a34"
-}
+```
+ws://127.0.0.1:18125/
 ```
 
-`name` is the label to show an artist, `id` addresses the socket. Use `default_engine_id`
-when the host offers no picker.
+The server accepts `/` and `/ws/engines/events`, with or without a query string, and
+rejects any other path with a 404 during the handshake. A completed handshake is the
+liveness check: connection refused means no engine is listening on that port with the
+driver enabled.
 
-### 3. Connect, and treat the socket as the liveness check
+**Take the URL as configuration, do not discover it.** Host and port belong in a host-side
+setting (a plugin preference, a knob, an environment variable the host defines) defaulted
+to `ws://127.0.0.1:18125/`. The engine does write files that look like a registry,
+`engines.json` and `sessions.json` under `$XDG_DATA_HOME/griptape_nodes`, and they are
+app-layer internals: their path, shape, and existence carry no compatibility promise from
+this protocol, so a host that parses them binds to the one surface here that is explicitly
+unversioned. Identity arrives on the wire instead. Every result envelope carries
+`engine_id` and `session_id`, and `NukeConnectResultSuccess` carries the engine and library
+versions.
 
-| Platform | Path |
-|---|---|
-| macOS, Linux | `$XDG_DATA_HOME/griptape_nodes/ipc/<engine_id>.sock`, `AF_UNIX` stream |
-| Windows | `\\.\pipe\griptape_nodes_<engine_id>` |
+### 3. Subscribe, then connect
 
-The path exists only while that engine is running with the driver enabled, so its presence
-is the liveness test. A registry entry with no socket is an engine installed and not
-running. A connection refused on a path that does exist is an engine that died without
-cleaning up.
+Outbound frames are topic-routed: a connection receives a frame only if it subscribed to
+that frame's topic. Two topics matter.
 
-Frames are newline-delimited JSON, one object per line, both directions. No TLS, no auth
-handshake: anything that can open the socket can drive the engine. The engine creates the
-socket file mode `0600`, so on a single-user machine that is owner-only by construction;
-treat it as the only access control there is.
+| Topic | Where it comes from | Carries |
+|---|---|---|
+| The host's reply topic | The host invents it, e.g. `nuke/reply`, and sets `response_topic` to it on every request | Results for the requests this host sent |
+| `event_topic` | `NukeConnectResultSuccess.event_topic` | Every notification |
 
-`griptape_nodes_app/cli/request.py` in the app package implements steps 2 and 3. Step 1 is a
-manual config edit.
+Subscribe with a text frame:
 
-### 4. Filter everything read from the socket
+```json
+{ "type": "subscribe", "topic": "nuke/reply" }
+```
 
-The server writes every outbound frame to every connected client. No server-side topic
-filtering, no subscription step. A host therefore sees replies to requests the editor made,
-other libraries' events, and engine chatter unrelated to it. Discard any frame whose
-`request_id` is not one this host sent and whose `payload_type` does not begin with `Nuke`.
+Order matters, because nothing is replayed:
 
-One consequence worth stating: `event_topic` on `NukeConnectResultSuccess` is
-informational on this transport. There is nothing to subscribe to, so there is no way to
-miss notifications by forgetting to.
+1. Subscribe to the host's reply topic.
+2. Send `NukeConnectRequest` with `response_topic` set to that topic.
+3. Read the reply, then subscribe to the `event_topic` it names.
+
+`{ "type": "unsubscribe", "topic": ... }` reverses either one. Subscriptions live on the
+connection, not on the engine, so a reconnect starts again at step 1.
+
+A request sent with no `response_topic` is not addressed to this host: its reply is
+published to the engine's default response topic, the same one `event_topic` names and the
+editor reads.
+
+### 4. Filter what arrives
+
+Topic routing narrows the stream; it does not make the stream yours.
+
+- `event_topic` is the engine's default response topic. Every library's app events,
+  execution progress, and engine chatter land there too.
+- The engine subscribes every direct connection to a session's request topic when a session
+  starts, so frames can arrive on a topic this host never asked for.
+
+So the discard rule stands: drop any frame whose `request_id` is not one this host sent and
+whose `payload_type` does not begin with `Nuke`.
 
 ## Frame formats
 
-Three frame classes share one connection, discriminated by the top-level `type` field
-(absent on outbound requests).
+One JSON object per WebSocket text message. No newline framing, no length prefix: the
+message boundary is the frame boundary. A binary frame carrying UTF-8 JSON is also
+accepted.
+
+Frames are discriminated by the top-level `type` field, absent on outbound requests.
 
 | `type` | Direction | Discriminator for dispatch |
 |---|---|---|
 | absent | host to engine | `payload.request_type` |
+| `subscribe`, `unsubscribe`, `ping` | host to engine | control frames, no `payload` |
 | `success_result`, `failure_result` | engine to host | `payload.request_id`, then `payload.result_type` |
 | `app_event` | engine to host | `payload.payload_type` |
+| `pong` | engine to host | answer to `ping`, echoes `id` |
 
-The `local_socket` driver has no control frames: no subscribe, no unsubscribe, no ping.
-Everything the engine sends outbound reaches every connected client, so a host's only
-responsibility is to discard what is not addressed to it.
-
-There is no protocol-level heartbeat either. Detect a dead engine from the socket closing,
-or by sending a cheap request such as `NukeGetExecutionStateRequest` with
+Heartbeat: send `{ "type": "ping", "id": "..." }` and the engine answers
+`{ "type": "pong", "id": "..." }` on the same connection, without the frame reaching the
+engine's event dispatch. Nothing pings the host, and WebSocket protocol-level ping frames
+are not part of what this driver answers. A dead engine otherwise shows up as a closed
+connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest` with
 `include_outputs: false`.
 
 ### Requests
 
 `request_id` is host-generated and echoed back; any value unique per in-flight request
-works. `response_topic` names the topic the reply is published on and the engine puts it on
-the reply envelope. On this transport a host receives the reply either way, so the value
-serves only as a label to filter on.
+works. `response_topic` names the topic the reply is published on, and the engine puts it
+on the reply envelope. It is load-bearing: subscribe to that topic first, or the reply goes
+somewhere this host is not listening.
 
 ```json
 {
@@ -201,8 +230,8 @@ Unsolicited. Other libraries and the engine broadcast on the same topic, so filt
 
 ## Read loop
 
-Results and notifications arrive interleaved on one socket. A client that reads until it
-finds its reply and discards everything else drops every notification.
+Results and notifications arrive interleaved on one connection. A client that reads until
+it finds its reply and discards everything else drops every notification.
 
 Required loop:
 
@@ -211,7 +240,7 @@ Required loop:
 3. If it carries the awaited `request_id`, it is the reply.
 4. Otherwise discard it.
 
-Implement this as a pump that owns the socket, not as a request-response helper that
+Implement this as a pump that owns the connection, not as a request-response helper that
 returns after one read.
 
 ## Verbs
@@ -231,13 +260,15 @@ Subscribe to a reply topic first, then connect. Required before anything else.
 | `supported_protocol_versions` | `list[int]` | Full support window, diagnostic |
 | `engine_version` | `str` | Display only |
 | `library_version` | `str` | Display only |
-| `event_topic` | `str` | The topic notifications are labelled with. Informational on `local_socket`, where nothing needs subscribing |
+| `event_topic` | `str` | The topic notifications are published on. Subscribe to it or receive none |
 | `value_types` | `list[str]` | Closed value type set for this version |
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
 pay to translate and re-emit every execution event it runs. A host that skips connect and
 goes straight to executing gets replies and no events, with no error to explain it.
+Subscribing to `event_topic` without connecting fails the same way: nothing is publishing
+yet.
 
 ```json
 {
@@ -453,7 +484,7 @@ added field, which a tolerant parser already handles.
 ### NukeGetExecutionStateRequest
 
 The output-reading and recovery path. Notifications have no replay, so a host that
-connected mid-execution or dropped its socket has permanently missed events; this call returns
+connected mid-execution or dropped its connection has permanently missed events; this call returns
 current truth read live from the engine, with no cache that could disagree. It is also how a
 host checks whether it may start another run.
 
@@ -676,11 +707,11 @@ Verified against the transport implementation.
 | Limit | Consequence for the host |
 |---|---|
 | Fire and forget | Outbound fan-out discards send errors. No acks, no backpressure, no delivery guarantee |
-| A slow reader is dropped, silently | The engine writes to every client while holding one lock. A client that stops reading long enough to fill its socket buffer is removed from the broadcast set on the first write error, and then receives nothing further, **replies included**, while its read side stays open and healthy. It looks like the engine went mute. Reconnecting is the only recovery |
-| A slow reader stalls everyone | Because that write happens under a shared lock, a wedged client delays delivery to every other client, the editor included. Read on a dedicated thread and never block it |
-| No replay | No buffer, backlog, or resume cursor. Events reach only clients connected at that instant, so connect before starting work |
-| No filtering for you | Every outbound frame reaches every client. A host that does not filter will process the editor's replies as its own |
-| No continuity across reconnects | After a drop, reconnect, re-issue `NukeConnectRequest`, and re-read state |
+| A slow reader is buffered, not dropped | Each connection has its own unbounded outbound queue drained by its own writer task, so a host that stops reading costs the engine memory rather than losing frames, and never stalls another client. Read on a dedicated thread regardless: that queue is the engine's memory, not the host's |
+| No replay | No buffer, backlog, or resume cursor. A frame reaches only the connections subscribed at that instant, so subscribe before starting work |
+| Topic routing is not filtering | Every subscriber to a topic gets every frame on it, and `event_topic` is shared with the editor. Filter on `request_id` and `payload_type` too |
+| No auth, no TLS | Anything that can reach the port can drive the engine. The loopback bind is the only access control there is |
+| No continuity across reconnects | After a drop: reconnect, re-subscribe both topics, re-issue `NukeConnectRequest`, re-read state |
 
 `NukeGetExecutionStateRequest` is the authority whenever state is uncertain.
 
