@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 packages = ["nuke_nodes", "execution", "script_parser", "nuke_runner"]
 
 [dependency-groups]
-dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest", "griptape-nodes-engine>=0.99.0", "websockets"]
+dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest", "griptape-nodes-engine>=0.99.0"]
 
 [tool.ruff]
 line-length = 120
