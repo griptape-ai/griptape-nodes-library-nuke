@@ -75,15 +75,12 @@ from nuke_host_api.protocol import (
     VALUE_TYPES,
     ExecutionState,
 )
-from nuke_host_api.value_types import normalize_value, value_type_for_engine_type
+from nuke_host_api.value_types import CONTROL_PARAM_TYPE, normalize_value, value_type_for_engine_type
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 logger = logging.getLogger("griptape_nodes")
-
-# Control-flow parameters are execution wiring, not data. Hosts never see them.
-CONTROL_PARAM_TYPE = "parametercontroltype"
 
 # Resolved relative to this file, not the process working directory, since a host may
 # launch the engine from anywhere.
