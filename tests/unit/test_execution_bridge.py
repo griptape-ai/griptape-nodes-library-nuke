@@ -8,7 +8,8 @@ otherwise meet raw engine artifacts.
 
 from __future__ import annotations
 
-from typing import Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from griptape.artifacts import ImageUrlArtifact
@@ -30,6 +31,11 @@ from nuke_host_api.events import (
 from nuke_host_api.execution_bridge import ExecutionBridge
 from nuke_host_api.protocol import ExecutionState, NodeState, ValueType
 from nuke_host_api.value_types import CONTROL_PARAM_TYPE
+from nuke_nodes import nuke_library_advanced
+from nuke_nodes.nuke_library_advanced import NukeLibraryAdvanced
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class FakeEventManager:
@@ -113,6 +119,77 @@ class TestSubscriptionLifecycle:
         assert event_manager.listener_count == 2 * len(first._subscriptions())
         first.uninstall()
         assert event_manager.listener_count == len(second._subscriptions())
+
+
+class TestProcessBridgeLifecycle:
+    """The bridge's subscription is engine-global, so when it installs is a real decision."""
+
+    @pytest.fixture(autouse=True)
+    def _leave_it_uninstalled(self) -> Iterator[None]:
+        """The process bridge is shared, so a test that installs it must put it back."""
+        yield
+        execution_bridge.uninstall()
+
+    def test_loading_the_library_does_not_subscribe(
+        self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole point of the latch.
+
+        An engine that merely has this library installed, with no transport enabled for a
+        host to arrive on, must not pay to translate and re-emit every execution event it
+        runs. So the real load hook is driven here, and nothing in it may subscribe.
+        """
+        registered: list[object] = []
+
+        class FakeLibraryManager:
+            def on_register_event_handler(self, **kwargs: Any) -> None:
+                registered.append(kwargs["request_type"])
+
+        class FakeGriptapeNodes:
+            @staticmethod
+            def LibraryManager() -> FakeLibraryManager:  # noqa: N802
+                return FakeLibraryManager()
+
+        monkeypatch.setattr(nuke_library_advanced, "GriptapeNodes", FakeGriptapeNodes)
+        library_data = SimpleNamespace(name="Nuke Nodes Library")
+
+        NukeLibraryAdvanced().after_library_nodes_loaded(library_data, None)  # type: ignore[arg-type]
+
+        assert registered, "the load hook must still register the publish handler"
+        assert not execution_bridge.is_installed()
+        assert not any(event_manager.listeners.values())
+
+    def test_a_host_connecting_subscribes(self, event_manager: FakeEventManager) -> None:
+        execution_bridge.ensure_installed()
+
+        assert execution_bridge.is_installed()
+        assert any(event_manager.listeners.values())
+
+    def test_repeated_connects_do_not_duplicate_listeners(self, event_manager: FakeEventManager) -> None:
+        """A host may connect repeatedly, and each reconnect must not add another listener set.
+
+        Duplicate subscriptions are the failure this guards: a host would receive every
+        notification twice, then three times.
+        """
+        execution_bridge.ensure_installed()
+        after_first = {event: set(callbacks) for event, callbacks in event_manager.listeners.items()}
+
+        execution_bridge.ensure_installed()
+        execution_bridge.ensure_installed()
+
+        assert {event: set(callbacks) for event, callbacks in event_manager.listeners.items()} == after_first
+
+    def test_library_unload_removes_every_listener(self, event_manager: FakeEventManager) -> None:
+        execution_bridge.ensure_installed()
+        execution_bridge.uninstall()
+
+        assert not execution_bridge.is_installed()
+        assert not any(event_manager.listeners.values()), "a listener outlived the bridge that added it"
+
+    def test_unload_without_any_host_having_connected_is_a_no_op(self, event_manager: FakeEventManager) -> None:
+        """Library unload calls this unconditionally, including when no host ever connected."""
+        execution_bridge.uninstall()
+        assert not any(event_manager.listeners.values())
 
 
 class TestTranslation:
