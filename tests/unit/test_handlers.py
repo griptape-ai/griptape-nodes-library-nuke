@@ -162,6 +162,28 @@ class TestConnect:
     def _fake_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(handlers, "GriptapeNodes", FakeEngine)
 
+    @pytest.fixture(autouse=True)
+    def _record_bridge_installs(self, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+        """Stub the real install, which would subscribe this process to the engine's feed."""
+        calls: list[bool] = []
+        monkeypatch.setattr(handlers.execution_bridge, "ensure_installed", lambda: calls.append(True))
+        return calls
+
+    def test_connecting_installs_the_event_bridge(self, _record_bridge_installs: list[bool]) -> None:
+        """Notifications begin at connect, so a successful connect must subscribe.
+
+        Forgetting this is silent: every request still succeeds and no event ever arrives.
+        """
+        result = handlers.handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+        assert isinstance(result, NukeConnectResultSuccess)
+        assert _record_bridge_installs == [True]
+
+    def test_a_refused_connect_does_not_install_the_event_bridge(self, _record_bridge_installs: list[bool]) -> None:
+        """A host that could not agree a version must not leave the engine paying for a feed."""
+        result = handlers.handle_connect(NukeConnectRequest(client_protocol_versions=[99]))
+        assert isinstance(result, NukeConnectResultFailure)
+        assert _record_bridge_installs == []
+
     def test_a_matching_version_connects(self) -> None:
         result = handlers.handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
         assert isinstance(result, NukeConnectResultSuccess)

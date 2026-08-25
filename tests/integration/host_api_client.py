@@ -14,6 +14,12 @@ rely on something a C++ plugin could not do.
 The pump is the part a request-response helper gets wrong. Results and notifications share
 one socket, so a client that reads until it finds its reply and discards the rest silently
 loses every event.
+
+A real plugin needs a dedicated reader thread. This harness is single-threaded and gets away
+with it only because tests are short: the engine's fan-out holds a lock across every client
+and writes serially, so a client that stops reading long enough to fill its socket buffer
+either stalls delivery for everyone or is dropped from the broadcast set, after which it
+receives nothing further, replies included, while its read side stays open.
 """
 
 from __future__ import annotations
@@ -29,7 +35,11 @@ from pathlib import Path
 from typing import Any
 
 REPLY_TOPIC = "nuke-smoke/reply"
-DEFAULT_TIMEOUT_S = 60.0
+
+# Short on purpose. A stalled socket means this client was dropped from the engine's
+# broadcast set and will never receive another frame, so waiting a minute to find that out
+# only makes a failing run slower to read.
+DEFAULT_TIMEOUT_S = 20.0
 
 
 def _xdg_data_home() -> Path:
