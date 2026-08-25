@@ -114,26 +114,30 @@ class ExecutionState:
     CANCELLED = "cancelled"
 
 
-# Value types. Closed set: a host switches on exactly these, forever.
+# Value types. Closed set: a host switches on exactly these, forever. The ``GT`` prefix marks
+# the far side of the boundary: inside a Nuke plugin everything is Nuke by default, so the
+# names worth flagging are the ones carrying engine data. Matches the ``gt_*`` knob prefix the
+# Griptape Annotator already writes into ``.nk`` scripts. The nouns are Nuke's, not the
+# engine's: a movie is a movie, and an image sequence is an image with many sources.
 class ValueType:
     """Value types a host may receive."""
 
     IMAGE = "GTImage"
-    VIDEO = "GTVideo"
+    MOVIE = "GTMovie"
     FILE = "GTFile"
     TEXT = "GTText"
     NUMBER = "GTNumber"
-    BOOLEAN = "GTBoolean"
+    BOOL = "GTBool"
     NULL = "GTNull"
 
 
 VALUE_TYPES = (
     ValueType.IMAGE,
-    ValueType.VIDEO,
+    ValueType.MOVIE,
     ValueType.FILE,
     ValueType.TEXT,
     ValueType.NUMBER,
-    ValueType.BOOLEAN,
+    ValueType.BOOL,
     ValueType.NULL,
 )
 
