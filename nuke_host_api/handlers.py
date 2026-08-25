@@ -49,6 +49,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
+from nuke_host_api import execution_bridge
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultFailure,
@@ -276,7 +277,13 @@ def _engine_is_running() -> bool:
 
 
 def handle_connect(request: RequestPayload) -> ResultPayload:
-    """Agree a protocol version and hand over the event topic."""
+    """Agree a protocol version and hand over the event topic.
+
+    Also installs the outbound event bridge, so a host must connect before it can receive
+    notifications. Connecting is the handshake, so gating the stream on it costs a host
+    nothing it was not already doing, and it keeps an engine that no host talks to free of
+    the bridge's engine-global subscription.
+    """
     if not isinstance(request, NukeConnectRequest):
         msg = f"Expected NukeConnectRequest, got {type(request).__name__}"
         raise TypeError(msg)
@@ -297,6 +304,12 @@ def handle_connect(request: RequestPayload) -> ResultPayload:
         )
 
     client = request.client_name or "unnamed host"
+
+    # Notifications start here, not at library load. The bridge's subscription is
+    # engine-global, so an engine no host has connected to should not pay to translate and
+    # re-emit every execution event it runs.
+    execution_bridge.ensure_installed()
+
     return NukeConnectResultSuccess(
         protocol_version=mutual[0],
         supported_protocol_versions=list(SUPPORTED_PROTOCOL_VERSIONS),
