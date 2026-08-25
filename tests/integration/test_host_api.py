@@ -75,14 +75,27 @@ def engine() -> Engine:
 def client(engine: Engine) -> Iterator[HostClient]:
     """A connected client that leaves the engine idle behind it.
 
+    Performs the connect handshake, because notifications begin at connect: the event bridge
+    installs there rather than at library load, so a client that skipped it would receive
+    replies and no events. Doing it here also means no test depends on an earlier test
+    having connected first.
+
     Teardown cancels anything still running. Execute refuses to start over a run in
     progress, so one test leaving a flow live would fail every later one for a reason that
     has nothing to do with what they assert.
     """
     with HostClient(socket_path=engine.socket_path) as connected:
+        handshake = connected.request(
+            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+        )
+        assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
         try:
             yield connected
         finally:
+            # Drain first. The engine writes every frame to every client, so leaving a
+            # backlog unread risks filling the socket buffer, and a client the engine cannot
+            # write to is dropped from its broadcast set and stops receiving replies too.
+            connected.drain(0.5)
             state = connected.request(Verb.GET_EXECUTION_STATE, {"include_outputs": False})
             if succeeded(state) and result_of(state).get("running"):
                 connected.request(Verb.CANCEL_EXECUTION)
@@ -227,6 +240,8 @@ class TestExecute:
         Notifications are collected without sending a single request, so a pass cannot be
         explained by polling. local_socket has no subscribe step and the engine's fan-out
         ignores topics for it, so either events arrive unsolicited or the push path is broken.
+
+        The fixture has already connected, which is what installs the bridge.
         """
         workflow_id = _smoke_workflow_id(client)
         started = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})

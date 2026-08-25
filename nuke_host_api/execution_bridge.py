@@ -12,6 +12,10 @@ listeners and would never reach the host.
 Eight engine event types collapse into four node states. That ratio is the point: the
 engine is free to add a ninth without the host learning anything new.
 
+Installed on the first ``NukeConnectRequest`` and torn down when the library unloads. The
+subscription is engine-global, so an engine no host has spoken to should not pay for it;
+see ``ensure_installed``.
+
 Stateless by design. The bridge holds no execution state beyond its own subscription
 flag. Values a host wants are read from the engine on demand via
 NukeGetExecutionStateRequest, so there is no copy of engine state here to go stale.
@@ -65,6 +69,10 @@ class ExecutionBridge:
 
     def __init__(self) -> None:
         self._installed = False
+
+    @property
+    def installed(self) -> bool:
+        return self._installed
 
     def _subscriptions(self) -> tuple[tuple[type[ExecutionPayload], Callable[[Any], None]], ...]:
         """Return the (engine event type, callback) pairs this bridge listens for.
@@ -195,3 +203,39 @@ class ExecutionBridge:
     def _on_flow_cancelled(self, event: ControlFlowCancelledEvent) -> None:
         detail = str(event.result_details) if event.result_details else "Workflow cancelled."
         self._emit(NukeExecutionStateEvent(state=ExecutionState.CANCELLED, detail=detail))
+
+
+# One bridge per process. Owned here rather than by the advanced library module so that
+# handle_connect can reach it without importing that module, which imports the handlers.
+_BRIDGE = ExecutionBridge()
+
+
+def ensure_installed() -> None:
+    """Subscribe to the engine's execution feed, unless already subscribed.
+
+    Called when a host connects, not when the library loads. The subscription is
+    engine-global: the engine keys execution listeners by event type, not by library or
+    node, so an installed bridge translates and re-emits for *every* workflow the engine
+    runs, including ones with no Nuke nodes driven entirely from the editor. Installing at
+    load time made anyone who merely has this library installed pay that, even with no
+    transport enabled for a host to arrive on.
+
+    Latching on rather than reference counting is deliberate. The transport gives Python no
+    disconnect signal, so there is nothing to count down. An idle timeout would be the
+    obvious substitute and is wrong: a host waiting on a twenty-minute render sends no
+    requests, and that is the moment the stream must not stop.
+    """
+    _BRIDGE.install()
+
+
+def uninstall() -> None:
+    """Tear down the process-wide bridge.
+
+    Not optional. Listeners outlive the library that added them, so a reload without this
+    leaves the previous bridge subscribed and a host receives every notification twice.
+    """
+    _BRIDGE.uninstall()
+
+
+def is_installed() -> bool:
+    return _BRIDGE.installed
