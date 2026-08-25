@@ -11,7 +11,7 @@ import functools
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.app_events import (
@@ -76,6 +76,9 @@ from nuke_host_api.protocol import (
     ExecutionState,
 )
 from nuke_host_api.value_types import normalize_value, value_type_for_engine_type
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -192,18 +195,15 @@ def _is_runnable(entry: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _ports(shape_section: object) -> list[dict[str, str]]:
-    """Flatten a workflow_shape section into host-visible ports.
+def _data_parameters(shape_section: object) -> Iterator[tuple[str, str, dict]]:
+    """Yield (node, parameter, parameter dict) for every data parameter in a shape section.
 
-    The engine hands back ``{node: {parameter: {...15+ keys...}}}`` where the inner dict
-    changes shape between releases. A host needs a name and a type, so the width stops
-    here. Control-flow parameters are dropped and unrecognized types degrade into the
-    closed host set.
+    Control-flow parameters are execution wiring rather than data, so they never reach a
+    host. Shared by the describe path and the input allow-list so the two cannot disagree
+    about which ports exist.
     """
     if not isinstance(shape_section, dict):
-        return []
-
-    ports: list[dict[str, str]] = []
+        return
     for node_name, parameters in shape_section.items():
         if not isinstance(parameters, dict):
             continue
@@ -212,15 +212,70 @@ def _ports(shape_section: object) -> list[dict[str, str]]:
                 continue
             if parameter.get("type") == CONTROL_PARAM_TYPE:
                 continue
-            ports.append(
-                {
-                    "node": str(node_name),
-                    "parameter": str(parameter_name),
-                    "name": f"{node_name}.{parameter_name}",
-                    "type": value_type_for_engine_type(parameter.get("type")),
-                }
-            )
-    return ports
+            yield str(node_name), str(parameter_name), parameter
+
+
+def _ports(shape_section: object) -> list[dict[str, Any]]:
+    """Flatten a workflow_shape section into host-visible ports.
+
+    The engine hands back ``{node: {parameter: {...20+ keys...}}}`` where the inner dict
+    changes shape between releases. A host needs enough to build a knob and nothing that
+    ties it to engine vocabulary, so the width stops here: identity, host type, the
+    author's default, help text, and whether it may be set. Unrecognized types degrade into
+    the closed host set.
+
+    ``default`` is a normalized descriptor rather than a raw engine value, so a port's
+    default and its live value arrive in the same shape.
+    """
+    return [
+        {
+            "node": node_name,
+            "parameter": parameter_name,
+            "name": f"{node_name}.{parameter_name}",
+            "type": value_type_for_engine_type(parameter.get("type")),
+            "default": normalize_value(parameter.get("default_value"), parameter.get("type")),
+            "tooltip": str(parameter.get("tooltip") or ""),
+            "settable": bool(parameter.get("settable", True)),
+        }
+        for node_name, parameter_name, parameter in _data_parameters(shape_section)
+    ]
+
+
+def _declared_input_ports(workflow_id: str) -> set[tuple[str, str]]:
+    """Return the (node, parameter) pairs a host may set on this workflow.
+
+    Reads identity only. Building full port descriptors here would normalize every default,
+    and normalizing a macro-templated one issues an engine request whose result this caller
+    then discards.
+    """
+    table = _workflow_table()
+    entry = table.get(workflow_id) if table else None
+    if not isinstance(entry, dict):
+        return set()
+    return {
+        (node_name, parameter_name)
+        for node_name, parameter_name, _ in _data_parameters(_workflow_shape(entry).get("inputs"))
+    }
+
+
+def _flow_is_running(state: GetFlowStateResultSuccess) -> bool:
+    """Report whether a flow state describes an execution in progress.
+
+    One predicate, used by both the execute guard and the state report, so the two cannot
+    disagree about what running means.
+    """
+    return bool(state.resolving_nodes or state.control_nodes)
+
+
+def _engine_is_running() -> bool:
+    """Report whether the engine is mid-execution."""
+    flow_name = _top_level_flow_name()
+    if flow_name is None:
+        return False
+    result = GriptapeNodes.handle_request(GetFlowStateRequest(flow_name=flow_name))
+    if not isinstance(result, GetFlowStateResultSuccess):
+        return False
+    return _flow_is_running(result)
 
 
 def handle_connect(request: RequestPayload) -> ResultPayload:
@@ -336,14 +391,32 @@ def handle_execute_workflow(request: RequestPayload) -> ResultPayload:
     point: RunWorkflowFromRegistryRequest loads the graph, parameter values are set on
     the loaded start node, and StartFlowRequest executes. A host should not have to know
     that sequence, or that it may change.
+
+    Refuses to start over a run already in progress. Loading a second graph would discard
+    the first mid-flight, and with no execution id in the engine's events a host could not
+    tell which run the notifications that followed belonged to, nor which one a cancel
+    would stop. Serial execution is what makes those two gaps survivable.
     """
     if not isinstance(request, NukeExecuteWorkflowRequest):
         msg = f"Expected NukeExecuteWorkflowRequest, got {type(request).__name__}"
         raise TypeError(msg)
 
+    if _engine_is_running():
+        details = (
+            f"Attempted to execute workflow '{request.workflow_id}'. "
+            f"Failed because the engine is already executing. Wait for the current run to "
+            f"finish, or cancel it with NukeCancelExecutionRequest, then retry."
+        )
+        return NukeExecuteWorkflowResultFailure(
+            workflow_id=request.workflow_id, exception=RuntimeError(details), result_details=details
+        )
+
+    allowed_inputs = _declared_input_ports(request.workflow_id)
+
     load_result = GriptapeNodes.handle_request(
         RunWorkflowFromRegistryRequest(workflow_name=request.workflow_id, run_with_clean_slate=True)
     )
+
     if not isinstance(load_result, RunWorkflowFromRegistryResultSuccess):
         details = (
             f"Attempted to execute workflow '{request.workflow_id}'. "
@@ -353,7 +426,7 @@ def handle_execute_workflow(request: RequestPayload) -> ResultPayload:
             workflow_id=request.workflow_id, exception=RuntimeError(details), result_details=details
         )
 
-    applied, rejected = _apply_inputs(request.inputs)
+    applied, rejected = _apply_inputs(request.inputs, allowed_inputs)
 
     flow_name = _top_level_flow_name()
     if flow_name is None:
@@ -384,12 +457,18 @@ def handle_execute_workflow(request: RequestPayload) -> ResultPayload:
     )
 
 
-def _apply_inputs(inputs: dict[str, dict[str, Any]]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+def _apply_inputs(
+    inputs: dict[str, dict[str, Any]], allowed: set[tuple[str, str]]
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Set each input on the loaded graph, reporting what stuck and what did not.
 
     A silently dropped input is worse than a failed execution: the workflow produces plausible
     output from the wrong values. So rejections are reported rather than logged and
     forgotten.
+
+    Only pairs describe_workflow declared are forwarded. The engine would happily set a
+    parameter on any node in the loaded graph, and this transport carries no authentication,
+    so a host must not be able to reach past a workflow's published inputs.
     """
     applied: list[dict[str, str]] = []
     rejected: list[dict[str, str]] = []
@@ -399,6 +478,15 @@ def _apply_inputs(inputs: dict[str, dict[str, Any]]) -> tuple[list[dict[str, str
             rejected.append({"node": str(node_name), "parameter": "*", "reason": "Expected an object of parameters."})
             continue
         for parameter_name, value in parameters.items():
+            if (node_name, parameter_name) not in allowed:
+                rejected.append(
+                    {
+                        "node": node_name,
+                        "parameter": parameter_name,
+                        "reason": "Not a declared input port of this workflow.",
+                    }
+                )
+                continue
             result = GriptapeNodes.handle_request(
                 SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=value)
             )
@@ -439,7 +527,7 @@ def handle_get_execution_state(request: RequestPayload) -> ResultPayload:
 
     active = list(result.resolving_nodes)
     involved = list(result.involved_nodes)
-    running = bool(active or result.control_nodes)
+    running = _flow_is_running(result)
 
     workflow_id = _current_workflow_id()
     outputs: dict[str, dict[str, Any]] = {}

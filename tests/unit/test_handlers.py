@@ -71,8 +71,13 @@ SHAPE = {
     "inputs": {
         "Start Flow": {
             "exec_out": {"type": "parametercontroltype"},
-            "topic": {"type": "str"},
-            "plate": {"type": "ImageUrlArtifact"},
+            "topic": {
+                "type": "str",
+                "default_value": "a quiet harbour at dusk",
+                "tooltip": "What the shot is about.",
+                "settable": True,
+            },
+            "plate": {"type": "ImageUrlArtifact", "default_value": None, "tooltip": "", "settable": False},
         }
     },
     "outputs": {
@@ -255,18 +260,34 @@ class FakeDispatchEngine:
         return response(request) if callable(response) else response
 
 
+WORKFLOW_TABLE = {"wf1": {"name": "WF One", "description": "d", "workflow_shape": SHAPE}}
+
+IDLE_FLOW = GetFlowStateResultSuccess(control_nodes=[], resolving_nodes=[], involved_nodes=[], result_details="idle")
+
+
+def _execute_responses(overrides: dict[type, Any] | None = None) -> dict[type, Any]:
+    """Engine responses for a clean execute, so each test overrides only what it is about.
+
+    Execute preflights twice before it loads anything: once to refuse starting over a run in
+    progress, once to learn which ports it may set.
+    """
+    responses: dict[type, Any] = {
+        ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok"),
+        GetFlowStateRequest: IDLE_FLOW,
+        RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
+        SetParameterValueRequest: lambda req: SetParameterValueResultSuccess(
+            finalized_value=req.value, data_type="str", result_details="set"
+        ),
+        GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
+        StartFlowRequest: StartFlowResultSuccess(result_details="started"),
+    }
+    responses.update(overrides or {})
+    return responses
+
+
 class TestExecuteWorkflow:
     def test_a_successful_run_calls_the_engine_in_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        engine = FakeDispatchEngine(
-            {
-                RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
-                SetParameterValueRequest: lambda req: SetParameterValueResultSuccess(
-                    finalized_value=req.value, data_type="str", result_details="set"
-                ),
-                GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
-                StartFlowRequest: StartFlowResultSuccess(result_details="started"),
-            }
-        )
+        engine = FakeDispatchEngine(_execute_responses())
         monkeypatch.setattr(handlers, "GriptapeNodes", engine)
 
         result = handlers.handle_execute_workflow(
@@ -285,25 +306,108 @@ class TestExecuteWorkflow:
         load_request = next(r for r in engine.requests if isinstance(r, RunWorkflowFromRegistryRequest))
         assert load_request.run_with_clean_slate is True
 
+    def test_refuses_to_start_over_a_run_already_in_progress(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Loading a second graph would discard the first mid-flight.
+
+        With no execution id in the engine's events, a host could not tell which run the
+        following notifications belonged to, nor which one a cancel would stop.
+        """
+        engine = FakeDispatchEngine(
+            _execute_responses(
+                {
+                    GetFlowStateRequest: GetFlowStateResultSuccess(
+                        control_nodes=["C1"], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="busy"
+                    )
+                }
+            )
+        )
+        monkeypatch.setattr(handlers, "GriptapeNodes", engine)
+
+        result = handlers.handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert not any(isinstance(request, RunWorkflowFromRegistryRequest) for request in engine.requests), (
+            "must not load a graph over a running one"
+        )
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+
+    def test_an_input_that_is_not_a_declared_port_is_rejected_without_reaching_the_engine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The engine would set a parameter on any node in the loaded graph.
+
+        This transport carries no authentication, so a host must not reach past the inputs
+        describe_workflow published.
+        """
+        engine = FakeDispatchEngine(_execute_responses())
+        monkeypatch.setattr(handlers, "GriptapeNodes", engine)
+
+        result = handlers.handle_execute_workflow(
+            NukeExecuteWorkflowRequest(
+                workflow_id="wf1",
+                inputs={"Start Flow": {"topic": "ok"}, "Some Private Node": {"api_key": "stolen"}},
+            )
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
+        assert result.rejected_inputs == [
+            {
+                "node": "Some Private Node",
+                "parameter": "api_key",
+                "reason": "Not a declared input port of this workflow.",
+            }
+        ]
+        touched = {r.node_name for r in engine.requests if isinstance(r, SetParameterValueRequest)}
+        assert touched == {"Start Flow"}
+
+    def test_the_preflight_reads_port_identity_without_normalizing_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Normalizing a macro-templated default issues an engine request.
+
+        The input allow-list needs node and parameter names only, so paying for resolution it
+        then discards would put avoidable engine round-trips on every execution.
+        """
+
+        def explode(*_args: Any, **_kwargs: Any) -> Any:
+            msg = "execute must not normalize port defaults; it needs identity only"
+            raise AssertionError(msg)
+
+        engine = FakeDispatchEngine(_execute_responses())
+        monkeypatch.setattr(handlers, "GriptapeNodes", engine)
+        monkeypatch.setattr(handlers, "normalize_value", explode)
+
+        result = handlers.handle_execute_workflow(
+            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
+
     def test_short_circuits_when_the_engine_cannot_load_the_workflow(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = FakeDispatchEngine(
-            {RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(result_details="not found")}
+            _execute_responses(
+                {RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(result_details="not found")}
+            )
         )
         monkeypatch.setattr(handlers, "GriptapeNodes", engine)
 
         result = handlers.handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="ghost"))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
-        assert len(engine.requests) == 1, "must not touch inputs or start a flow it never loaded"
+        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests), (
+            "must not touch inputs of a workflow it never loaded"
+        )
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
     def test_short_circuits_when_the_loaded_workflow_has_no_top_level_flow(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         engine = FakeDispatchEngine(
-            {
-                RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
-                GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok"),
-            }
+            _execute_responses(
+                {GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok")}
+            )
         )
         monkeypatch.setattr(handlers, "GriptapeNodes", engine)
 
@@ -314,11 +418,9 @@ class TestExecuteWorkflow:
 
     def test_short_circuits_when_the_engine_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = FakeDispatchEngine(
-            {
-                RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
-                GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
-                StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[]),
-            }
+            _execute_responses(
+                {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])}
+            )
         )
         monkeypatch.setattr(handlers, "GriptapeNodes", engine)
 
@@ -337,7 +439,9 @@ class TestApplyInputs:
         engine = FakeDispatchEngine({SetParameterValueRequest: respond})
         monkeypatch.setattr(handlers, "GriptapeNodes", engine)
 
-        applied, rejected = handlers._apply_inputs({"Node A": {"good": 1, "bad": "nope"}})
+        applied, rejected = handlers._apply_inputs(
+            {"Node A": {"good": 1, "bad": "nope"}}, {("Node A", "good"), ("Node A", "bad")}
+        )
 
         assert applied == [{"node": "Node A", "parameter": "good"}]
         assert rejected == [{"node": "Node A", "parameter": "bad", "reason": "rejected: wrong type"}]
@@ -348,7 +452,7 @@ class TestApplyInputs:
         engine = FakeDispatchEngine({})
         monkeypatch.setattr(handlers, "GriptapeNodes", engine)
 
-        applied, rejected = handlers._apply_inputs({"Node A": "not a dict"})  # type: ignore[arg-type]
+        applied, rejected = handlers._apply_inputs({"Node A": "not a dict"}, {("Node A", "good")})  # type: ignore[arg-type]
 
         assert applied == []
         assert rejected == [{"node": "Node A", "parameter": "*", "reason": "Expected an object of parameters."}]
@@ -412,6 +516,51 @@ class TestDescribeWorkflow:
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
         assert {port["parameter"] for port in result.inputs} == {"topic", "plate"}
         assert {port["parameter"] for port in result.outputs} == {"was_successful", "mixed_audio"}
+
+    def test_ports_carry_the_authors_default_its_help_text_and_whether_it_may_be_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A host builds knobs from this, so a port with no default has nothing to initialize to.
+
+        The default arrives as a normalized descriptor rather than a raw engine value, so a
+        port's default and its live value are the same shape.
+        """
+        engine = FakeDispatchEngine(
+            {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok")}
+        )
+        monkeypatch.setattr(handlers, "GriptapeNodes", engine)
+
+        result = handlers.handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeDescribeWorkflowResultSuccess)
+        ports = {port["parameter"]: port for port in result.inputs}
+
+        assert ports["topic"]["default"]["value_type"] == ValueType.TEXT
+        assert ports["topic"]["tooltip"] == "What the shot is about."
+        assert ports["topic"]["settable"] is True
+
+        assert ports["plate"]["default"]["value_type"] == ValueType.NULL
+        assert ports["plate"]["settable"] is False
+
+    def test_a_port_the_engine_gave_no_metadata_for_still_describes_completely(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Older workflow_shape entries carry only a type, and every field must still be present.
+
+        A host indexes these keys unconditionally, so an absent one is a crash, not a default.
+        """
+        engine = FakeDispatchEngine(
+            {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok")}
+        )
+        monkeypatch.setattr(handlers, "GriptapeNodes", engine)
+
+        result = handlers.handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeDescribeWorkflowResultSuccess)
+        bare = next(port for port in result.outputs if port["parameter"] == "was_successful")
+        assert bare["default"]["value_type"] == ValueType.NULL
+        assert bare["tooltip"] == ""
+        assert bare["settable"] is True
 
     def test_an_unknown_workflow_id_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = FakeDispatchEngine(
@@ -520,7 +669,7 @@ class TestGetExecutionState:
         result = handlers.handle_get_execution_state(NukeGetExecutionStateRequest(include_outputs=True))
 
         assert isinstance(result, NukeGetExecutionStateResultSuccess)
-        assert result.outputs["End Flow"]["was_successful"]["value_type"] == ValueType.BOOLEAN
+        assert result.outputs["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert result.outputs["End Flow"]["mixed_audio"]["value_type"] == ValueType.FILE
 
     def test_fails_when_no_workflow_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
