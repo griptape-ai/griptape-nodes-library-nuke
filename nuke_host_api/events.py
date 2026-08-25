@@ -115,16 +115,17 @@ class NukeDescribeWorkflowRequest(RequestPayload):
 class NukeDescribeWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     """Host-visible description.
 
-    ``inputs`` and ``outputs`` entries are ``{node, parameter, name, type}`` where
-    ``type`` is always a member of ``protocol.VALUE_TYPES``. ``node`` and ``parameter``
-    are split out because NukeExecuteWorkflowRequest addresses inputs by that pair.
+    ``inputs`` and ``outputs`` entries are ``{node, parameter, name, type, default,
+    tooltip, settable}`` where ``type`` is always a member of ``protocol.VALUE_TYPES`` and
+    ``default`` is a normalized value descriptor. ``node`` and ``parameter`` are split out
+    because NukeExecuteWorkflowRequest addresses inputs by that pair.
     """
 
     workflow_id: str
     name: str
     description: str
-    inputs: list[dict[str, str]]
-    outputs: list[dict[str, str]]
+    inputs: list[dict[str, Any]]
+    outputs: list[dict[str, Any]]
 
 
 @dataclass
@@ -148,7 +149,9 @@ class NukeExecuteWorkflowRequest(RequestPayload):
 
     Args:
         workflow_id: Id from NukeListWorkflowsRequest.
-        inputs: ``{node_name: {parameter_name: value}}``. Values are plain JSON.
+        inputs: ``{node_name: {parameter_name: value}}``. Values are plain JSON. Only pairs
+            NukeDescribeWorkflowRequest declared as inputs are accepted; anything else is
+            reported in ``rejected_inputs``.
     """
 
     workflow_id: str
@@ -181,7 +184,7 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
 @dataclass
 @PayloadRegistry.register
 class NukeExecuteWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """Execution could not be started."""
+    """Execution could not be started, including when a run is already in progress."""
 
     workflow_id: str
 

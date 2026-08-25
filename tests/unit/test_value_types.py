@@ -30,11 +30,25 @@ STATIC_URL = "http://localhost:8124/workspace/static_files/render.png"
     [
         ("ImageArtifact", ValueType.IMAGE),
         ("ImageUrlArtifact", ValueType.IMAGE),
-        ("VideoUrlArtifact", ValueType.VIDEO),
+        ("VideoUrlArtifact", ValueType.MOVIE),
         ("str", ValueType.TEXT),
         ("int", ValueType.NUMBER),
         ("float", ValueType.NUMBER),
-        ("bool", ValueType.BOOLEAN),
+        ("bool", ValueType.BOOL),
+        # An image sequence is an image with many sources, under either name in use for one.
+        ("Sequence", ValueType.IMAGE),
+        ("ImageSequenceArtifact", ValueType.IMAGE),
+        # The engine wraps a container port's element type, and the brackets must not defeat
+        # the mapping table or the Artifact suffix test.
+        ("list[ImageUrlArtifact]", ValueType.IMAGE),
+        ("list[VideoUrlArtifact]", ValueType.MOVIE),
+        ("list[int]", ValueType.NUMBER),
+        ("list[str]", ValueType.TEXT),
+        ("list[AudioUrlArtifact]", ValueType.FILE),
+        # A wildcard port declares only that it accepts anything, so the most permissive
+        # host control is the honest answer and the runtime descriptor is authoritative.
+        ("any", ValueType.TEXT),
+        ("all", ValueType.TEXT),
         # Unknown artifact classes degrade to a file rather than leaking the engine name.
         ("AudioUrlArtifact", ValueType.FILE),
         ("SomethingInventedNextRelease", ValueType.TEXT),
@@ -46,20 +60,69 @@ def test_engine_type_names_map_into_the_closed_set(engine_type: str | None, expe
 
 
 @pytest.mark.parametrize(
+    ("declared", "value"),
+    [
+        ("Sequence", ["/show/plate.0001.exr", "/show/plate.0002.exr"]),
+        ("list[ImageUrlArtifact]", ["http://x/a.exr", "http://x/b.exr"]),
+        ("list[int]", [1, 2, 3]),
+        ("ImageUrlArtifact", "http://x/render.png"),
+        ("VideoUrlArtifact", "/show/cut.mov"),
+        ("bool", True),
+        ("int", 7),
+    ],
+)
+def test_declared_port_type_agrees_with_the_type_its_values_normalize_to(declared: str, value: Any) -> None:
+    """A host builds a knob from the declared type and then receives values on it.
+
+    The two disagreeing is worse than either being wrong alone: the plugin builds a text
+    field for a port that goes on to stream image sequences. Sequence ports are the case
+    this library itself produces, so they are the case most likely to regress.
+    """
+    assert (
+        value_types.value_type_for_engine_type(declared) == value_types.normalize_value(value, declared)["value_type"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("declared", "value", "runtime"),
+    [
+        ("GenericArtifact", GenericArtifact("https://cdn.example.com/still.jpg"), ValueType.IMAGE),
+        ("GenericArtifact", GenericArtifact("https://cdn.example.com/notes.bin"), ValueType.FILE),
+        ("AudioUrlArtifact", "https://cdn.example.com/take.mov", ValueType.MOVIE),
+        ("ThreeDUrlArtifact", "/show/model.obj", ValueType.FILE),
+    ],
+)
+def test_a_port_whose_declared_type_carries_no_media_information_may_narrow_at_runtime(
+    declared: str, value: Any, runtime: str
+) -> None:
+    """An unmapped artifact class describes as GTFile, and its values may narrow to media.
+
+    Nothing at describe time can know a GenericArtifact holds a jpg, because no value exists
+    yet, and throwing that away once one does would be worse than the mismatch. So the
+    narrowing is documented rather than removed, and pinned here: it must stay inside the
+    sourced types and never become GTText, GTNumber or GTBool. That is the mismatch that
+    actually breaks a host, because it makes it build a text field for media.
+    """
+    assert value_types.value_type_for_engine_type(declared) == ValueType.FILE
+    assert value_types.normalize_value(value, declared)["value_type"] == runtime
+    assert runtime in {ValueType.FILE, ValueType.IMAGE, ValueType.MOVIE}
+
+
+@pytest.mark.parametrize(
     ("value", "declared", "expected"),
     [
         (ImageUrlArtifact(STATIC_URL), "ImageUrlArtifact", ValueType.IMAGE),
-        (VideoUrlArtifact("http://x/plate.mov"), "VideoUrlArtifact", ValueType.VIDEO),
+        (VideoUrlArtifact("http://x/plate.mov"), "VideoUrlArtifact", ValueType.MOVIE),
         (ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2), "ImageArtifact", ValueType.IMAGE),
         ("/mnt/show/plate.exr", "str", ValueType.IMAGE),
-        ("/mnt/show/plate.mov", "str", ValueType.VIDEO),
+        ("/mnt/show/plate.mov", "str", ValueType.MOVIE),
         ("/mnt/show/notes.txt", "str", ValueType.FILE),
         ("a hazy afternoon", "str", ValueType.TEXT),
         ("3/4 cup", "str", ValueType.TEXT),
         ("aspect 16/9", "str", ValueType.TEXT),
         (BlobArtifact(value=b"\x00\x01"), "BlobArtifact", ValueType.FILE),
         (None, "ImageUrlArtifact", ValueType.NULL),
-        (True, "bool", ValueType.BOOLEAN),
+        (True, "bool", ValueType.BOOL),
         (23.976, "float", ValueType.NUMBER),
         (7, "int", ValueType.NUMBER),
     ],
@@ -91,7 +154,7 @@ def test_every_descriptor_reports_a_member_of_the_closed_set() -> None:
 
 def test_bool_is_not_reported_as_a_number() -> None:
     """bool is a subclass of int in Python, so order of checks matters."""
-    assert value_types.normalize_value(True)["value_type"] == ValueType.BOOLEAN
+    assert value_types.normalize_value(True)["value_type"] == ValueType.BOOL
     assert value_types.normalize_value(1)["value_type"] == ValueType.NUMBER
 
 
@@ -179,7 +242,7 @@ def test_a_slash_alone_does_not_make_prose_a_file() -> None:
         # A relative path is the ordinary form in a Nuke script, so an extension alongside a
         # separator is enough to make it a locator.
         ("shots/plate.exr", "str", ValueType.IMAGE, True),
-        ("renders/out.mov", "str", ValueType.VIDEO, True),
+        ("renders/out.mov", "str", ValueType.MOVIE, True),
         ("notes/readme.txt", "str", ValueType.FILE, True),
         # Prose that merely contains a slash: no locator shape, so the declared type wins
         # and no source is manufactured.
@@ -201,7 +264,7 @@ def test_locator_fallback_matrix(value: str, declared: str, expected_type: str, 
         assert descriptor["sources"] == []
 
 
-SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.NUMBER, ValueType.BOOLEAN, ValueType.NULL}
+SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.NUMBER, ValueType.BOOL, ValueType.NULL}
 
 
 @pytest.mark.parametrize(
@@ -228,9 +291,9 @@ SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.NUMBER, ValueType.BOOLEAN, V
     ],
 )
 def test_a_media_or_file_type_never_arrives_without_a_source(value: Any, declared: str | None) -> None:
-    """GTImage, GTVideo and GTFile promise a host somewhere to get bytes, so they must carry a source.
+    """GTImage, GTMovie and GTFile promise a host somewhere to get bytes, so they must carry a source.
 
-    Both docs publish the inverse rule too: only GTText, GTNumber, GTBoolean and GTNull arrive
+    Both docs publish the inverse rule too: only GTText, GTNumber, GTBool and GTNull arrive
     sourceless. A declared media type describes what a port is for, not what a value turned out
     to be, so prose on an image port must not be announced as an image a host can open.
     """

@@ -71,6 +71,29 @@ def test_value_type_set_is_closed_and_consistent() -> None:
     assert len(protocol.VALUE_TYPES) == len(declared), "VALUE_TYPES contains duplicates"
 
 
+def test_value_type_wire_strings_are_exactly_these() -> None:
+    """The literal strings, not the attribute names, are what a compiled plugin switches on.
+
+    Every other test here refers to these symbolically, so renaming a wire string while
+    keeping its attribute would pass all of them and silently break every shipped plugin.
+    Spelled out literally so that rename cannot happen quietly.
+    """
+    assert protocol.ValueType.IMAGE == "GTImage"
+    assert protocol.ValueType.MOVIE == "GTMovie"
+    assert protocol.ValueType.FILE == "GTFile"
+    assert protocol.ValueType.TEXT == "GTText"
+    assert protocol.ValueType.NUMBER == "GTNumber"
+    assert protocol.ValueType.BOOL == "GTBool"
+    assert protocol.ValueType.NULL == "GTNull"
+
+
+def test_source_kind_wire_strings_are_exactly_these() -> None:
+    assert protocol.SourceKind.URL == "url"
+    assert protocol.SourceKind.PATH == "path"
+    assert protocol.SourceKind.INLINE == "inline"
+    assert protocol.SourceKind.MACRO == "macro"
+
+
 def test_source_kind_set_is_closed_and_consistent() -> None:
     declared = {value for name, value in vars(protocol.SourceKind).items() if not name.startswith("_")}
     assert set(protocol.SOURCE_KINDS) == declared
