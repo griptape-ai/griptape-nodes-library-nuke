@@ -100,9 +100,11 @@ def _has_lockfile(companion: str) -> bool:
 # interpreter imports the wrapper's copy of a dependency instead of the version the
 # engine pinned.  Pure-Python packages import fine across minor versions, so this
 # shows up as a wrong-version ImportError rather than a missing module.  Mirrors the
-# desktop app's list in griptape-nodes-desktop/src/common/config/env.ts -- keep the
-# two in sync.  UV_PYTHON/UV_SYSTEM_PYTHON are stripped as well because an
-# inherited value fights the bundle's pinned requires-python.
+# desktop app's list in griptape-nodes-desktop/src/common/config/env.ts, which solves
+# the same problem for the bundled engine -- add here when that list grows (a unit test
+# only enforces the floor, it cannot see that repo change).  UV_PYTHON/UV_SYSTEM_PYTHON
+# are stripped as well because an inherited value fights the bundle's pinned
+# requires-python.
 _LEAKED_PYTHON_VARS = (
     "PYTHONPATH",
     "PYTHONHOME",

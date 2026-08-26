@@ -229,8 +229,14 @@ class TestChildEnvPythonIsolation:
         _build_child_env(self._LOCAL, base)
         assert base == original
 
-    def test_strip_list_matches_the_desktop_app(self) -> None:
-        """Kept in sync with griptape-nodes-desktop/src/common/config/env.ts."""
+    def test_strip_list_covers_at_least_the_desktop_apps_vars(self) -> None:
+        """A floor on the strip list, not a sync check.
+
+        desktop_vars is transcribed from griptape-nodes-desktop/src/common/config/env.ts,
+        so this catches us *dropping* one of those vars. It cannot see the desktop app
+        adding a var -- that direction needs a shared constant, which isn't possible
+        across a Python library and an Electron app.
+        """
         desktop_vars = {"PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE", "VIRTUAL_ENV"}
         assert desktop_vars <= set(_LEAKED_PYTHON_VARS)
 

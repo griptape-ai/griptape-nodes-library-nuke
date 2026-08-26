@@ -27,6 +27,14 @@ _STRIPPED_QT_VARS = ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH")
 # different ABI -- ahead of Nuke's own, which crashes it rather than failing to
 # import. Same leak in the opposite direction as _LEAKED_PYTHON_VARS in
 # publish_gizmo/run_button.py.
+#
+# Deliberately narrower than that list, and duplicated rather than shared:
+# run_button.py is exec'd standalone inside Nuke and can only import its own
+# companion-bundle siblings, so it cannot read this constant. The differences are
+# intentional -- UV_PYTHON/UV_SYSTEM_PYTHON are meaningless here (no uv involved),
+# and PYTHONNOUSERSITE is omitted because user site-packages are version-keyed, so
+# a 3.12 user tree won't load under Nuke's 3.10/3.11 anyway. Add to both lists when
+# the var would hijack either interpreter.
 _STRIPPED_PYTHON_VARS = ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE", "VIRTUAL_ENV")
 
 
