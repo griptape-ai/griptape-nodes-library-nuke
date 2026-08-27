@@ -89,8 +89,8 @@ class TestCustomizeProjectYmlOutput:
         macro_node = _get_keyword_value(call, "macro")
         assert isinstance(macro_node, ast.Constant)
         assert isinstance(macro_node.value, str)
-        assert "_v{_index?:04}" in macro_node.value, (
-            f"Expected versioned macro containing '_v{{_index?:04}}', got: {macro_node.value!r}"
+        assert "{####?:^_v}" in macro_node.value, (
+            f"Expected versioned macro containing '{{####?:^_v}}', got: {macro_node.value!r}"
         )
 
     def test_save_node_output_collision_policy_is_create_new(self) -> None:

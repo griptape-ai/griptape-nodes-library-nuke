@@ -329,7 +329,7 @@ class NukeGizmoPublisher:
           ``{OUTPUTS_DIR_ENV_VAR}``: the runner always exports that variable.
         * ``save_node_output`` uses a versioned naming convention so each gizmo
           run produces a new numbered file Nuke can detect and load:
-          ``{outputs}/{sub_dirs?:/}{file_name_base}_v{_index?:04}.{file_extension}``
+          ``{outputs}/{sub_dirs?:/}{file_name_base}{####?:^_v}.{file_extension}``
           ``{sub_dirs?:/}`` passes through any relative subdirectory; when absent
           the whole token (including its separator) is dropped.
           ``CREATE_NEW`` collision policy auto-increments the index on each run.
@@ -374,7 +374,7 @@ class NukeGizmoPublisher:
             # so the result is "{outputs}/comp.exr" (single slash, no "//").
             # sub_dirs carries no trailing slash, so "{sub_dirs?}" alone would yield
             # "renderscomp.exr".
-            macro="{outputs}/{sub_dirs?:/}{file_name_base}_v{_index?:04}.{file_extension}",
+            macro="{outputs}/{sub_dirs?:/}{file_name_base}{####?:^_v}.{file_extension}",
             policy=SituationPolicy(
                 on_collision=SituationFilePolicy.CREATE_NEW,
                 create_dirs=True,
