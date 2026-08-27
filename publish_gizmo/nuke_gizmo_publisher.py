@@ -40,6 +40,7 @@ from griptape_nodes.retained_mode.publishing import WorkflowPackager
 from publish_gizmo.constants import (
     BUNDLED_SCRIPTS,
     GRIPTAPE_DIR_NAME,
+    GRIPTAPE_RUN_DIR_NAME,
     INIT_MARKER,
     PRESERVED_ON_REPUBLISH,
     versioned_gizmo_filename,
@@ -57,6 +58,23 @@ logger = logging.getLogger(__name__)
 # Env var used to redirect `{outputs}` path macro, configured in project.yml. The
 # runner calculates and exports this before executing the workflow.
 OUTPUTS_DIR_ENV_VAR = "GTN_NUKE_GIZMO_OUTPUTS_DIR"
+
+# Env var every other writable directory in project.yml is anchored on. The runner
+# exports it as the artist's .nk script directory, so one variable moves them all off
+# the installed gizmo.
+SCRIPT_DIR_ENV_VAR = "GTN_NUKE_GIZMO_SCRIPT_DIR"
+
+# Template directory name -> path relative to SCRIPT_DIR_ENV_VAR. All these intermediate
+# writeable directories are gathered under one hidden `.griptape` parent instead of
+# scattered beside the .nk script.
+SCRIPT_ANCHORED_DIRECTORIES = {
+    "backups": f"{GRIPTAPE_RUN_DIR_NAME}/backups",
+    "workflow_run_failures": f"{GRIPTAPE_RUN_DIR_NAME}/workflow_run_failures",
+    "temp": f"{GRIPTAPE_RUN_DIR_NAME}/temp",
+    "griptape-nodes-previews": f"{GRIPTAPE_RUN_DIR_NAME}/previews",
+    "griptape-nodes-metadata": f"{GRIPTAPE_RUN_DIR_NAME}/metadata",
+    "griptape-nodes-thumbnails": f"{GRIPTAPE_RUN_DIR_NAME}/thumbnails",
+}
 
 
 class NukeGizmoPublisher:
@@ -327,12 +345,30 @@ class NukeGizmoPublisher:
 
         * ``outputs`` directory's ``path_macro`` is the plain, single-token
           ``{OUTPUTS_DIR_ENV_VAR}``: the runner always exports that variable.
+        * ``inputs`` is re-anchored on ``{workspace_dir}``, the bundle root, so that a
+           bundled static file is read back from where the packager put it; see the
+           comment below.
+        * Every directory in ``SCRIPT_ANCHORED_DIRECTORIES`` is re-anchored on
+          ``{SCRIPT_DIR_ENV_VAR}`` and gathered under the hidden ``.griptape`` parent
+          named there, because each of those defaults resolves inside the installed
+          gizmo -- possibly a shared or read-only drive.
         * ``save_node_output`` uses a versioned naming convention so each gizmo
           run produces a new numbered file Nuke can detect and load:
           ``{outputs}/{sub_dirs?:/}{file_name_base}{####?:^_v}.{file_extension}``
           ``{sub_dirs?:/}`` passes through any relative subdirectory; when absent
           the whole token (including its separator) is dropped.
           ``CREATE_NEW`` collision policy auto-increments the index on each run.
+        * Six further situations are overridden. Five of them -- ``save_file``,
+          ``save_workflow``, ``create_versioned_workflow``, ``copy_external_file`` and
+          ``download_url`` -- are moved beside the .nk script, under the same hidden
+          ``.griptape`` parent, keeping their descriptions and policies: their defaults are
+          either relative (so the engine anchors them on the bundle) or explicitly
+          bundle-anchored, and the installed gizmo may be shared or read-only.
+        * ``save_static_file`` is the sixth, and is the one situation this method does not
+          move: its macro carries no anchor at all, because the runner redirects static
+          files through the ``static_files_directory`` config value instead -- see
+          ``_export_engine_config_directories`` in nuke_workflow_runner.py, and the comment
+          above the override itself.
 
         Fatal on failure. project.yml governs where a run's outputs land, so a bundle
         carrying the engine's un-customized template writes them inside the companion
@@ -361,22 +397,115 @@ class NukeGizmoPublisher:
             path_macro=f"{{{OUTPUTS_DIR_ENV_VAR}}}",
         )
 
+        # `inputs` must resolve to `<bundle>/inputs`, where
+        # WorkflowPackager.copy_static_files put the bundled assets.
+        template.directories["inputs"] = DirectoryDefinition(
+            name="inputs",
+            path_macro="{workspace_dir}/inputs",
+        )
+
+        for name, relative_path in SCRIPT_ANCHORED_DIRECTORIES.items():
+            template.directories[name] = DirectoryDefinition(
+                name=name,
+                path_macro=f"{{{SCRIPT_DIR_ENV_VAR}}}/{relative_path}",
+            )
+
         template.situations["save_node_output"] = SituationTemplate(
             name="save_node_output",
             description="Node generates and saves output (Nuke gizmo)",
             # No workflow-name subdirectory: files land directly under {outputs}.
             # When Output Directory is set at runtime, {outputs} is redirected there,
             # so files go directly into the artist's chosen directory.
-            # {sub_dirs?:/} passes through any relative subdirectory the artist typed
-            # (e.g. "renders/comp.exr" lands under griptape_outputs/renders/comp.exr).
-            # Note: ":/" is a separator FORMAT (appended to the value), not a default —
-            # when sub_dirs is absent the whole token including its separator is dropped,
-            # so the result is "{outputs}/comp.exr" (single slash, no "//").
-            # sub_dirs carries no trailing slash, so "{sub_dirs?}" alone would yield
-            # "renderscomp.exr".
             macro="{outputs}/{sub_dirs?:/}{file_name_base}{####?:^_v}.{file_extension}",
             policy=SituationPolicy(
                 on_collision=SituationFilePolicy.CREATE_NEW,
+                create_dirs=True,
+            ),
+            fallback="save_file",
+        )
+
+        template.situations["save_file"] = SituationTemplate(
+            name="save_file",
+            description="Generic file save operation",
+            macro=(
+                f"{{{SCRIPT_DIR_ENV_VAR}}}/{GRIPTAPE_RUN_DIR_NAME}/{{file_name_base}}{{###?:^_}}.{{file_extension}}"
+            ),
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.CREATE_NEW,
+                create_dirs=True,
+            ),
+            fallback=None,
+        )
+
+        template.situations["save_workflow"] = SituationTemplate(
+            name="save_workflow",
+            description="Save a workflow Python file, preserving any sub-directory hierarchy",
+            macro=(
+                f"{{{SCRIPT_DIR_ENV_VAR}}}/{GRIPTAPE_RUN_DIR_NAME}/{{sub_dirs?:/}}{{file_name_base}}.{{file_extension}}"
+            ),
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.OVERWRITE,
+                create_dirs=True,
+            ),
+            fallback="save_file",
+        )
+
+        template.situations["create_versioned_workflow"] = SituationTemplate(
+            name="create_versioned_workflow",
+            description="Save a new version of a workflow with a padded index suffix",
+            macro=(
+                f"{{{SCRIPT_DIR_ENV_VAR}}}/{GRIPTAPE_RUN_DIR_NAME}/"
+                "{sub_dirs?:/}{file_name_base}{###?:^_v}.{file_extension}"
+            ),
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.CREATE_NEW,
+                create_dirs=True,
+            ),
+            fallback="save_file",
+        )
+
+        # A run's own inputs are written beside the .nk script even though the `inputs`
+        # DIRECTORY stays inside the bundle: that directory holds the read-only assets the
+        # packager shipped, which is not somewhere a run may add to.
+        template.situations["copy_external_file"] = SituationTemplate(
+            name="copy_external_file",
+            description="User copies external file to project",
+            macro=(
+                f"{{{SCRIPT_DIR_ENV_VAR}}}/{GRIPTAPE_RUN_DIR_NAME}/inputs/{{file_extension_directory?:/}}"
+                "{file_name_base}{###?:^_}.{file_extension}"
+            ),
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.CREATE_NEW,
+                create_dirs=True,
+            ),
+            fallback="save_file",
+        )
+
+        template.situations["download_url"] = SituationTemplate(
+            name="download_url",
+            description="Download file from URL",
+            macro=(
+                f"{{{SCRIPT_DIR_ENV_VAR}}}/{GRIPTAPE_RUN_DIR_NAME}/inputs/"
+                "{file_extension_directory?:/}{sanitized_url}"
+            ),
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.OVERWRITE,
+                create_dirs=True,
+            ),
+            fallback="save_file",
+        )
+        # No script-dir prefix, because {static_files_dir} is not a directory macro, it
+        # is the `static_files_directory` config value, which the runner sets to an
+        # absolute path beside the .nk.
+        template.situations["save_static_file"] = SituationTemplate(
+            name="save_static_file",
+            description=(
+                "Save static file to workflow-relative staticfiles directory. "
+                "Required for projects using StaticFilesManager.save_static_file."
+            ),
+            macro="{static_files_dir}/{file_name_base}.{file_extension}",
+            policy=SituationPolicy(
+                on_collision=SituationFilePolicy.OVERWRITE,
                 create_dirs=True,
             ),
             fallback="save_file",

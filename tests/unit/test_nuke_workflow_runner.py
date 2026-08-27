@@ -139,6 +139,18 @@ class TestMainOutputSerialization:
         return mock
 
     @pytest.fixture
+    def export_script_dir(self, monkeypatch: pytest.MonkeyPatch) -> Mock:
+        mock = Mock(spec=nuke_workflow_runner._export_script_dir, return_value="/projects/shot_010/comp")
+        monkeypatch.setattr(nuke_workflow_runner, "_export_script_dir", mock)
+        return mock
+
+    @pytest.fixture
+    def export_engine_config_directories(self, monkeypatch: pytest.MonkeyPatch) -> Mock:
+        mock = Mock(spec=nuke_workflow_runner._export_engine_config_directories, return_value=None)
+        monkeypatch.setattr(nuke_workflow_runner, "_export_engine_config_directories", mock)
+        return mock
+
+    @pytest.fixture
     def register_bundled_libraries(self, monkeypatch: pytest.MonkeyPatch) -> Mock:
         mock = Mock(spec=register_libraries_script.register_bundled_libraries)
         monkeypatch.setattr(register_libraries_script, "register_bundled_libraries", mock)
@@ -171,6 +183,8 @@ class TestMainOutputSerialization:
         bootstrap_environment: Mock,
         activate_bundle_project: Mock,
         export_outputs_dir: Mock,
+        export_script_dir: Mock,
+        export_engine_config_directories: Mock,
         register_bundled_libraries: Mock,
         subprocess_run: Mock,
         load_workflow_module: Mock,
@@ -212,6 +226,8 @@ class TestMainOutputSerialization:
         bootstrap_environment: Mock,
         activate_bundle_project: Mock,
         export_outputs_dir: Mock,
+        export_script_dir: Mock,
+        export_engine_config_directories: Mock,
         register_bundled_libraries: Mock,
         subprocess_run: Mock,
         load_workflow_module: Mock,
@@ -239,6 +255,65 @@ class TestMainOutputSerialization:
         export_outputs_dir.assert_called_once_with(None, None, bundle_dir)
         assert [name for name, _args, _kwargs in call_order.mock_calls] == ["activate", "export"]
         emit_payload.assert_called_once_with({"image": "/renders/gen.png"})
+
+    def test_the_script_dir_anchor_is_exported_before_the_bundles_project_is_activated(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        emit_payload: Mock,
+        basic_config: Mock,
+        bootstrap_environment: Mock,
+        activate_bundle_project: Mock,
+        export_outputs_dir: Mock,
+        export_script_dir: Mock,
+        export_engine_config_directories: Mock,
+        register_bundled_libraries: Mock,
+        subprocess_run: Mock,
+        load_workflow_module: Mock,
+        serialize_output: Mock,
+    ) -> None:
+        """Activating the project is the first thing that can resolve a directory macro, so the anchor precedes it.
+
+        Every writable directory in the bundled project.yml is defined in terms of this one
+        variable. Exported late, a directory resolved in between carries an unresolved
+        ``{GTN_NUKE_GIZMO_SCRIPT_DIR}`` in its path. The config-backed directories go out at the
+        same point for a stricter reason: activation is also the first engine call, so their
+        values must already be in the environment when the engine reads its config.
+        """
+        workflow_file = tmp_path / "workflow.py"
+        workflow_file.write_text("", encoding="utf-8")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "run_workflow.py",
+                "--workflow-file",
+                str(workflow_file),
+                "--json-input",
+                "{}",
+                "--nk-script-dir",
+                "/projects/shot_010/comp",
+            ],
+        )
+        call_order = Mock()
+        call_order.attach_mock(export_script_dir, "export_script_dir")
+        call_order.attach_mock(export_engine_config_directories, "export_engine_config_directories")
+        call_order.attach_mock(activate_bundle_project, "activate")
+        call_order.attach_mock(export_outputs_dir, "export_outputs_dir")
+
+        nuke_workflow_runner.main()
+
+        bundle_dir = Path(nuke_workflow_runner.__file__).parent
+        export_script_dir.assert_called_once_with("/projects/shot_010/comp", bundle_dir)
+        # The anchor the script-dir export computed, not one worked out a second time: the static
+        # files directory has to land under the same hidden parent as the project.yml directories.
+        export_engine_config_directories.assert_called_once_with(export_script_dir.return_value)
+        assert [name for name, _args, _kwargs in call_order.mock_calls] == [
+            "export_script_dir",
+            "export_engine_config_directories",
+            "activate",
+            "export_outputs_dir",
+        ]
 
 
 class TestExportOutputsDir:
@@ -365,6 +440,128 @@ class TestExportOutputsDir:
         # The provisional seed stays: it is a real resolvable path, written before the knob is read
         # so that a "{outputs}" inside the knob text has something to resolve against.
         assert fake_os.environ[nuke_workflow_runner.OUTPUTS_DIR_ENV_VAR] == f"{nk_dir}/griptape_outputs"
+
+
+class TestExportScriptDir:
+    """Tests for nuke_workflow_runner._export_script_dir's SCRIPT_DIR_ENV_VAR export."""
+
+    @pytest.fixture(autouse=True)
+    def fake_os(self, monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
+        """Swap nuke_workflow_runner's os for a fake so env writes are inspectable and don't leak."""
+        fake = types.SimpleNamespace(environ={})
+        monkeypatch.setattr(nuke_workflow_runner, "os", fake)
+        return fake
+
+    def test_the_nk_script_dir_becomes_the_anchor(self, fake_os: types.SimpleNamespace, tmp_path: Path) -> None:
+        """The bundle's writable directories hang off the artist's .nk script, not the installed gizmo."""
+        nk_dir = tmp_path / "nk_shot"
+        bundle_dir = tmp_path / "bundle"
+
+        nuke_workflow_runner._export_script_dir(str(nk_dir), bundle_dir)
+
+        assert fake_os.environ[nuke_workflow_runner.SCRIPT_DIR_ENV_VAR] == str(nk_dir)
+
+    def test_falls_back_to_the_bundle_root_when_the_nk_script_is_unsaved(
+        self, fake_os: types.SimpleNamespace, tmp_path: Path
+    ) -> None:
+        """An unsaved .nk has no directory to sit beside, so the anchor falls back as the outputs default does."""
+        bundle_dir = tmp_path / "bundle"
+
+        nuke_workflow_runner._export_script_dir(None, bundle_dir)
+
+        assert fake_os.environ[nuke_workflow_runner.SCRIPT_DIR_ENV_VAR] == str(bundle_dir)
+
+    def test_backslashes_are_normalized_to_forward_slashes(self, fake_os: types.SimpleNamespace) -> None:
+        """Nuke's TCL layer treats a backslash as an escape, so a Windows path is mangled unless normalized."""
+        nuke_workflow_runner._export_script_dir("C:\\projects\\shot_010\\comp", Path("/unused/bundle"))
+
+        assert fake_os.environ[nuke_workflow_runner.SCRIPT_DIR_ENV_VAR] == "C:/projects/shot_010/comp"
+
+    def test_a_trailing_separator_does_not_survive_into_the_anchor(
+        self, fake_os: types.SimpleNamespace, tmp_path: Path
+    ) -> None:
+        """The bundle joins '/<name>' onto this anchor, so a trailing separator would yield '<dir>//temp'."""
+        nk_dir = tmp_path / "nk_shot"
+
+        nuke_workflow_runner._export_script_dir(f"{nk_dir}/", tmp_path / "bundle")
+
+        assert fake_os.environ[nuke_workflow_runner.SCRIPT_DIR_ENV_VAR] == str(nk_dir)
+
+    def test_a_parent_segment_does_not_survive_into_the_anchor(
+        self, fake_os: types.SimpleNamespace, tmp_path: Path
+    ) -> None:
+        """The sibling outputs anchor is normalized off the same argument, so an un-collapsed '..' diverges."""
+        nk_dir = tmp_path / "nk_shot"
+
+        nuke_workflow_runner._export_script_dir(f"{nk_dir}/renders/..", tmp_path / "bundle")
+
+        assert fake_os.environ[nuke_workflow_runner.SCRIPT_DIR_ENV_VAR] == str(nk_dir)
+
+    def test_the_anchor_is_returned_for_the_config_directories_to_share(
+        self, fake_os: types.SimpleNamespace, tmp_path: Path
+    ) -> None:
+        """The config-backed directories hang off the same anchor, so it is computed here once and handed on."""
+        nk_dir = tmp_path / "nk_shot"
+
+        anchor = nuke_workflow_runner._export_script_dir(str(nk_dir), tmp_path / "bundle")
+
+        assert anchor == fake_os.environ[nuke_workflow_runner.SCRIPT_DIR_ENV_VAR]
+
+
+class TestExportEngineConfigDirectories:
+    """Tests for the two writable directories the engine reads from config, not from project.yml."""
+
+    @pytest.fixture(autouse=True)
+    def fake_os(self, monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
+        """Swap nuke_workflow_runner's os for a fake so env writes are inspectable and don't leak."""
+        fake = types.SimpleNamespace(environ={})
+        monkeypatch.setattr(nuke_workflow_runner, "os", fake)
+        return fake
+
+    def test_static_files_land_beside_the_nk_script(self, fake_os: types.SimpleNamespace, tmp_path: Path) -> None:
+        """No situation override can move these: StaticFilesManager rebuilds the path from this config value."""
+        nk_dir = tmp_path / "nk_shot"
+
+        nuke_workflow_runner._export_engine_config_directories(str(nk_dir))
+
+        assert fake_os.environ["GTN_CONFIG_STATIC_FILES_DIRECTORY"] == f"{nk_dir}/.griptape/staticfiles"
+
+    def test_synced_workflows_land_in_a_per_machine_scratch_directory(
+        self, fake_os: types.SimpleNamespace, tmp_path: Path
+    ) -> None:
+        """Cloud-sync scratch a gizmo run never uses, so neither the shot folder nor the bundle may hold it."""
+        fake_os.environ["XDG_DATA_HOME"] = str(tmp_path / "data_home")
+        nk_dir = tmp_path / "nk_shot"
+
+        nuke_workflow_runner._export_engine_config_directories(str(nk_dir))
+
+        synced = fake_os.environ["GTN_CONFIG_SYNCED_WORKFLOWS_DIRECTORY"]
+        assert synced == f"{tmp_path / 'data_home'}/griptape_nodes/gizmo_standalone/synced_workflows"
+        assert not Path(synced).is_relative_to(nk_dir), (
+            "SyncManager mkdir's this unguarded during Engine.__init__, so anchoring it on the .nk "
+            "script scaffolds an empty tree into the artist's shot folder on every run."
+        )
+
+    def test_synced_workflows_fall_back_to_the_home_data_directory(
+        self, fake_os: types.SimpleNamespace, tmp_path: Path
+    ) -> None:
+        """XDG_DATA_HOME is unset on a stock Windows or macOS host, where the per-machine guarantee still holds."""
+        nuke_workflow_runner._export_engine_config_directories(str(tmp_path / "nk_shot"))
+
+        expected = Path.home() / ".local" / "share" / "griptape_nodes" / "gizmo_standalone" / "synced_workflows"
+        assert fake_os.environ["GTN_CONFIG_SYNCED_WORKFLOWS_DIRECTORY"] == str(expected).replace("\\", "/")
+
+    def test_backslashes_are_normalized_to_forward_slashes(self, fake_os: types.SimpleNamespace) -> None:
+        """Nuke's TCL layer treats a backslash as an escape, so a Windows path is mangled unless normalized."""
+        fake_os.environ["XDG_DATA_HOME"] = "C:\\Users\\artist\\AppData\\Local"
+
+        nuke_workflow_runner._export_engine_config_directories("C:\\projects\\shot_010\\comp")
+
+        assert fake_os.environ["GTN_CONFIG_STATIC_FILES_DIRECTORY"] == "C:/projects/shot_010/comp/.griptape/staticfiles"
+        assert (
+            fake_os.environ["GTN_CONFIG_SYNCED_WORKFLOWS_DIRECTORY"]
+            == "C:/Users/artist/AppData/Local/griptape_nodes/gizmo_standalone/synced_workflows"
+        )
 
 
 class TestActivateBundleProject:

@@ -27,6 +27,24 @@ class TestOutputsDirEnvVarSync:
         assert nuke_workflow_runner.OUTPUTS_DIR_ENV_VAR == nuke_gizmo_publisher.OUTPUTS_DIR_ENV_VAR
 
 
+class TestScriptDirEnvVarSync:
+    """Guards SCRIPT_DIR_ENV_VAR against drift between nuke_workflow_runner.py and nuke_gizmo_publisher.py."""
+
+    def test_script_dir_env_var_matches_between_runner_and_publisher(self) -> None:
+        assert nuke_workflow_runner.SCRIPT_DIR_ENV_VAR == nuke_gizmo_publisher.SCRIPT_DIR_ENV_VAR
+
+
+class TestGriptapeRunDirNameSync:
+    """Guards GRIPTAPE_RUN_DIR_NAME against drift between nuke_workflow_runner.py and constants.py.
+
+    The runner executes standalone inside the published bundle, where publish_gizmo is not
+    importable, so it keeps its own copy of the hidden run directory's name.
+    """
+
+    def test_griptape_run_dir_name_matches_between_runner_and_constants(self) -> None:
+        assert nuke_workflow_runner.GRIPTAPE_RUN_DIR_NAME == constants.GRIPTAPE_RUN_DIR_NAME
+
+
 class TestOutputsDirNameSync:
     """Guards OUTPUTS_DIR_NAME against drift between output_paths.py and constants.py.
 

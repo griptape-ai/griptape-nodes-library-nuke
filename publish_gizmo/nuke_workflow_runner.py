@@ -47,6 +47,7 @@ from output_paths import (
     ProjectActivation,
     activate_project,
     default_output_dir,
+    normalize_for_nuke,
     resolve_output_dir,
     serialize_output,
 )
@@ -57,6 +58,14 @@ logger = logging.getLogger(__name__)
 # The bundled project.yml's ``outputs`` directory references only this variable, so the
 # runner must always export it.
 OUTPUTS_DIR_ENV_VAR = "GTN_NUKE_GIZMO_OUTPUTS_DIR"
+
+# Every other writable directory in the bundled project.yml is anchored on this
+# variable.
+SCRIPT_DIR_ENV_VAR = "GTN_NUKE_GIZMO_SCRIPT_DIR"
+
+# Hidden directory, beside the artist's .nk script, holding everything a run writes apart
+# from its outputs.
+GRIPTAPE_RUN_DIR_NAME = ".griptape"
 
 
 def _load_bundled_env(env_path: Path) -> None:
@@ -186,6 +195,10 @@ def main() -> None:
     script_dir = Path(__file__).parent
     bundle_project_file = script_dir / "project.yml"
 
+    # Export env var that will be interpolated into the project on activation.
+    anchor_dir = _export_script_dir(nk_script_dir, script_dir)
+    # Redirect the writable directories project.yml cannot reach, before the engine is built.
+    _export_engine_config_directories(anchor_dir)
     # Activate project in case the knob contains macros.
     _activate_bundle_project(bundle_project_file)
     # Resolve and export the knob value as an environment variable, referenced in
@@ -264,6 +277,35 @@ def main() -> None:
     emit_payload(result)
 
 
+def _export_script_dir(nk_script_dir: str | None, script_dir: Path) -> str:
+    """Export SCRIPT_DIR_ENV_VAR: the anchor the bundle's writable directories all hang off."""
+    # An unsaved .nk script has no directory to sit beside, so this falls back to the
+    # bundle root - see default_output_dir().
+    anchor = normalize_for_nuke(nk_script_dir or str(script_dir))
+    os.environ[SCRIPT_DIR_ENV_VAR] = anchor
+    return anchor
+
+
+def _export_engine_config_directories(anchor_dir: str) -> None:
+    """Redirect the two writable engine directories that come from config rather than project.yml.
+
+    GTN_CONFIG_ variables are the highest-precedence config layer and are read in memory only,
+    unlike a written config value, which would persist into the artist's own user config.
+    """
+    # StaticFilesManager clamps a resolved path back inside the workspace; the fallback arm it
+    # lands in rebuilds the path from this raw config value without re-validating, so an absolute
+    # value escapes the clamp. Left alone, static files are written inside the bundle.
+    os.environ["GTN_CONFIG_STATIC_FILES_DIRECTORY"] = normalize_for_nuke(
+        f"{anchor_dir}/{GRIPTAPE_RUN_DIR_NAME}/staticfiles"
+    )
+
+    # Scratch for cloud workflow sync, which a gizmo run never uses, so it has no business in the
+    # artist's shot folder. Nor may it sit under the bundle: SyncManager.__init__ mkdir's it
+    # unguarded during Engine.__init__, so a read-only install hard-crashes before the runner can
+    # report anything. A per-machine location is writable either way.
+    os.environ["GTN_CONFIG_SYNCED_WORKFLOWS_DIRECTORY"] = normalize_for_nuke(_per_machine_synced_workflows_dir())
+
+
 def _activate_bundle_project(bundle_project_file: Path) -> ProjectActivation:
     """Make the bundle's own project current, or abort: every later macro resolves through it."""
     activation = activate_project(bundle_project_file)
@@ -285,6 +327,17 @@ def _export_outputs_dir(output_dir_arg: str | None, nk_script_dir: str | None, s
 
     logger.info("Output directory: %s", resolution.path)
     os.environ[OUTPUTS_DIR_ENV_VAR] = resolution.path
+
+
+def _per_machine_synced_workflows_dir() -> str:
+    """Return a writable per-machine location for the engine's synced-workflows directory.
+
+    Derived the same way as run_button.py's venv root, and unconditionally: the
+    XDG_CONFIG_HOME fallback at the top of this module only computes a base when the parent
+    left that variable unset.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return f"{data_home}/griptape_nodes/gizmo_standalone/synced_workflows"
 
 
 def _activation_abort_message(bundle_project_file: Path, activation: ProjectActivation) -> str:

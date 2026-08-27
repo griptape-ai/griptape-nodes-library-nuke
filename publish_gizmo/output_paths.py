@@ -52,15 +52,19 @@ class OutputDirResolution(NamedTuple):
 
 
 def absolutize(value: str, base_dir: str) -> str:
-    """Anchor *value* to *base_dir* if relative and normalize to forward slashes.
-
-    Nuke/TCL treats backslashes as escape characters when saving .nk files, silently
-    mangling Windows paths.
-    """
+    """Anchor *value* to *base_dir* if relative and normalize to forward slashes."""
     expanded = os.path.expanduser(value)
     if not os.path.isabs(expanded):
         expanded = os.path.join(base_dir, expanded)
-    return os.path.normpath(expanded).replace("\\", "/")
+    return normalize_for_nuke(expanded)
+
+
+def normalize_for_nuke(path: str) -> str:
+    """Collapse redundant separators and '..' segments, then switch to the slashes Nuke needs."""
+    # normpath first: on Windows it turns forward slashes back into backslashes, so replacing
+    # first would undo itself. Nuke's TCL layer treats a backslash as an escape when the .nk is
+    # saved, silently mangling Windows paths.
+    return os.path.normpath(path).replace("\\", "/")
 
 
 def resolve_output_dir(raw: str | None, nk_script_dir: str | None, companion_dir: str) -> OutputDirResolution:
