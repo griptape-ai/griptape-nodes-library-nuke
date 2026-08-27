@@ -14,24 +14,38 @@ from pathlib import Path
 _RUN_BUTTON = Path(__file__).parent.parent.parent / "publish_gizmo" / "run_button.py"
 
 
-def _func_source(func_name: str) -> str:
-    """Return the source lines of a top-level function from run_button.py."""
+def _top_level_source(first_line_prefix: str) -> str:
+    """Return a top-level definition from run_button.py, including its continuation lines."""
     source = _RUN_BUTTON.read_text(encoding="utf-8")
     lines = source.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith(f"def {func_name}("))
+    start = next(i for i, line in enumerate(lines) if line.startswith(first_line_prefix))
     body_lines = [lines[start]]
     for line in lines[start + 1 :]:
+        # A top-level statement ends at the next line that starts in column 0,
+        # except for the closing bracket of a multi-line literal.
         if line and not line[0].isspace():
+            if line.startswith(")"):
+                body_lines.append(line)
             break
         body_lines.append(line)
     return "\n".join(body_lines)
 
 
+def _func_source(func_name: str) -> str:
+    """Return the source lines of a top-level function from run_button.py."""
+    return _top_level_source(f"def {func_name}(")
+
+
 # Load the pure helpers into one shared namespace so _gizmo_local_dir can call
 # _venv_root, without running run_button.py's module-scope Nuke/Qt code.
 _NS: dict = {"os": os, "re": re, "hashlib": hashlib}
+# _build_child_env reads these module-level constants, so they must be in scope too.
+for _const in ("_LEAKED_PYTHON_VARS = (", "_KEEP_PYTHONPATH_VAR = "):
+    exec(_top_level_source(_const), _NS)  # noqa: S102
 for _name in ("_venv_root", "_gizmo_local_dir", "_has_lockfile", "_build_child_env"):
     exec(_func_source(_name), _NS)  # noqa: S102
+
+_LEAKED_PYTHON_VARS = _NS["_LEAKED_PYTHON_VARS"]
 
 _venv_root = _NS["_venv_root"]
 _build_child_env = _NS["_build_child_env"]
@@ -138,12 +152,93 @@ class TestBuildChildEnv:
         assert "\\" not in env["XDG_CONFIG_HOME"]
         assert "\\" not in env["UV_PROJECT_ENVIRONMENT"]
 
-    def test_preserves_all_base_env_keys(self) -> None:
-        """All existing env keys must be present in the child env."""
+    def test_preserves_base_env_keys_outside_the_strip_list(self) -> None:
+        """Env keys that aren't interpreter-hijacking must survive untouched."""
         base = {"PATH": "/usr/bin", "HOME": "/home/user", "CUSTOM_VAR": "value"}
         env = _build_child_env(self._LOCAL, base)
         for key, value in base.items():
             assert env[key] == value
+
+
+class TestChildEnvPythonIsolation:
+    """Host Python vars must not shadow the gizmo venv's own site-packages."""
+
+    _LOCAL = "/home/user/.local/share/griptape_nodes/venvs/wf-abcd1234"
+    # A wrapper-supplied python3.11 tree, whose older copy of an engine dependency
+    # would otherwise be imported ahead of the 3.12 venv's pinned version.
+    _WRAPPER_PYTHONPATH = "/opt/wrapper_python_envs/shared/3.11.9/lib/python3.11/site-packages"
+
+    def test_strips_inherited_pythonpath(self) -> None:
+        env = _build_child_env(self._LOCAL, {"PYTHONPATH": self._WRAPPER_PYTHONPATH})
+        assert "PYTHONPATH" not in env
+
+    def test_strips_pythonhome_and_virtual_env(self) -> None:
+        base = {
+            "PYTHONHOME": "/opt/wrapper_python_envs/shared/3.11.9",
+            "PYTHONEXECUTABLE": "/usr/bin/python3.11",
+            "PYTHONSTARTUP": "/etc/pythonstart.py",
+            "PYTHONUSERBASE": "/home/user/.local",
+            "VIRTUAL_ENV": "/some/other/.venv",
+            "CONDA_PREFIX": "/opt/conda",
+        }
+        env = _build_child_env(self._LOCAL, base)
+        for key in base:
+            assert key not in env
+
+    def test_strips_uv_python_overrides(self) -> None:
+        """An inherited UV_PYTHON would fight the bundle's pinned requires-python."""
+        env = _build_child_env(self._LOCAL, {"UV_PYTHON": "3.11", "UV_SYSTEM_PYTHON": "1"})
+        assert "UV_PYTHON" not in env
+        assert "UV_SYSTEM_PYTHON" not in env
+
+    def test_sets_pythonnousersite(self) -> None:
+        """A host user site-packages dir shadows the venv and no env var points at it."""
+        env = _build_child_env(self._LOCAL, {})
+        assert env["PYTHONNOUSERSITE"] == "1"
+
+    def test_keeps_pythonpath_when_opt_out_set(self) -> None:
+        base = {"PYTHONPATH": self._WRAPPER_PYTHONPATH, "GTN_GIZMO_KEEP_PYTHONPATH": "1"}
+        env = _build_child_env(self._LOCAL, base)
+        assert env["PYTHONPATH"] == self._WRAPPER_PYTHONPATH
+
+    def test_opt_out_still_strips_the_other_vars(self) -> None:
+        """The escape hatch is scoped to PYTHONPATH; PYTHONHOME still breaks the venv."""
+        base = {"PYTHONHOME": "/opt/py311", "GTN_GIZMO_KEEP_PYTHONPATH": "1"}
+        env = _build_child_env(self._LOCAL, base)
+        assert "PYTHONHOME" not in env
+
+    def test_falsy_opt_out_still_strips_pythonpath(self) -> None:
+        base = {"PYTHONPATH": self._WRAPPER_PYTHONPATH, "GTN_GIZMO_KEEP_PYTHONPATH": "0"}
+        env = _build_child_env(self._LOCAL, base)
+        assert "PYTHONPATH" not in env
+
+    def test_leaves_ld_library_path_intact(self) -> None:
+        """A wrapper env supplies GPU/driver libs this way — stripping it breaks more than it fixes."""
+        base = {
+            "LD_LIBRARY_PATH": "/opt/nuke/lib:/usr/lib64",
+            "DYLD_LIBRARY_PATH": "/opt/lib",
+            "PATH": "/usr/bin",
+        }
+        env = _build_child_env(self._LOCAL, base)
+        for key, value in base.items():
+            assert env[key] == value
+
+    def test_does_not_mutate_base_env_when_stripping(self) -> None:
+        base = {"PYTHONPATH": self._WRAPPER_PYTHONPATH, "PYTHONHOME": "/opt/py311"}
+        original = dict(base)
+        _build_child_env(self._LOCAL, base)
+        assert base == original
+
+    def test_strip_list_covers_at_least_the_desktop_apps_vars(self) -> None:
+        """A floor on the strip list, not a sync check.
+
+        desktop_vars is transcribed from griptape-nodes-desktop/src/common/config/env.ts,
+        so this catches us *dropping* one of those vars. It cannot see the desktop app
+        adding a var -- that direction needs a shared constant, which isn't possible
+        across a Python library and an Electron app.
+        """
+        desktop_vars = {"PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE", "VIRTUAL_ENV"}
+        assert desktop_vars <= set(_LEAKED_PYTHON_VARS)
 
     def test_does_not_mutate_base_env(self) -> None:
         base = {"PATH": "/usr/bin"}

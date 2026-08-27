@@ -116,8 +116,21 @@ def _load_workflow_module(workflow_file: str):
     return module
 
 
+def _log_interpreter() -> None:
+    """Log which interpreter is running and whether a host PYTHONPATH leaked in.
+
+    run_button.py streams this to the gizmo's progress dialog, so an environment
+    leak (a wrapper's site-packages shadowing the venv) is visible at a glance
+    instead of surfacing as a bare ImportError from deep inside the engine.
+    """
+    logger.info("Interpreter: %s", sys.executable)
+    logger.info("Python version: %s", sys.version.split()[0])
+    logger.info("PYTHONPATH: %s", os.environ.get("PYTHONPATH", "") or "(empty)")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    _log_interpreter()
 
     parser = argparse.ArgumentParser(description="Run a Griptape Nodes workflow from a gizmo.")
     parser.add_argument("--workflow-file", required=True, help="Path to the workflow .py file")
@@ -182,7 +195,20 @@ def main() -> None:
 
         register_bundled_libraries()
     except Exception as e:
-        print(json.dumps({"error": f"Failed to register bundled libraries: {e}"}))
+        # This is the message an artist copies into a bug report, and the usual cause
+        # is a host env var pointing the interpreter at foreign packages -- so name the
+        # interpreter and any leaked PYTHONPATH here rather than only in the log stream.
+        print(
+            json.dumps(
+                {
+                    "error": (
+                        f"Failed to register bundled libraries: {e}"
+                        f" [interpreter={sys.executable} python={sys.version.split()[0]}"
+                        f" PYTHONPATH={os.environ.get('PYTHONPATH', '') or '(empty)'}]"
+                    )
+                }
+            )
+        )
         sys.exit(1)
 
     # Download HuggingFace models if a download script was bundled at publish time.

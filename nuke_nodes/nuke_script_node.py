@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import urllib.request
 import uuid
+from collections.abc import Mapping
 from typing import Any
 
 from griptape_nodes.common.macro_parser import ParsedMacro
@@ -35,7 +36,7 @@ from griptape_nodes.traits.file_system_picker import FileSystemPicker
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
-from execution.direct import DirectSubprocessProvider
+from execution.direct import _STRIPPED_PYTHON_VARS, _STRIPPED_QT_VARS, DirectSubprocessProvider
 from execution.installations import NukeInstallation, find_installation, merged_installations
 from nuke_plugin.installer import get_plugin_path
 from nuke_runner.manifest import JobManifest, KnobOverride, ManifestInput, ManifestOutput
@@ -145,6 +146,18 @@ for o in data.get("knob_overrides", []):
     except Exception as exc:
         print("Griptape open-in-nuke: " + o["node"] + "." + o["knob"] + ": " + str(exc), file=sys.stderr)
 """
+
+
+def _sanitize_nuke_launch_env(base_env: Mapping[str, str], env_overrides: Mapping[str, str]) -> dict[str, str]:
+    """Return base_env minus the vars that would shadow Nuke's own Qt and interpreter, plus overrides."""
+    # The GUI counterpart of what DirectSubprocessProvider.submit does for `nuke -t`:
+    # the engine runs in a 3.12 venv, Nuke runs its own 3.10/3.11, and a leaked
+    # PYTHONPATH puts mismatched-ABI extensions ahead of Nuke's -- which takes the whole
+    # app down rather than failing a single headless job.  Overrides are applied *after*
+    # the strip, matching direct.py, so an installation can still set these deliberately.
+    env = {k: v for k, v in base_env.items() if k not in (*_STRIPPED_QT_VARS, *_STRIPPED_PYTHON_VARS)}
+    env.update(env_overrides)
+    return env
 
 
 def _build_open_in_nuke_launch(
@@ -328,10 +341,7 @@ class NukeScriptNode(SuccessFailureNode):
             if installation is not None
             else int(GriptapeNodes.ConfigManager().get_config_value("nuke.annotator_nuke_version") or 16)
         )
-        env: dict[str, str] = {**os.environ, **self._build_env(installation)}
-        # Strip third-party Qt plugin paths (e.g. cv2) that shadow Nuke's bundled Qt.
-        for _qt_var in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
-            env.pop(_qt_var, None)
+        env: dict[str, str] = _sanitize_nuke_launch_env(os.environ, self._build_env(installation))
 
         try:
             plugin_path = get_plugin_path(nuke_major)

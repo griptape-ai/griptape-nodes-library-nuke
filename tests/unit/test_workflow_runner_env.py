@@ -19,17 +19,20 @@ _RUNNER = Path(__file__).parent.parent.parent / "publish_gizmo" / "nuke_workflow
 _API_KEY = "GT_CLOUD_API_KEY"
 
 
-def _load_bundled_env_fn():
+def _extract_fn(name: str, ns: dict):
     src = _RUNNER.read_text(encoding="utf-8")
     tree = ast.parse(src)
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_load_bundled_env":
+        if isinstance(node, ast.FunctionDef) and node.name == name:
             func_src = textwrap.dedent(ast.get_source_segment(src, node) or "")
-            ns: dict = {"os": os, "dotenv_values": dotenv_values, "Path": Path}
             exec(func_src, ns)  # noqa: S102
-            return ns["_load_bundled_env"]
-    msg = "_load_bundled_env not found in nuke_workflow_runner.py"
+            return ns[name]
+    msg = f"{name} not found in nuke_workflow_runner.py"
     raise AssertionError(msg)
+
+
+def _load_bundled_env_fn():
+    return _extract_fn("_load_bundled_env", {"os": os, "dotenv_values": dotenv_values, "Path": Path})
 
 
 @pytest.fixture
@@ -89,3 +92,34 @@ def test_blank_bundled_value_is_not_exported(load_bundled_env, env_file) -> None
 def test_quoted_values_are_parsed_not_taken_literally(load_bundled_env, env_file) -> None:
     load_bundled_env(env_file(f'{_API_KEY}="key with spaces"\n'))
     assert os.environ[_API_KEY] == "key with spaces"
+
+
+class TestInterpreterLogging:
+    """The runner announces its interpreter so an env leak is diagnosable from the dialog."""
+
+    @staticmethod
+    def _run(caplog) -> str:
+        import logging
+        import sys
+
+        ns: dict = {"os": os, "sys": sys, "logger": logging.getLogger("test_runner_interp")}
+        log_interpreter = _extract_fn("_log_interpreter", ns)
+        with caplog.at_level(logging.INFO, logger="test_runner_interp"):
+            log_interpreter()
+        return caplog.text
+
+    def test_logs_interpreter_path_and_version(self, caplog) -> None:
+        import sys
+
+        text = self._run(caplog)
+        assert sys.executable in text
+        assert sys.version.split()[0] in text
+
+    def test_logs_leaked_pythonpath(self, caplog, monkeypatch) -> None:
+        monkeypatch.setenv("PYTHONPATH", "/rez/python3.11/site-packages")
+        assert "/rez/python3.11/site-packages" in self._run(caplog)
+
+    def test_reports_empty_pythonpath_explicitly(self, caplog, monkeypatch) -> None:
+        """A blank line would be ambiguous — 'not set' must be distinguishable."""
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+        assert "(empty)" in self._run(caplog)

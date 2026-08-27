@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 
-from nuke_nodes.nuke_script_node import _build_open_in_nuke_launch
+from nuke_nodes.nuke_script_node import _build_open_in_nuke_launch, _sanitize_nuke_launch_env
 from nuke_runner.manifest import KnobOverride
 
 
@@ -82,3 +82,41 @@ def test_empty_overrides_produces_empty_array() -> None:
     with open(manifest_path, encoding="utf-8") as f:
         data = json.load(f)
     assert data["knob_overrides"] == []
+
+
+class TestSanitizeNukeLaunchEnv:
+    """The GUI launch env must not shadow Nuke's own Qt plugins or interpreter."""
+
+    def test_strips_engine_python_vars(self) -> None:
+        base = {
+            "PYTHONPATH": "/opt/venvs/engine/lib/python3.12/site-packages",
+            "PYTHONHOME": "/opt/py312",
+            "PYTHONEXECUTABLE": "/opt/venvs/engine/bin/python",
+            "VIRTUAL_ENV": "/opt/venvs/engine",
+        }
+        env = _sanitize_nuke_launch_env(base, {})
+        for key in base:
+            assert key not in env
+
+    def test_strips_qt_plugin_paths(self) -> None:
+        base = {"QT_PLUGIN_PATH": "/opt/venvs/engine/lib/cv2/plugins", "QT_QPA_PLATFORM_PLUGIN_PATH": "/opt/plugins"}
+        env = _sanitize_nuke_launch_env(base, {})
+        for key in base:
+            assert key not in env
+
+    def test_preserves_unrelated_vars(self) -> None:
+        base = {"PATH": "/usr/bin", "LD_LIBRARY_PATH": "/opt/nuke/lib", "foundry_LICENSE": "set-by-secrets-panel"}
+        env = _sanitize_nuke_launch_env(base, {})
+        for key, value in base.items():
+            assert env[key] == value
+
+    def test_overrides_win_over_the_strip(self) -> None:
+        """The ordering guarantee: an installation can deliberately reinstate a stripped var."""
+        env = _sanitize_nuke_launch_env({"PYTHONPATH": "/leaked"}, {"PYTHONPATH": "/deliberate/site-packages"})
+        assert env["PYTHONPATH"] == "/deliberate/site-packages"
+
+    def test_does_not_mutate_base_env(self) -> None:
+        base = {"PYTHONPATH": "/leaked", "PATH": "/usr/bin"}
+        original = dict(base)
+        _sanitize_nuke_launch_env(base, {"HOME": "/home/user"})
+        assert base == original

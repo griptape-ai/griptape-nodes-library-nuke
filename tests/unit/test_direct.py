@@ -60,6 +60,36 @@ def test_submit_writes_manifest_env_into_subprocess_env() -> None:
     assert env_kwarg["OCIO"] == "/ocio/config"
 
 
+def test_submit_strips_engine_python_vars_from_nuke_env(monkeypatch) -> None:
+    """The engine's 3.12 venv must not shadow Nuke's own bundled interpreter."""
+    monkeypatch.setenv("PYTHONPATH", "/engine/.venv/lib/python3.12/site-packages")
+    monkeypatch.setenv("PYTHONHOME", "/engine/.venv")
+    monkeypatch.setenv("PYTHONEXECUTABLE", "/engine/.venv/bin/python")
+    monkeypatch.setenv("VIRTUAL_ENV", "/engine/.venv")
+
+    provider = _make_provider()
+    with patch("execution.direct.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = _mock_process()
+        provider.submit(_make_manifest())
+
+    env_kwarg = mock_popen.call_args[1]["env"]
+    for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE", "VIRTUAL_ENV"):
+        assert key not in env_kwarg
+
+
+def test_submit_lets_manifest_env_reinstate_a_stripped_var(monkeypatch) -> None:
+    """Stripping happens before overrides, so a caller can still set these deliberately."""
+    monkeypatch.setenv("PYTHONPATH", "/engine/.venv/lib/python3.12/site-packages")
+
+    provider = _make_provider()
+    manifest = _make_manifest(env={"PYTHONPATH": "/studio/nuke/pythonpath"})
+    with patch("execution.direct.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = _mock_process()
+        provider.submit(manifest)
+
+    assert mock_popen.call_args[1]["env"]["PYTHONPATH"] == "/studio/nuke/pythonpath"
+
+
 def test_submit_returns_unique_handles_per_call() -> None:
     provider = _make_provider()
     with patch("execution.direct.subprocess.Popen", return_value=_mock_process()):
