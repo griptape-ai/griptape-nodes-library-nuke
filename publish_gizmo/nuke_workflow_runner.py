@@ -90,7 +90,7 @@ def _bootstrap_environment() -> None:
 
     # Workspace path must be the bundle root since the bundled workflow may contain relative paths.
     os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = str(script_dir)
-    os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
+    os.environ["GTN_CONFIG_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 
     # Supply the project file path if not already set.  The project.yml
     # always lives in the companion bundle regardless of the workspace.
