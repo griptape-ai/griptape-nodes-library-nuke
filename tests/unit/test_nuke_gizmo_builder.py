@@ -98,6 +98,65 @@ class TestValidDefaultsArePreserved:
         assert any('prompt "hello"' in line for line in lines)
 
 
+class TestCrossTypedDefaultsAreCoerced:
+    """A value carried over from the canvas may not match the param's declared type.
+
+    Emitting nothing leaves Nuke to initialize the knob to 0, which run_button then
+    sends back as a real input.
+    """
+
+    def test_int_param_with_string_default_emits_value(self) -> None:
+        gizmo = _generate_gizmo({"seed": {"type": "int", "default_value": "42"}})
+        assert any(line.strip() == "seed 42" for line in gizmo.splitlines())
+
+    def test_float_param_with_int_default_emits_value(self) -> None:
+        gizmo = _generate_gizmo({"scale": {"type": "float", "default_value": 5}})
+        assert any(line.strip() == "scale 5.0" for line in gizmo.splitlines())
+
+    def test_int_param_with_float_default_truncates(self) -> None:
+        gizmo = _generate_gizmo({"count": {"type": "int", "default_value": 2.7}})
+        assert any(line.strip() == "count 2" for line in gizmo.splitlines())
+
+    def test_bool_param_with_string_default_emits_value(self) -> None:
+        gizmo = _generate_gizmo({"enabled": {"type": "bool", "default_value": "true"}})
+        assert any(line.strip() == "enabled 1" for line in gizmo.splitlines())
+
+    def test_int_param_with_bool_default_omits_value(self) -> None:
+        # A checkbox value on an int knob is a type mismatch, not a 0/1 the user chose.
+        gizmo = _generate_gizmo({"count": {"type": "int", "default_value": True}})
+        assert [line for line in gizmo.splitlines() if line.strip().startswith("count ")] == []
+
+    def test_int_param_with_unparseable_default_omits_value(self) -> None:
+        gizmo = _generate_gizmo({"count": {"type": "int", "default_value": "abc"}})
+        assert [line for line in gizmo.splitlines() if line.strip().startswith("count ")] == []
+
+    def test_zero_is_emitted_not_treated_as_absent(self) -> None:
+        gizmo = _generate_gizmo({"seed": {"type": "int", "default_value": 0}})
+        assert any(line.strip() == "seed 0" for line in gizmo.splitlines())
+
+    def test_string_param_with_int_default_emits_text(self) -> None:
+        gizmo = _generate_gizmo({"label": {"type": "str", "default_value": 7}})
+        assert any('label "7"' in line for line in gizmo.splitlines())
+
+    def test_string_param_with_object_default_omits_value(self) -> None:
+        # An artifact would stringify to a Python repr, and the writer's TCL escaping
+        # needs a str at all.
+        gizmo = _generate_gizmo({"image": {"type": "str", "default_value": {"a": 1}}})
+        assert [line for line in gizmo.splitlines() if line.strip().startswith('image "')] == []
+
+    def test_dropdown_uses_selected_value_index(self) -> None:
+        gizmo = _generate_gizmo(
+            {
+                "mode": {
+                    "type": "str",
+                    "default_value": "fast",
+                    "ui_options": {"simple_dropdown": ["slow", "fast"]},
+                }
+            }
+        )
+        assert any(line.strip() == "mode 1" for line in gizmo.splitlines())
+
+
 class TestNoneDefaultOmitsValueLine:
     """None default_value must not emit a value line for any type."""
 
@@ -124,15 +183,15 @@ class TestMismatchedDefaultTypeIgnored:
         value_lines = [line for line in lines if line.strip().startswith("scale ")]
         assert value_lines == []
 
-    def test_string_default_for_bool_param_ignored(self) -> None:
-        gizmo = _generate_gizmo({"flag": {"type": "bool", "default_value": "yes"}})
+    def test_unrecognized_string_default_for_bool_param_ignored(self) -> None:
+        gizmo = _generate_gizmo({"flag": {"type": "bool", "default_value": "maybe"}})
         lines = gizmo.splitlines()
         value_lines = [line for line in lines if line.strip().startswith("flag ")]
         assert value_lines == []
 
 
-class TestSubclassDefaultsRejectedByStrictTypeCheck:
-    """type(x) is T rejects subclass matches that isinstance would accept."""
+class TestBoolDefaultsRejectedForNumericParams:
+    """A checkbox value on a numeric knob is a type mismatch, not a 0/1 the user chose."""
 
     def test_bool_default_rejected_for_int_param(self) -> None:
         gizmo = _generate_gizmo({"count": {"type": "int", "default_value": True}})
@@ -142,12 +201,6 @@ class TestSubclassDefaultsRejectedByStrictTypeCheck:
 
     def test_bool_default_rejected_for_float_param(self) -> None:
         gizmo = _generate_gizmo({"scale": {"type": "float", "default_value": False}})
-        lines = gizmo.splitlines()
-        value_lines = [line for line in lines if line.strip().startswith("scale ")]
-        assert value_lines == []
-
-    def test_int_default_rejected_for_float_param(self) -> None:
-        gizmo = _generate_gizmo({"scale": {"type": "float", "default_value": 3}})
         lines = gizmo.splitlines()
         value_lines = [line for line in lines if line.strip().startswith("scale ")]
         assert value_lines == []

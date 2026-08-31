@@ -72,3 +72,15 @@ class TestGetNukePublishOptions:
         assert "update_mode" in names
         gizmo_field = next(f for f in result.fields if f.name == "gizmo_install_path")
         assert gizmo_field.default_value == normalize_path_str(str(Path.home() / ".nuke"))
+
+    def test_saved_relative_custom_path_is_shown_absolute(self, _mock_find, monkeypatch) -> None:
+        """Anchored to the workspace, since that is the base the file picker used."""
+        monkeypatch.delenv("NUKE_PATH", raising=False)
+        with patch("publish_gizmo.nuke_publish_options.GriptapeNodes") as griptape_nodes:
+            griptape_nodes.ConfigManager.return_value.workspace_path = Path("/home/user/workspace")
+            result = get_nuke_publish_options(
+                _request({"gizmo_install_path": GIZMO_INSTALL_CUSTOM, "custom_gizmo_path": "gizmos/nuke"})
+            )
+
+        custom_field = next(f for f in result.fields if f.name == "custom_gizmo_path")
+        assert custom_field.default_value == "/home/user/workspace/gizmos/nuke"
