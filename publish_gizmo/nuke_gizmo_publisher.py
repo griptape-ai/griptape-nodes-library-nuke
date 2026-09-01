@@ -89,6 +89,10 @@ class NukeGizmoPublisher:
             if install_dir is None:
                 msg = "Gizmo install path is not set."
                 raise ValueError(msg)
+            # Checked before anything writes: the staging mkdir and every WriteFileRequest
+            # create parents, so by the time the publish finishes the directory exists
+            # either way and there is no telling afterwards whether we made it.
+            install_dir_created = not install_dir.exists()
 
             workflow_file_path = Path(WorkflowRegistry.get_complete_file_path(workflow.file_path))
             workflow_stem = workflow_file_path.stem
@@ -138,6 +142,11 @@ class NukeGizmoPublisher:
 
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
             details = f"Gizmo v{version} installed to: {gizmo_path}"
+            if install_dir_created:
+                # A typo'd or accidentally workspace-relative pick now silently becomes a
+                # real directory; saying so is the only thing standing between that and a
+                # gizmo the artist cannot find.
+                details += f"\n\nNote: the install directory did not exist and was created: {install_dir}"
             if lock_error:
                 # Surface the skipped lock in the publish result, not just the log:
                 # without it the artist running the gizmo is the first to find out.
@@ -406,14 +415,16 @@ class NukeGizmoPublisher:
         install_dir = self._resolve_gizmo_install_path()
         if install_dir is None:
             errors.append(ValueError("Gizmo install path is not configured. Please set it in the publish dialog."))
-        elif not install_dir.is_dir():
-            # Reported with the resolved path so a relative pick that got anchored to the
-            # workspace is visible, and caught here so the publish stops before it writes
-            # a partial bundle to the wrong place.
+        elif install_dir.exists() and not install_dir.is_dir():
+            # A directory that does not exist yet is fine -- the publish creates it, which
+            # is how first-time config of a machine with no ~/.nuke works. Only something
+            # already occupying the path is fatal, and it is caught here so the publish
+            # stops before it writes a partial bundle. Reported with the resolved path so
+            # a relative pick that got anchored to the workspace is visible.
             errors.append(
                 ValueError(
-                    f"Gizmo install path '{install_dir}' is not an existing directory. "
-                    "Please choose an existing directory in the publish dialog."
+                    f"Gizmo install path '{install_dir}' exists but is not a directory. "
+                    "Please choose a directory in the publish dialog."
                 )
             )
         return errors
@@ -421,13 +432,13 @@ class NukeGizmoPublisher:
     def _resolve_gizmo_install_path(self) -> Path | None:
         """Return the install directory as an absolute path, anchoring a relative one to the workspace.
 
-        A relative path cannot survive this publish: the flow resolves paths against
-        three different bases. The event layer anchors a relative path to the workspace
-        on write (WriteFileRequest, MakeDirectoryRequest, ...) but to the engine's
-        current working directory on read (ReadFileRequest bypasses that resolution),
-        and the plain ``pathlib`` calls here use the working directory too. So the
-        bundle gets written under the workspace and read back from somewhere else.
-        The file picker hands back workspace-relative paths, which is how one gets in.
+        A relative path cannot survive this publish, because one value gets resolved
+        against different bases depending on which layer touches it: the engine's event
+        layer anchors relative paths to the workspace, while the plain ``pathlib`` calls
+        here anchor them to the engine's working directory. Which requests do which has
+        varied across engine releases, and a re-publish to a workspace-relative path
+        fails even on an engine that anchors both reads and writes. Anchoring once, here,
+        makes the publish independent of all of that.
 
         ``absolutize`` rather than the engine's ``resolve_workspace_path`` because the
         latter calls ``Path.resolve()`` on absolute paths too. A studio share is

@@ -1,9 +1,9 @@
 """Tests that the gizmo install path is absolute by the time the publish uses it.
 
-A relative install dir cannot survive the publish: the event layer anchors a relative
-path to the workspace on write but to the engine's working directory on read, and the
-publisher's plain ``pathlib`` calls use the working directory too. The file picker
-returns workspace-relative paths, so the publisher must anchor them itself.
+A relative install dir cannot survive the publish: one value gets resolved against
+different bases depending on which layer touches it -- the engine's event layer anchors
+to the workspace, the publisher's plain ``pathlib`` calls to the engine's working
+directory -- so the publisher anchors it once itself.
 """
 
 from __future__ import annotations
@@ -84,10 +84,9 @@ class TestValidateInstallPath:
             griptape_nodes.ConfigManager.return_value.workspace_path = Path(WORKSPACE)
             return publisher._validate()  # noqa: SLF001
 
-    def test_missing_directory_is_reported_with_the_resolved_path(self) -> None:
-        errors = self._validate(_custom("gizmos/nuke"))
-        assert len(errors) == 1
-        assert f"{WORKSPACE}/gizmos/nuke" in str(errors[0])
+    def test_missing_directory_passes_because_the_publish_creates_it(self) -> None:
+        """First-time config of a machine has no ~/.nuke yet, and that has to publish."""
+        assert self._validate(_custom("gizmos/nuke")) == []
 
     def test_unconfigured_path_is_reported(self) -> None:
         errors = self._validate({})
@@ -98,10 +97,12 @@ class TestValidateInstallPath:
         assert self._validate(_custom(str(tmp_path))) == []
 
     def test_file_instead_of_directory_is_rejected(self, tmp_path) -> None:
+        """Named with the resolved path, so an accidentally workspace-relative pick is visible."""
         target = tmp_path / "not_a_dir"
         target.write_text("")
         errors = self._validate(_custom(str(target)))
         assert len(errors) == 1
+        assert str(target) in str(errors[0])
 
 
 class TestSavePublishConfig:

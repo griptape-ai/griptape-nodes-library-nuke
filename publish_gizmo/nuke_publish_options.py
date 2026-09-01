@@ -72,8 +72,9 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
         selected_gizmo = default_gizmo_path(gizmo_choices)
 
     # Absolutized like the dropdown selection above, but anchored to the workspace rather
-    # than via normalize_path_str: the file picker returns workspace-relative paths, and
-    # normalize_path_str would resolve those against the engine's working directory.
+    # than via normalize_path_str, which would resolve a relative saved value against the
+    # engine's working directory. Matches _resolve_gizmo_install_path so the dialog shows
+    # the path the publish will actually use.
     saved_custom = current.get("custom_gizmo_path")
     custom_gizmo_default = (
         absolutize(str(saved_custom), str(GriptapeNodes.ConfigManager().workspace_path))
