@@ -25,6 +25,7 @@ from publish_gizmo.nuke_discovery import (
     default_gizmo_path,
     normalize_path_str,
 )
+from publish_gizmo.output_paths import absolutize
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,16 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
     else:
         selected_gizmo = default_gizmo_path(gizmo_choices)
 
-    custom_gizmo_default = current.get("custom_gizmo_path", str(Path.home() / ".nuke"))
+    # Absolutized like the dropdown selection above, but anchored to the workspace rather
+    # than via normalize_path_str, which would resolve a relative saved value against the
+    # engine's working directory. Matches _resolve_gizmo_install_path so the dialog shows
+    # the path the publish will actually use.
+    saved_custom = current.get("custom_gizmo_path")
+    custom_gizmo_default = (
+        absolutize(str(saved_custom), str(GriptapeNodes.ConfigManager().workspace_path))
+        if saved_custom
+        else str(Path.home() / ".nuke")
+    )
     custom_hidden = selected_gizmo != GIZMO_INSTALL_CUSTOM
 
     is_update = bool(current.get("gizmo_path") and current.get("version") is not None)

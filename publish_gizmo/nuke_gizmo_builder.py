@@ -151,6 +151,66 @@ def _label(name: str) -> str:
     return name.replace("_", " ").title()
 
 
+def _as_bool(value: object) -> bool | None:
+    """Coerce a knob default to bool, or None when there is no value to write.
+
+    None is the signal to omit the value line entirely, which leaves the knob at
+    Nuke's own initial value. Dynamically added parameters carry "" rather than
+    None, so an empty string must read as absent too.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "1", "yes", "on"):
+            return True
+        if lowered in ("false", "0", "no", "off"):
+            return False
+    return None
+
+
+def _as_int(value: object) -> int | None:
+    """Coerce a knob default to int, or None when there is no usable value."""
+    # bool is an int subclass, but a checkbox value on an int knob is a type
+    # mismatch rather than a 0/1 the user chose, so leave the knob alone.
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        return int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_text(value: object) -> str | None:
+    """Coerce a knob default to text, or None when there is no usable value.
+
+    Only scalars are accepted. An artifact or container would stringify to a Python
+    repr, which is worse in the knob than leaving it empty — and the writer's TCL
+    escaping requires a str.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bool, int, float)):
+        return str(value)
+    return None
+
+
+def _as_float(value: object) -> float | None:
+    """Coerce a knob default to float, or None when there is no usable value."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_knob_changed_code() -> str:
     """Return Python code for the gizmo's knobChanged callback.
 
@@ -449,19 +509,19 @@ class NukeGizmoBuilder:
             default_index = choices.index(default) if default and default in choices else None
             w.add_enumeration_knob(knob_name, label, choices, default_index=default_index)
         elif param_type in _FILE_PATH_TYPES:
-            w.add_file_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            w.add_file_knob(knob_name, label, default=_as_text(default), tooltip=_TCL_HINT_TOOLTIP)
             self._write_link_button(w, knob_name)
         elif param_type == "bool":
-            w.add_bool_knob(knob_name, label, default=default if type(default) is bool else None)
+            w.add_bool_knob(knob_name, label, default=_as_bool(default))
         elif param_type == "float":
-            w.add_double_knob(knob_name, label, default=default if type(default) is float else None)
+            w.add_double_knob(knob_name, label, default=_as_float(default))
         elif param_type == "int":
-            w.add_int_knob(knob_name, label, default=default if type(default) is int else None)
+            w.add_int_knob(knob_name, label, default=_as_int(default))
         elif param_type in _MULTILINE_TYPES:
-            w.add_multiline_string_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            w.add_multiline_string_knob(knob_name, label, default=_as_text(default), tooltip=_TCL_HINT_TOOLTIP)
             self._write_link_button(w, knob_name)
         else:
-            w.add_string_knob(knob_name, label, default=default or None, tooltip=_TCL_HINT_TOOLTIP)
+            w.add_string_knob(knob_name, label, default=_as_text(default), tooltip=_TCL_HINT_TOOLTIP)
             self._write_link_button(w, knob_name)
 
     @staticmethod

@@ -49,6 +49,7 @@ from publish_gizmo.constants import (
 )
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
 from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder
+from publish_gizmo.output_paths import absolutize
 
 if TYPE_CHECKING:
     from griptape_nodes.node_library.workflow_registry import Workflow
@@ -72,6 +73,7 @@ class NukeGizmoPublisher:
 
             self._packager.emit_progress(5.0, "Extracting workflow shape...")
             workflow_shape = GriptapeNodes.WorkflowManager().extract_workflow_shape(self._workflow_name)
+            self._overlay_current_values(workflow_shape)
             logger.info("Workflow shape: %s", workflow_shape)
 
             self._packager.emit_progress(5.0, "Saving workflow...")
@@ -87,6 +89,10 @@ class NukeGizmoPublisher:
             if install_dir is None:
                 msg = "Gizmo install path is not set."
                 raise ValueError(msg)
+            # Checked before anything writes: the staging mkdir and every WriteFileRequest
+            # create parents, so by the time the publish finishes the directory exists
+            # either way and there is no telling afterwards whether we made it.
+            install_dir_created = not install_dir.exists()
 
             workflow_file_path = Path(WorkflowRegistry.get_complete_file_path(workflow.file_path))
             workflow_stem = workflow_file_path.stem
@@ -136,6 +142,11 @@ class NukeGizmoPublisher:
 
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
             details = f"Gizmo v{version} installed to: {gizmo_path}"
+            if install_dir_created:
+                # A typo'd or accidentally workspace-relative pick now silently becomes a
+                # real directory; saying so is the only thing standing between that and a
+                # gizmo the artist cannot find.
+                details += f"\n\nNote: the install directory did not exist and was created: {install_dir}"
             if lock_error:
                 # Surface the skipped lock in the publish result, not just the log:
                 # without it the artist running the gizmo is the first to find out.
@@ -152,6 +163,37 @@ class NukeGizmoPublisher:
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    @staticmethod
+    def _overlay_current_values(workflow_shape: dict) -> None:
+        """Replace declared defaults in *workflow_shape* with the values set on the canvas.
+
+        ``extract_workflow_shape`` reports ``Parameter.default_value`` and never consults
+        ``node.parameter_values``. Every NukeStartFlow input is a user-added parameter whose
+        declared default is None, so the value the artist typed lives only in
+        ``parameter_values`` — without this the gizmo's knobs are built with no value line
+        and Nuke initializes them to 0 / empty, which run_button.py then sends back as a
+        real input and writes over the value the bundled workflow saved correctly.
+
+        A path baked from this machine may not resolve on the machine that runs the gizmo;
+        the per-knob Link button is how an artist repoints one.
+        """
+        node_manager = GriptapeNodes.NodeManager()
+        for node_name, params in workflow_shape.get("input", {}).items():
+            try:
+                node = node_manager.get_node_by_name(node_name)
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not resolve node '%s' for value overlay; keeping declared defaults", node_name)
+                continue
+            for param_name, info in params.items():
+                # Only params the artist actually set; an untouched one keeps its
+                # declared default, which is already right.
+                if param_name not in node.parameter_values:
+                    continue
+                try:
+                    info["default_value"] = node.get_parameter_value(param_name)
+                except Exception:  # noqa: BLE001
+                    logger.debug("Could not read '%s.%s' for value overlay", node_name, param_name)
 
     # -- Bundle assembly --
 
@@ -370,17 +412,45 @@ class NukeGizmoPublisher:
         if self._get_nuke_start_flow_node() is None:
             errors.append(ValueError("No NukeStartFlow node found in the workflow."))
             return errors
-        if self._resolve_gizmo_install_path() is None:
+        install_dir = self._resolve_gizmo_install_path()
+        if install_dir is None:
             errors.append(ValueError("Gizmo install path is not configured. Please set it in the publish dialog."))
+        elif install_dir.exists() and not install_dir.is_dir():
+            # A directory that does not exist yet is fine -- the publish creates it, which
+            # is how first-time config of a machine with no ~/.nuke works. Only something
+            # already occupying the path is fatal, and it is caught here so the publish
+            # stops before it writes a partial bundle. Reported with the resolved path so
+            # a relative pick that got anchored to the workspace is visible.
+            errors.append(
+                ValueError(
+                    f"Gizmo install path '{install_dir}' exists but is not a directory. "
+                    "Please choose a directory in the publish dialog."
+                )
+            )
         return errors
 
     def _resolve_gizmo_install_path(self) -> Path | None:
+        """Return the install directory as an absolute path, anchoring a relative one to the workspace.
+
+        A relative path cannot survive this publish, because one value gets resolved
+        against different bases depending on which layer touches it: the engine's event
+        layer anchors relative paths to the workspace, while the plain ``pathlib`` calls
+        here anchor them to the engine's working directory. Which requests do which has
+        varied across engine releases, and a re-publish to a workspace-relative path
+        fails even on an engine that anchors both reads and writes. Anchoring once, here,
+        makes the publish independent of all of that.
+
+        ``absolutize`` rather than the engine's ``resolve_workspace_path`` because the
+        latter calls ``Path.resolve()`` on absolute paths too. A studio share is
+        routinely reached through a symlink, and resolving it substitutes a
+        host-specific target for the path the publisher actually chose.
+        """
         choice = self._metadata.get("gizmo_install_path")
         if choice == GIZMO_INSTALL_CUSTOM:
             choice = self._metadata.get("custom_gizmo_path")
         if not choice:
             return None
-        return Path(choice)
+        return Path(absolutize(str(choice), str(GriptapeNodes.ConfigManager().workspace_path)))
 
     def _get_nuke_start_flow_node(self):  # noqa: ANN202
         result = GriptapeNodes.handle_request(GetTopLevelFlowRequest())
@@ -432,9 +502,14 @@ class NukeGizmoPublisher:
         start_flow = self._get_nuke_start_flow_node()
         if start_flow is None:
             return
+        # Store the resolved custom path so the next publish dialog round-trips an
+        # absolute value instead of the relative one the file picker handed back.
+        custom_path = self._metadata.get("custom_gizmo_path")
+        if custom_path:
+            custom_path = absolutize(str(custom_path), str(GriptapeNodes.ConfigManager().workspace_path))
         start_flow.metadata["publish_config"] = {
             "gizmo_install_path": self._metadata.get("gizmo_install_path"),
-            "custom_gizmo_path": self._metadata.get("custom_gizmo_path"),
+            "custom_gizmo_path": custom_path,
             "gizmo_path": str(gizmo_path),
             "version": version,
         }
