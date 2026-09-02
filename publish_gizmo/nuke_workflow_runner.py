@@ -40,14 +40,32 @@ import importlib.util  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import subprocess  # noqa: E402
-import tempfile  # noqa: E402
 
 from dotenv import dotenv_values
-from griptape_nodes.common.project_templates.directory import DirectoryDefinition
-from output_paths import build_macro_map, load_project_template, resolve_output_dir, serialize_output
+from output_paths import (
+    OutputDirResolution,
+    ProjectActivation,
+    activate_project,
+    default_output_dir,
+    normalize_for_nuke,
+    resolve_output_dir,
+    serialize_output,
+)
 from output_protocol import emit_payload
 
 logger = logging.getLogger(__name__)
+
+# The bundled project.yml's ``outputs`` directory references only this variable, so the
+# runner must always export it.
+OUTPUTS_DIR_ENV_VAR = "GTN_NUKE_GIZMO_OUTPUTS_DIR"
+
+# Every other writable directory in the bundled project.yml is anchored on this
+# variable.
+SCRIPT_DIR_ENV_VAR = "GTN_NUKE_GIZMO_SCRIPT_DIR"
+
+# Hidden directory, beside the artist's .nk script, holding everything a run writes apart
+# from its outputs.
+GRIPTAPE_RUN_DIR_NAME = ".griptape"
 
 
 def _load_bundled_env(env_path: Path) -> None:
@@ -71,27 +89,17 @@ def _load_bundled_env(env_path: Path) -> None:
         os.environ[key] = value
 
 
-def _bootstrap_environment(nk_script_dir: str | None = None) -> None:
-    """Load .env and set workspace config, matching LocalPublisher's run.py entrypoint.
-
-    Args:
-        nk_script_dir: If provided, use this as the workspace directory so that
-            project directory macros (``{outputs}``, ``{inputs}``, etc.) resolve
-            relative to the Nuke script rather than the companion bundle.  When
-            *None*, the companion directory is used (original behaviour).
-    """
+def _bootstrap_environment() -> None:
+    """Pin workspace_path to the bundle root, matching Local/Cloud's entrypoints."""
     script_dir = Path(__file__).parent
 
     env_path = script_dir / ".env"
     if env_path.exists():
         _load_bundled_env(env_path)
 
-    # When a Nuke script directory is available, use it as the workspace so
-    # that relative directory macros in project.yml (like ``outputs``) resolve
-    # next to the .nk file instead of inside the companion bundle.
-    workspace_dir = nk_script_dir if nk_script_dir else str(script_dir)
-    os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = workspace_dir
-    os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
+    # Workspace path must be the bundle root since the bundled workflow may contain relative paths.
+    os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = str(script_dir)
+    os.environ["GTN_CONFIG_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 
     # Supply the project file path if not already set.  The project.yml
     # always lives in the companion bundle regardless of the workspace.
@@ -139,15 +147,20 @@ def main() -> None:
         "--output-dir",
         default=None,
         help=(
-            "Override for the {outputs} directory macro. An absolute path is used as-is; a relative path is "
-            "anchored to --nk-script-dir (the companion bundle when the script is unsaved); project directory "
-            "macros such as {inputs} are resolved against the bundle's project.yml"
+            "Directory workflow outputs are written to. Left blank, outputs go to a 'griptape_outputs' folder "
+            "next to the .nk script. A relative path is anchored to the .nk script's directory. An absolute "
+            "path is used as-is. Macros in braces, such as {outputs}, are resolved against the bundle's own "
+            "project.yml, falling back to this process's environment for any name that project does not "
+            "define. Avoid the built-ins {project_dir}, {workflow_dir}, {workspace_dir} and {inputs}, which "
+            "resolve to a location inside the installed gizmo, and {workflow_name}, which is resolved before "
+            "the workflow is loaded, so there is no workflow to name yet and it never resolves. If any name "
+            "cannot be resolved, the run stops with an error naming it and nothing is rendered."
         ),
     )
     parser.add_argument(
         "--nk-script-dir",
         default=None,
-        help="Nuke script directory; used as workspace so project directory macros resolve next to the .nk file",
+        help="Absolute Nuke script directory; the outputs directory macro resolves next to this file",
     )
     parser.add_argument(
         "--storage-backend",
@@ -156,6 +169,14 @@ def main() -> None:
         help="Storage backend for the workflow executor",
     )
     args = parser.parse_args()
+
+    # This same value is handed to _export_outputs_dir below, where it anchors the outputs
+    # directory. A relative value reaching there would silently anchor outputs under the
+    # wrong directory, so it is rejected here before anything else runs.
+    nk_script_dir = args.nk_script_dir
+    if nk_script_dir is not None and not Path(nk_script_dir).is_absolute():
+        emit_payload({"error": f"--nk-script-dir must be an absolute path, got: {nk_script_dir!r}"})
+        sys.exit(1)
 
     workflow_file = Path(args.workflow_file)
     if not workflow_file.is_file():
@@ -168,28 +189,27 @@ def main() -> None:
         emit_payload({"error": f"Invalid --json-input: {e}"})
         sys.exit(1)
 
-    # Bootstrap environment before loading workflow (needs .env for API keys etc.)
-    _bootstrap_environment(nk_script_dir=args.nk_script_dir)
+    # Bootstrap environment before loading workflow.
+    _bootstrap_environment()
 
-    # Resolve the requested output directory once, up front.  Both the engine's
-    # save path and the path reported back to Nuke are derived from this single
-    # absolute value, so a relative knob value can't be resolved two different
-    # ways (which left Nuke's Read node unable to open a file that was written).
-    # The macro map is built from the bundle's project.yml before any override is
-    # installed, so a {outputs}-relative knob value resolves against the authored
-    # directory instead of becoming a self-reference the engine reads as a cycle.
     script_dir = Path(__file__).parent
-    workspace_dir = Path(args.nk_script_dir) if args.nk_script_dir else None
-    macro_map = build_macro_map(script_dir, workspace_dir=workspace_dir)
-    output_dir = resolve_output_dir(args.output_dir, args.nk_script_dir, str(script_dir), macro_map)
-    if output_dir:
-        logger.info("Output directory: %s", output_dir)
+    bundle_project_file = script_dir / "project.yml"
+
+    # Export env var that will be interpolated into the project on activation.
+    anchor_dir = _export_script_dir(nk_script_dir, script_dir)
+    # Redirect the writable directories project.yml cannot reach, before the engine is built.
+    _export_engine_config_directories(anchor_dir)
+    # Activate project in case the knob contains macros.
+    _activate_bundle_project(bundle_project_file)
+    # Resolve and export the knob value as an environment variable, referenced in
+    # project.yml.
+    _export_outputs_dir(args.output_dir, nk_script_dir, script_dir)
 
     # Eagerly register the bundled libraries before the workflow module loads.
     # The workflow uses name-based RegisterLibraryFromFileRequest, which only
     # succeeds if the library is already known to the engine — and the
     # libraries_to_register entries in griptape_nodes_config.json are not
-    # always picked up on a fresh user machine.
+    # read until later.
     try:
         from register_libraries_script import register_bundled_libraries
 
@@ -214,18 +234,18 @@ def main() -> None:
     # Download HuggingFace models if a download script was bundled at publish time.
     # If a local HuggingFace cache already exists on this machine, point the subprocess
     # at it via HF_HUB_CACHE so that cached models are reused instead of re-downloaded.
-    download_script = Path(__file__).parent / "download_models.py"
+    download_script = script_dir / "download_models.py"
     if download_script.exists():
         download_env = os.environ.copy()
         if "HF_HUB_CACHE" not in download_env and "HF_HOME" not in download_env:
             default_hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
             if default_hf_cache.is_dir():
                 download_env["HF_HUB_CACHE"] = str(default_hf_cache)
-        result = subprocess.run(
+        download_result = subprocess.run(
             [sys.executable, str(download_script)],
             env=download_env,
         )
-        if result.returncode != 0:
+        if download_result.returncode != 0:
             emit_payload({"error": "Model download failed. See log output for details."})
             sys.exit(1)
 
@@ -239,54 +259,126 @@ def main() -> None:
         emit_payload({"error": "Workflow module has no execute_workflow() function"})
         sys.exit(1)
 
-    bundle_project_file = script_dir / "project.yml"
-
-    # When an output directory is specified, build a per-run temp project.yml that
-    # redirects {outputs} to the requested directory.  The bundle's situation macro
-    # and OVERWRITE policy are kept exactly as authored — only the directory changes.
-    # This makes the engine's actual save path agree with the path we report to Nuke.
-    # The bundle file itself is never modified.
-    temp_project_file = None
-    project_file_path: str | None = str(bundle_project_file) if bundle_project_file.exists() else None
-
-    if output_dir:
-        template = load_project_template(bundle_project_file)
-        if template is not None:
-            template.directories["outputs"] = DirectoryDefinition(
-                name="outputs",
-                path_macro=output_dir,
-            )
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".yml",
-                prefix="griptape_nuke_run_",
-                delete=False,
-                encoding="utf-8",
-            )
-            temp_project_file = tmp.name  # register for cleanup before any write can raise
-            project_file_path = temp_project_file
-            tmp.write(template.to_yaml())
-            tmp.close()
-
     try:
         output = module.execute_workflow(
             input=flow_input,
-            project_file_path=project_file_path,
+            project_file_path=str(bundle_project_file),
         )
     except Exception as e:
         emit_payload({"error": f"Workflow execution failed: {e}"})
         sys.exit(1)
-    finally:
-        if temp_project_file is not None:
-            try:
-                Path(temp_project_file).unlink(missing_ok=True)
-            except OSError:
-                pass
+    else:
+        try:
+            result = serialize_output(output)
+        except Exception as e:
+            emit_payload({"error": f"Failed to serialize output after a successful run: {e}"})
+            sys.exit(1)
 
-    if output_dir:
-        macro_map["outputs"] = output_dir
-    result = serialize_output(output, macro_map)
     emit_payload(result)
+
+
+def _export_script_dir(nk_script_dir: str | None, script_dir: Path) -> str:
+    """Export SCRIPT_DIR_ENV_VAR: the anchor the bundle's writable directories all hang off."""
+    # An unsaved .nk script has no directory to sit beside, so this falls back to the
+    # bundle root - see default_output_dir().
+    anchor = normalize_for_nuke(nk_script_dir or str(script_dir))
+    os.environ[SCRIPT_DIR_ENV_VAR] = anchor
+    return anchor
+
+
+def _export_engine_config_directories(anchor_dir: str) -> None:
+    """Redirect the two writable engine directories that come from config rather than project.yml.
+
+    GTN_CONFIG_ variables are the highest-precedence config layer and are read in memory only,
+    unlike a written config value, which would persist into the artist's own user config.
+    """
+    # StaticFilesManager clamps a resolved path back inside the workspace; the fallback arm it
+    # lands in rebuilds the path from this raw config value without re-validating, so an absolute
+    # value escapes the clamp. Left alone, static files are written inside the bundle.
+    os.environ["GTN_CONFIG_STATIC_FILES_DIRECTORY"] = normalize_for_nuke(
+        f"{anchor_dir}/{GRIPTAPE_RUN_DIR_NAME}/staticfiles"
+    )
+
+    # Scratch for cloud workflow sync, which a gizmo run never uses, so it has no business in the
+    # artist's shot folder. Nor may it sit under the bundle: SyncManager.__init__ mkdir's it
+    # unguarded during Engine.__init__, so a read-only install hard-crashes before the runner can
+    # report anything. A per-machine location is writable either way.
+    os.environ["GTN_CONFIG_SYNCED_WORKFLOWS_DIRECTORY"] = normalize_for_nuke(_per_machine_synced_workflows_dir())
+
+
+def _activate_bundle_project(bundle_project_file: Path) -> ProjectActivation:
+    """Make the bundle's own project current, or abort: every later macro resolves through it."""
+    activation = activate_project(bundle_project_file)
+    if not activation.succeeded:
+        emit_payload({"error": _activation_abort_message(bundle_project_file, activation)})
+        sys.exit(1)
+    return activation
+
+
+def _export_outputs_dir(output_dir_arg: str | None, nk_script_dir: str | None, script_dir: Path) -> None:
+    """Resolve the Output Directory knob and export it as OUTPUTS_DIR_ENV_VAR, or abort before anything runs."""
+    # In case the user included `{outputs}` in the knob value (i.e. output_dir_arg).
+    os.environ[OUTPUTS_DIR_ENV_VAR] = default_output_dir(nk_script_dir, str(script_dir))
+    resolution = resolve_output_dir(output_dir_arg, nk_script_dir, str(script_dir))
+    # Abort if resolution failed, e.g. a required macro could not be substituted.
+    if resolution.path is None:
+        emit_payload({"error": _output_dir_abort_message(resolution)})
+        sys.exit(1)
+
+    logger.info("Output directory: %s", resolution.path)
+    os.environ[OUTPUTS_DIR_ENV_VAR] = resolution.path
+
+
+def _per_machine_synced_workflows_dir() -> str:
+    """Return a writable per-machine location for the engine's synced-workflows directory.
+
+    Derived the same way as run_button.py's venv root, and unconditionally: the
+    XDG_CONFIG_HOME fallback at the top of this module only computes a base when the parent
+    left that variable unset.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return f"{data_home}/griptape_nodes/gizmo_standalone/synced_workflows"
+
+
+def _activation_abort_message(bundle_project_file: Path, activation: ProjectActivation) -> str:
+    """Compose the abort text for a bundle whose project.yml could not be made the current project."""
+    message = (
+        "Attempted to work out where this gizmo's outputs should be written, using the project "
+        f"settings published with the gizmo at {bundle_project_file}. "
+        f"Failed due to {activation.failure_reason}. "
+        "Republish the gizmo from Griptape Nodes to rebuild its bundle, then try again."
+    )
+
+    if activation.engine_detail is None:
+        return message
+
+    return f"{message} Technical detail from the engine: {activation.engine_detail}"
+
+
+def _output_dir_abort_message(resolution: OutputDirResolution) -> str:
+    """Compose the abort text for an Output Directory the engine could not turn into a path."""
+    message = (
+        "Attempted to work out where this gizmo's outputs should be written, from the Output "
+        f"Directory '{resolution.raw_text}'. "
+        f"Failed due to {_unresolved_name_cause(resolution.missing_variables)}. "
+        "Nothing has been rendered. Check the spelling, or clear the Output Directory to write "
+        "next to the .nk script instead, then run again."
+    )
+
+    if resolution.failure_reason is None:
+        return message
+
+    return f"{message} Technical detail from the engine: {resolution.failure_reason}"
+
+
+def _unresolved_name_cause(missing_variables: tuple[str, ...]) -> str:
+    """Name the variables the engine could not resolve, or say only that the text was unreadable."""
+    if not missing_variables:
+        return "that text not being readable as a path"
+
+    named = ", ".join(f"'{name}'" for name in missing_variables)
+    plural = "s" if len(missing_variables) > 1 else ""
+    return f"there being no variable{plural} named {named}"
 
 
 if __name__ == "__main__":

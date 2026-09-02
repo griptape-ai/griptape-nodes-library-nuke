@@ -11,7 +11,7 @@ import pytest
 from griptape_nodes.retained_mode.events.os_events import WriteFileRequest, WriteFileResultSuccess
 from griptape_nodes.retained_mode.events.workflow_events import SaveWorkflowRequest, SaveWorkflowResultSuccess
 
-from publish_gizmo.constants import PRESERVED_ON_REPUBLISH, VERSION_DIR_GLOB
+from publish_gizmo.constants import GRIPTAPE_RUN_DIR_NAME, PRESERVED_ON_REPUBLISH, VERSION_DIR_GLOB
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 
 
@@ -34,6 +34,10 @@ class TestPreservedEntries:
         staleness the rebuild fixes.
         """
         assert "griptape_outputs" in PRESERVED_ON_REPUBLISH
+        assert GRIPTAPE_RUN_DIR_NAME in PRESERVED_ON_REPUBLISH
+
+    def test_the_pre_griptape_layout_static_files_dir_is_preserved(self) -> None:
+        """Bundles published before the hidden run directory existed hold run artifacts in <bundle>/staticfiles."""
         assert "staticfiles" in PRESERVED_ON_REPUBLISH
 
 

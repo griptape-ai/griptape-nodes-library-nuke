@@ -566,7 +566,11 @@ else:
         if output_dir:
             cmd.extend(["--output-dir", output_dir])
 
-        if _QT_AVAILABLE:
+        # nuke.GUI is False under `nuke -t`/`-i` (headless) even when Qt itself imports
+        # fine, since Qt is bundled with every Nuke install regardless of GUI mode.
+        # Without this check the async path below tries to show a real dialog with no
+        # event loop pumping it, hanging headless runs.
+        if _QT_AVAILABLE and nuke.GUI:  # noqa: F821
             # ------------------------------------------------------------------
             # Async path: non-modal progress dialog + background thread
             # ------------------------------------------------------------------
@@ -714,7 +718,7 @@ else:
 
         else:
             # ------------------------------------------------------------------
-            # Fallback: blocking path when Qt is not available
+            # Fallback: blocking path when Qt is unavailable or Nuke is headless
             # ------------------------------------------------------------------
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=companion, timeout=600, env=_child_env)
             if result.returncode == 0:

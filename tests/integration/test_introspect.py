@@ -24,7 +24,8 @@ def _run_introspect() -> dict:
         text=True,
     )
     assert result.returncode == 0, f"introspect.py exited {result.returncode}:\n{result.stderr}"
-    return json.loads(result.stdout)
+    # Take last line - lines above are Nuke copyright notice etc.
+    return json.loads(result.stdout.splitlines()[-1])
 
 
 def test_introspect_returns_valid_json_for_annotated_script() -> None:

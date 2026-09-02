@@ -5,11 +5,9 @@ from __future__ import annotations
 import io
 import json
 import sys
+from typing import NamedTuple
 
 import pytest
-
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent.parent / "publish_gizmo"))
-
 from output_protocol import (
     OUTPUT_SENTINEL_BEGIN,
     OUTPUT_SENTINEL_END,
@@ -18,15 +16,25 @@ from output_protocol import (
 )
 
 
-def _capture_emit(payload: dict) -> str:
-    buf = io.StringIO()
-    old = sys.stdout
-    sys.stdout = buf
+class _EmittedStreams(NamedTuple):
+    stdout: str
+    stderr: str
+
+
+def _capture_streams(payload: dict) -> _EmittedStreams:
+    out_buf = io.StringIO()
+    err_buf = io.StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = out_buf, err_buf
     try:
         emit_payload(payload)
     finally:
-        sys.stdout = old
-    return buf.getvalue()
+        sys.stdout, sys.stderr = old_out, old_err
+    return _EmittedStreams(stdout=out_buf.getvalue(), stderr=err_buf.getvalue())
+
+
+def _capture_emit(payload: dict) -> str:
+    return _capture_streams(payload).stdout
 
 
 class TestEmitPayload:
@@ -44,6 +52,30 @@ class TestEmitPayload:
     def test_empty_dict(self):
         raw = _capture_emit({})
         assert extract_payload(raw) == {}
+
+
+class TestEmitPayloadErrorReachesStderr:
+    """run_button.py shows only the runner's stderr when the run fails, so an error must land there too."""
+
+    def test_error_text_is_written_to_stderr(self):
+        streams = _capture_streams({"error": "Attempted to open the door. Failed due to: it is locked."})
+
+        assert streams.stderr == "Attempted to open the door. Failed due to: it is locked.\n"
+
+    def test_error_payload_stdout_framing_is_unchanged(self):
+        streams = _capture_streams({"error": "it is locked"})
+
+        assert extract_payload(streams.stdout) == {"error": "it is locked"}
+
+    def test_success_payload_writes_nothing_to_stderr(self):
+        streams = _capture_streams({"image_url": "/tmp/out.jpg"})
+
+        assert streams.stderr == ""
+
+    def test_blank_error_writes_nothing_to_stderr(self):
+        streams = _capture_streams({"error": ""})
+
+        assert streams.stderr == ""
 
 
 class TestExtractPayload:

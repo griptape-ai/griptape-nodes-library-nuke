@@ -276,7 +276,7 @@ class TestRunnerXdgConfigHomeImportOrder:
     any griptape_nodes import so the engine's config path is frozen correctly."""
 
     def test_xdg_config_home_set_before_griptape_import(self) -> None:
-        """The env guard block must appear before the first 'from griptape_nodes' line."""
+        """The env guard block must appear before the first import that pulls in griptape_nodes."""
         source = (Path(__file__).parent.parent.parent / "publish_gizmo" / "nuke_workflow_runner.py").read_text(
             encoding="utf-8"
         )
@@ -287,15 +287,21 @@ class TestRunnerXdgConfigHomeImportOrder:
             None,
         )
         griptape_line = next(
-            (i for i, line in enumerate(lines) if line.startswith("from griptape_nodes")),
+            (
+                i
+                for i, line in enumerate(lines)
+                if line.startswith("from output_paths import")  # Transitively imports griptape_nodes.
+            ),
             None,
         )
 
         assert xdg_line is not None, "XDG_CONFIG_HOME guard not found in nuke_workflow_runner.py"
-        assert griptape_line is not None, "No 'from griptape_nodes' import found in nuke_workflow_runner.py"
+        assert griptape_line is not None, (
+            "No 'from griptape_nodes' or 'from output_paths import' line found in nuke_workflow_runner.py"
+        )
         assert xdg_line < griptape_line, (
             f"XDG_CONFIG_HOME guard (line {xdg_line + 1}) must precede "
-            f"first griptape_nodes import (line {griptape_line + 1})"
+            f"first griptape_nodes-pulling import (line {griptape_line + 1})"
         )
 
     def test_runner_respects_parent_xdg_config_home(self) -> None:

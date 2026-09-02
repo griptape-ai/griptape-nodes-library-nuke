@@ -14,9 +14,9 @@ INIT_MARKER = "# griptape-plugin-path"
 RUN_BUTTON_FILENAME = "run_button.py"
 
 # Directory name (relative to the .nk script) where workflow outputs land when the
-# gizmo's Output Directory knob is left blank. Stamped into the bundled project.yml
-# at publish time and quoted in the gizmo's Run tab help text — shared here so the
-# documented default and the actual default cannot drift apart.
+# gizmo's Output Directory knob is left blank. Quoted in the gizmo's Run tab help
+# text — shared here so the documented default and the actual default cannot drift
+# apart.
 OUTPUTS_DIR_NAME = "griptape_outputs"
 
 # Publisher-source filename -> companion-bundle filename, for the scripts copied
@@ -35,16 +35,24 @@ BUNDLED_SCRIPTS = {
 # with "v".
 VERSION_DIR_GLOB = "v[0-9]*"
 
+# Hidden directory, beside the artist's .nk script, holding everything a run writes
+# apart from its outputs.
+GRIPTAPE_RUN_DIR_NAME = ".griptape"
+
 # Entries a re-publish must carry across the staged rebuild rather than discard.
 #
 # The version subdirs are meant to accumulate -- each published version keeps its
-# own workflow file. The other two are run artifacts, not publish artifacts: for a
-# gizmo driven from an unsaved .nk there is no script directory to use as the
-# workspace, so the runner falls back to the companion and the engine writes
-# griptape_outputs/ and staticfiles/ inside the bundle. Deleting an artist's
-# generated frames on re-publish would be worse than the staleness the rebuild
-# fixes, so they survive it.
-PRESERVED_ON_REPUBLISH = [VERSION_DIR_GLOB, OUTPUTS_DIR_NAME, "staticfiles"]
+# own workflow file. The others are run artifacts, not publish artifacts: a run
+# writes its outputs to griptape_outputs/ beside the .nk script and everything else
+# under a hidden .griptape/ there, but a gizmo driven from an unsaved .nk has no
+# script directory to sit beside, so the runner falls back to the bundle and both
+# land inside it. Deleting an artist's generated frames on re-publish would be worse
+# than the staleness the rebuild fixes, so they survive it.
+#
+# "staticfiles" is a migration carry-over: bundles published before the .griptape/
+# layout hold their run artifacts there, and the first re-publish after upgrading
+# would otherwise delete them. Drop it in a later version.
+PRESERVED_ON_REPUBLISH = [VERSION_DIR_GLOB, OUTPUTS_DIR_NAME, GRIPTAPE_RUN_DIR_NAME, "staticfiles"]
 
 # Prefix for the hidden companion knob that stores a Link button's TCL expression
 # (the visible knob shows the evaluated value). Kept in sync with the local copy
