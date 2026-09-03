@@ -67,6 +67,16 @@ IDLE_FLOW = GetFlowStateResultSuccess(control_nodes=[], resolving_nodes=[], invo
 ENGINE_VERSION = GetEngineVersionResultSuccess(major=0, minor=97, patch=0, result_details="ok")
 
 
+class _FakeEventManager:
+    """Records notifications a handler pushes via ``engine.emit_event``."""
+
+    def __init__(self) -> None:
+        self.emitted: list[Any] = []
+
+    def put_event(self, event: Any) -> None:
+        self.emitted.append(event)
+
+
 class FakeEngine:
     """Dispatches handle_request by request type, recording call order.
 
@@ -87,6 +97,7 @@ class FakeEngine:
         self._session_id = session_id
         self._engine_id = engine_id
         self.requests: list[Any] = []
+        self.event_manager = _FakeEventManager()
 
     def handle_request(self, request: Any) -> Any:
         self.requests.append(request)
@@ -101,6 +112,9 @@ class FakeEngine:
 
     def get_engine_id(self) -> str:
         return self._engine_id
+
+    def EventManager(self) -> _FakeEventManager:  # noqa: N802
+        return self.event_manager
 
 
 def use_engine(monkeypatch: pytest.MonkeyPatch, responses: dict[type, Any] | None = None, **kwargs: Any) -> FakeEngine:

@@ -19,7 +19,7 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
 )
-from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
+from griptape_nodes.retained_mode.events.base_events import AppEvent, AppPayload, RequestPayload, ResultPayload
 from griptape_nodes.retained_mode.events.context_events import (
     GetWorkflowContextRequest,
     GetWorkflowContextSuccess,
@@ -152,3 +152,13 @@ def is_running() -> bool:
     if attempt.value is None:
         return False
     return flow_is_running(attempt.value)
+
+
+def emit_event(payload: AppPayload) -> None:
+    """Push a host notification onto the one path that actually reaches a connected host.
+
+    ``put_event`` is what reaches IPC; ``broadcast_app_event`` only notifies in-process
+    listeners, so any code emitting a notification for a host, not only ``execution_bridge``,
+    goes through this rather than that.
+    """
+    GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))

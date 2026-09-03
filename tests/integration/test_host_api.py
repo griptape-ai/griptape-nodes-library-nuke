@@ -49,6 +49,16 @@ ENGINE = running_engine()
 NAMED_WORKFLOW = os.environ.get("GRIPTAPE_NODES_SMOKE_WORKFLOW")
 NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "30"))
 
+# A fixed string, not a fresh id per invocation. NukeConnectRequest.client_id's own docstring
+# asks for an id "minted once per Nuke session and reused across every reconnect that session
+# makes", and this suite is one logical session across every test in it, and across every
+# separate `pytest` invocation too: the engine's lease is process-global and outlives any one
+# run (nothing here ever disconnects), so a uuid4 minted at import time would be reused within
+# a run but be a competing claim on the next one, refused for up to IDLE_WINDOW_SECONDS after
+# the previous run exited. Every connect below is a renewal of this same lease, which is what
+# lets three separate tests reconnect without racing each other or needing force=True.
+SMOKE_CLIENT_ID = "nuke-smoke-tests"
+
 pytestmark = [
     pytest.mark.skipif(
         sys.platform == "win32",
@@ -86,7 +96,8 @@ def client(engine: Engine) -> Iterator[HostClient]:
     """
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
-            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+            Verb.CONNECT,
+            {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "client_id": SMOKE_CLIENT_ID},
         )
         assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
         try:
@@ -148,7 +159,8 @@ class TestDiscovery:
 class TestConnect:
     def test_connect_negotiates_a_version_and_returns_the_closed_type_set(self, client: HostClient) -> None:
         reply = client.request(
-            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+            Verb.CONNECT,
+            {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "client_id": SMOKE_CLIENT_ID},
         )
         assert succeeded(reply), f"connect failed: {detail_of(reply)}"
         body = result_of(reply)
@@ -174,7 +186,11 @@ class TestConnect:
         """
         reply = client.request(
             Verb.CONNECT,
-            {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
+            {
+                "client_protocol_versions": [PROTOCOL_VERSION],
+                "client_id": SMOKE_CLIENT_ID,
+                "field_from_a_future_version": "ignore me",
+            },
         )
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
 

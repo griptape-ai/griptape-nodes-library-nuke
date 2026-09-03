@@ -124,11 +124,20 @@ class Notification:
 
 @dataclass
 class HostClient:
-    """Request/reply plus a notification stream over one local socket."""
+    """Request/reply plus a notification stream over one local socket.
+
+    ``session_token`` starts empty and is filled in automatically the first time a
+    ``NukeConnectRequest`` on this client succeeds, then attached to every later request's
+    body without a call site having to touch it. That mirrors what a real plugin does
+    (``dispatch.verb`` refuses any non-connect verb whose ``session_token`` does not match
+    the engine's current lease) and keeps every existing ``client.request(Verb.X, {...})``
+    call in this suite working unchanged once a client_id is threaded into its connect.
+    """
 
     socket_path: str
     timeout_s: float = DEFAULT_TIMEOUT_S
     notifications: list[Notification] = field(default_factory=list)
+    session_token: str = field(default="", repr=False)
     _sock: socket.socket | None = None
     _buffer: bytes = b""
 
@@ -144,20 +153,33 @@ class HostClient:
             self._sock = None
 
     def request(self, request_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Send one request and return the reply payload whose request_id matches."""
+        """Send one request and return the reply payload whose request_id matches.
+
+        Every request but ``NukeConnectRequest`` gets this client's current
+        ``session_token`` merged into its body, since ``dispatch.verb`` requires one from
+        everything else. A successful connect's own ``session_token`` is captured back out
+        of the reply here, so a caller threads a ``client_id`` into one ``Verb.CONNECT``
+        call and never handles a token directly again.
+        """
         request_id = uuid.uuid4().hex
+        body = dict(payload or {})
+        if request_type != "NukeConnectRequest" and self.session_token:
+            body["session_token"] = self.session_token
         self._send(
             {
                 "payload": {
                     "event_type": "EventRequest",
                     "request_type": request_type,
-                    "request": payload or {},
+                    "request": body,
                     "request_id": request_id,
                     "response_topic": REPLY_TOPIC,
                 }
             }
         )
-        return self._pump(until_request_id=request_id)
+        reply = self._pump(until_request_id=request_id)
+        if request_type == "NukeConnectRequest" and succeeded(reply):
+            self.session_token = result_of(reply).get("session_token", "")
+        return reply
 
     def drain(self, seconds: float) -> list[Notification]:
         """Collect notifications for a while, sending nothing.
