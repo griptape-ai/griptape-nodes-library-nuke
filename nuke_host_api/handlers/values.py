@@ -27,9 +27,8 @@ for three reasons found by reading ``node_manager.py`` rather than the event's d
 ``GetParameterValueRequest`` (``parameter_events.py``) has none of those problems: it hands
 back the live value alongside ``type``, the exact declared-type hint ``normalize_value``
 needs to disambiguate a bare string, for the one port asked about. The cost is one engine
-request per declared port instead of one per node, which is the same cost
-``NukeGetExecutionStateRequest`` already paid for its output ports before this verb existed,
-and a workflow's declared surface is knobs, not hundreds of them.
+request per declared port, and a workflow's declared surface is knobs, not hundreds of
+them.
 """
 
 from __future__ import annotations
@@ -65,7 +64,10 @@ def handle_get_port_values(
     """
     attempted = "to read declared port values"
 
-    sections: list[str] = list(request.sections) if request.sections else list(PORT_SECTIONS)
+    # Deduplicated before the unknown-name check, not after: a repeated name must not
+    # inflate requested_sections or the "N section(s)" count below, since that field's
+    # whole job is telling a host what was actually read apart from what came back empty.
+    sections: list[str] = list(dict.fromkeys(request.sections)) if request.sections else list(PORT_SECTIONS)
     unknown = [section for section in sections if section not in PORT_SECTIONS]
     if unknown:
         return failure(

@@ -106,10 +106,8 @@ live value are one shape.
 
 `NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and
 which nodes are involved. `NukeGetPortValuesRequest` answers a different one: what does
-every declared start-flow or end-flow parameter currently hold. They used to be one verb,
-with an `include_outputs` flag bolted onto the state request to cover only the output
-side; splitting them gives each verb one meaning and lets a host read every input-side
-parameter too, which the old shape could not do at all.
+every declared start-flow or end-flow parameter currently hold. Each verb has one meaning,
+and a host reads every input-side parameter as readily as every output-side one.
 
 `sections` selects `"inputs"`, `"outputs"`, or both (the default, when the list is empty),
 so a host reads a start node's parameters, an end node's parameters, or everything in one

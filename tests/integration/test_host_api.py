@@ -96,7 +96,7 @@ def client(engine: Engine) -> Iterator[HostClient]:
             # backlog unread risks filling the socket buffer, and a client the engine cannot
             # write to is dropped from its broadcast set and stops receiving replies too.
             connected.drain(0.5)
-            state = connected.request(Verb.GET_EXECUTION_STATE, {"include_outputs": False})
+            state = connected.request(Verb.GET_EXECUTION_STATE)
             if succeeded(state) and result_of(state).get("running"):
                 connected.request(Verb.CANCEL_EXECUTION)
 
@@ -299,18 +299,19 @@ class TestExecute:
         assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
         client.drain(NOTIFICATION_WINDOW_S)
 
-        reply = client.request(Verb.GET_EXECUTION_STATE, {"include_outputs": True})
-        assert succeeded(reply), f"reading execution state failed: {detail_of(reply)}"
+        reply = client.request(Verb.GET_PORT_VALUES, {"sections": ["outputs"]})
+        assert succeeded(reply), f"reading port values failed: {detail_of(reply)}"
         body = result_of(reply)
         assert body["workflow_id"] == workflow_id
 
         promised = {port["node"] for port in described["outputs"]}
         assert promised <= set(body["outputs"]), (
-            f"describe promised outputs on {sorted(promised)} but state returned {sorted(body['outputs'])}"
+            f"describe promised outputs on {sorted(promised)} but port values returned {sorted(body['outputs'])}"
         )
         for parameters in body["outputs"].values():
             for descriptor in parameters.values():
                 assert descriptor["value_type"] in VALUE_TYPES
+        assert body["unavailable"] == [], f"every promised output should have answered: {body['unavailable']}"
 
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
         """Serial execution is what makes the missing engine-side execution id survivable.
@@ -321,7 +322,7 @@ class TestExecute:
         workflow_id = _smoke_workflow_id(client)
         assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
 
-        state = result_of(client.request(Verb.GET_EXECUTION_STATE, {"include_outputs": False}))
+        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
         if not state.get("running"):
             pytest.skip(f"workflow {workflow_id!r} finished before a second execute could race it")
 
@@ -362,7 +363,7 @@ class TestExecute:
 
 class TestCancel:
     def test_cancel_is_refused_when_nothing_is_running(self, client: HostClient) -> None:
-        state = result_of(client.request(Verb.GET_EXECUTION_STATE, {"include_outputs": False}))
+        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
         if state.get("running"):
             pytest.skip("something is already running, so an idle cancel cannot be tested")
 

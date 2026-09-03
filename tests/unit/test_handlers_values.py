@@ -79,6 +79,11 @@ class TestGetPortValues:
         assert result.inputs["Start Flow"]["topic"]["value_type"] == ValueType.TEXT
         assert result.outputs["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert result.outputs["End Flow"]["mixed_audio"]["value_type"] == ValueType.FILE
+        # A value the engine genuinely holds as None is not a port it would not answer for:
+        # it lands in `inputs` as GTNull, not in `unavailable`. See handlers/values.py's
+        # third reason for not using GetAllNodeInfoRequest.
+        assert result.inputs["Start Flow"]["plate"]["value_type"] == ValueType.NULL
+        assert result.unavailable == []
 
     def test_a_single_section_reads_only_that_side(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: _respond_to_get_value})

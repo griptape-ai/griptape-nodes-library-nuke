@@ -32,8 +32,13 @@ One rename happened without a version bump: ``ExecutionState``'s ``SUCCEEDED`` b
 ``COMPLETED``, both a rename and a meaning change, which the rule above says should bump
 the version. It did not, because it happened before this protocol's first release: no
 compiled plugin has ever spoken ``PROTOCOL_VERSION`` 1, so none depends on the old name.
-This is a one-time exception for a value that never shipped, not a precedent. A rename
-after release, of this or anything else in this file, MUST bump ``PROTOCOL_VERSION``.
+A second removal happened the same way: ``NukeGetExecutionStateRequest`` dropped
+``include_outputs`` and its result dropped ``outputs`` when ``NukeGetPortValuesRequest``
+took over reading port values, again free only because no compiled plugin has spoken this
+version yet. Neither is a precedent for a version that has shipped. The actual rule for
+this file, until the day a plugin is compiled against ``PROTOCOL_VERSION`` 1, is: a removal
+or rename here is free before the first compiled plugin, and MUST bump the version after
+it. Read every entry above under that rule, not as a promise that removals are always free.
 """
 
 from __future__ import annotations

@@ -223,7 +223,11 @@ been sent separately. There is no batched reply to wait for.
 This shape is derived from the envelope's own `dict()`/`from_dict()` contract
 (`retained_mode/events/base_events.py`), not confirmed against a live `websocket_direct`
 round trip, so treat it as the documented contract rather than a captured transcript like
-every other frame here. Useful for a plugin that wants several verbs answered in one
+every other frame here. `EventRequestBatch` itself is unversioned engine surface, not part
+of the `Verb` list or the Bound surface table below, so this hedge is about whether the
+envelope's shape can change out from under a host, not merely about whether this JSON was
+captured from a live round trip like the others. Useful for a plugin that wants several
+verbs answered in one
 network round trip, for example reading port values and execution state together on a
 single poll tick, without paying one WebSocket message per verb.
 
