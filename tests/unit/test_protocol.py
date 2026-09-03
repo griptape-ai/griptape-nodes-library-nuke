@@ -37,6 +37,22 @@ def test_notification_names_match_real_payload_classes() -> None:
         )
 
 
+def test_session_revoked_is_a_declared_notification() -> None:
+    """Explicit, since a plugin binds to this name to learn it lost the engine's lease."""
+    assert protocol.Notification.SESSION_REVOKED == "NukeSessionRevokedEvent"
+    assert hasattr(events, protocol.Notification.SESSION_REVOKED)
+
+
+def test_session_expired_result_failure_exists_and_is_shared_across_verbs() -> None:
+    """Every routed verb but connect may answer with this one shape when its token lapses.
+
+    Not tied to any single verb's stem, unlike every other ``ResultFailure`` in this module,
+    since the session gate lives in ``dispatch.verb`` rather than in a handler and answers
+    identically no matter which verb the caller was making.
+    """
+    assert hasattr(events, "NukeSessionExpiredResultFailure")
+
+
 def test_every_verb_has_a_success_and_failure_result() -> None:
     """A host must always get a typed answer, never a bare exception."""
     for attribute, verb in vars(protocol.Verb).items():

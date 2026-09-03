@@ -105,6 +105,7 @@ class Notification:
     NODE_STATE = "NukeNodeStateEvent"
     PARAMETER_VALUE = "NukeParameterValueEvent"
     EXECUTION_STATE = "NukeExecutionStateEvent"
+    SESSION_REVOKED = "NukeSessionRevokedEvent"
 
 
 # Node lifecycle, collapsed from the engine's finer-grained execution events.

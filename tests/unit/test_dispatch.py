@@ -2,16 +2,38 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
 
+from nuke_host_api import session
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeDescribeWorkflowResultFailure,
     NukeListWorkflowsRequest,
     NukeListWorkflowsResultFailure,
+    NukeListWorkflowsResultSuccess,
+    NukeSessionExpiredResultFailure,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+
+@pytest.fixture(autouse=True)
+def _authorized_session() -> None:
+    """This file tests the real gate; the shared bypass in conftest.py must not apply here."""
+    return
+
+
+@pytest.fixture(autouse=True)
+def _reset_lease() -> Iterator[None]:
+    """One process-global lease; a leftover claim from another test must not leak in."""
+    session.reset()
+    yield
+    session.reset()
 
 
 class TestVerb:
@@ -94,3 +116,66 @@ class TestFailure:
         )
 
         assert result.workflow_id == "ghost"
+
+
+class TestSessionGate:
+    """Every routed verb but connect is refused without the token connect handed back."""
+
+    def test_a_non_connect_verb_is_refused_with_no_token(self) -> None:
+        calls: list[NukeListWorkflowsRequest] = []
+
+        @verb(NukeListWorkflowsRequest)
+        def handler(request: NukeListWorkflowsRequest) -> ResultPayload:
+            calls.append(request)
+            return NukeListWorkflowsResultSuccess(workflows=[], result_details="ok")
+
+        result = handler(NukeListWorkflowsRequest())
+
+        assert isinstance(result, NukeSessionExpiredResultFailure)
+        assert not calls, "a refused request must never reach the handler body"
+
+    def test_a_non_connect_verb_is_refused_with_an_unknown_token(self) -> None:
+        @verb(NukeListWorkflowsRequest)
+        def handler(request: NukeListWorkflowsRequest) -> ResultPayload:  # noqa: ARG001
+            return NukeListWorkflowsResultSuccess(workflows=[], result_details="ok")
+
+        result = handler(NukeListWorkflowsRequest(session_token="not-a-real-token"))
+
+        assert isinstance(result, NukeSessionExpiredResultFailure)
+
+    def test_a_non_connect_verb_succeeds_with_the_current_token(self) -> None:
+        claimed = session.claim("nuke-1", "Nuke 16.0v7", force=False)
+
+        @verb(NukeListWorkflowsRequest)
+        def handler(request: NukeListWorkflowsRequest) -> ResultPayload:  # noqa: ARG001
+            return NukeListWorkflowsResultSuccess(workflows=[], result_details="ok")
+
+        result = handler(NukeListWorkflowsRequest(session_token=claimed.session_token))
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+
+    def test_connect_itself_is_exempt_even_with_no_lease_ever_claimed(self) -> None:
+        """Connect is how a host obtains a token, so it cannot be asked to already carry one."""
+        calls: list[NukeConnectRequest] = []
+
+        @verb(NukeConnectRequest)
+        def handler(request: NukeConnectRequest) -> ResultPayload:
+            calls.append(request)
+            return NukeListWorkflowsResultFailure(result_details="reached")
+
+        result = handler(NukeConnectRequest())
+
+        assert calls, "connect must reach the handler body unconditionally"
+        assert not isinstance(result, NukeSessionExpiredResultFailure)
+
+    def test_a_takeover_revokes_the_earlier_holders_access_to_every_other_verb(self) -> None:
+        first = session.claim("nuke-1", "Nuke 16.0v7", force=False)
+        session.claim("nuke-2", "Nuke 15.1v3", force=True)
+
+        @verb(NukeListWorkflowsRequest)
+        def handler(request: NukeListWorkflowsRequest) -> ResultPayload:  # noqa: ARG001
+            return NukeListWorkflowsResultSuccess(workflows=[], result_details="ok")
+
+        result = handler(NukeListWorkflowsRequest(session_token=first.session_token))
+
+        assert isinstance(result, NukeSessionExpiredResultFailure)
