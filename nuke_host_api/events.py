@@ -43,9 +43,20 @@ class NukeSessionScopedRequest:
     Defaults to empty rather than being required, so a host that has not connected yet still
     structures off the wire cleanly and receives the library's own worded refusal instead of
     a raw deserialization error.
+
+    ``omit_from_result`` in the field metadata is load-bearing, not decorative. The engine's
+    ``EventManager`` echoes the originating request back inside every reply envelope
+    (``EventResultSuccess``/``EventResultFailure``), and that envelope is published to
+    ``event_topic`` when a host sends no ``response_topic`` of its own -- the same topic the
+    editor and every other library read (see ``NukeConnectResultSuccess.event_topic``,
+    ``NukeSessionRevokedEvent``). Without this metadata the bearer token this whole session
+    design rests on would ride back out on that shared topic on every single request, which is
+    exactly the exposure ``NukeSessionRevokedEvent`` was written to avoid by carrying
+    ``revoked_client_id`` instead of a token. ``EventManager._handle_request_core`` nulls any
+    field so marked before building the result, matching ``static_file_events.content``.
     """
 
-    session_token: str = field(default="", kw_only=True)
+    session_token: str = field(default="", kw_only=True, metadata={"omit_from_result": True})
 
 
 @dataclass

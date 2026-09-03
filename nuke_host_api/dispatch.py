@@ -16,7 +16,7 @@ from griptape_nodes.retained_mode.events.base_events import (
 )
 
 from nuke_host_api import session
-from nuke_host_api.events import NukeConnectRequest, NukeSessionExpiredResultFailure
+from nuke_host_api.events import NukeConnectRequest, NukeSessionExpiredResultFailure, NukeSessionScopedRequest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,6 +37,14 @@ def verb[R: RequestPayload](
     how a host obtains a token rather than something it is expected to already carry one
     for. Every other verb is refused with ``NukeSessionExpiredResultFailure`` unless its
     ``session_token`` matches the engine's current lease; see ``session.authorize``.
+
+    Reads ``request.session_token`` directly rather than through a defensive ``getattr``:
+    every request but ``NukeConnectRequest`` is required to mix in
+    ``NukeSessionScopedRequest``, and ``test_every_routed_verb_but_connect_carries_the_
+    session_mixin`` in ``test_handlers_routes.py`` fails at test time if a future verb is
+    routed without it. A silent ``getattr`` fallback would instead turn that mistake into a
+    live refusal indistinguishable from an expired session, pointing a host at a reconnect
+    that can never fix it.
     """
 
     def decorate(handler: Callable[[R], ResultPayload]) -> Callable[[RequestPayload], ResultPayload]:
@@ -46,8 +54,8 @@ def verb[R: RequestPayload](
                 msg = f"Expected {expected.__name__}, got {type(request).__name__}"
                 raise TypeError(msg)
             if expected is not NukeConnectRequest:
-                token = getattr(request, "session_token", "")
-                if not session.authorize(token):
+                assert isinstance(request, NukeSessionScopedRequest)
+                if not session.authorize(request.session_token):
                     return failure(
                         NukeSessionExpiredResultFailure,
                         attempted=f"to call {expected.__name__}",

@@ -85,12 +85,23 @@ def _mint_token() -> str:
 
 
 def _is_stale(lease: _Lease) -> bool:
-    """A lease is never stale while the engine is executing.
+    """A lease is never stale while the engine is executing, for anyone.
 
     A host that started a long render and is waiting quietly for it to finish sends no
     requests in the meantime, and that is exactly the moment a rival must not be able to
     steal the engine out from under it. The engine query only runs once the idle window has
     already elapsed, so a live, chatty holder never pays for it.
+
+    ``engine_is_running()`` is engine-global, not scoped to this lease's holder, because
+    nothing below this layer threads an execution id through to attribute a run to a
+    client (see ``protocol.ExecutionState``). So a holder that died before starting
+    anything is kept alive by a render started by someone else entirely, including the
+    editor, for as long as that unrelated render runs; only ``force`` frees the lease in
+    that case. This is the same gap that makes ``NukeCancelExecutionRequest`` cancel
+    whatever is running rather than a specific run, and it is recorded in the README's
+    known gaps rather than papered over here with local state, since inventing a per-holder
+    "did I start this" flag would need to know when a run ends to clear it, and the engine
+    gives this layer no event for that either.
     """
     if _now() - lease.last_seen <= IDLE_WINDOW_SECONDS:
         return False
