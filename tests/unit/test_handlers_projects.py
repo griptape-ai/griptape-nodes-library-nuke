@@ -14,6 +14,7 @@ from griptape_nodes.common.project_templates.validation import (
     ProjectValidationStatus,
 )
 from griptape_nodes.retained_mode.events.base_events import ResultPayloadFailure
+from griptape_nodes.retained_mode.events.config_events import GetWorkspaceRequest, GetWorkspaceResultSuccess
 from griptape_nodes.retained_mode.events.execution_events import GetFlowStateRequest, GetFlowStateResultSuccess
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.project_events import (
@@ -54,7 +55,7 @@ from nuke_host_api.handlers import (
     handle_list_projects,
     handle_set_current_project,
 )
-from tests.unit.host_api_fakes import IDLE_FLOW, use_engine
+from tests.unit.host_api_fakes import use_engine
 
 
 def _template(name: str = "My Project", description: str = "a project") -> ProjectTemplate:
@@ -105,6 +106,16 @@ def _resolve_workspace(workspace_dir: str | None) -> dict[type, object]:
     }
 
 
+def _workspace(workspace_path: str) -> dict[type, object]:
+    """The engine's one live workspace, for the two verbs that read the active project rather than preview one."""
+    return {GetWorkspaceRequest: GetWorkspaceResultSuccess(workspace_path=workspace_path, result_details="ok")}
+
+
+def _nothing_running() -> dict[type, object]:
+    """Short-circuits ``is_running()`` on the ``flow_name is None`` branch, with no flow-state request to fake."""
+    return {GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="none loaded")}
+
+
 def _current(info: ProjectInfo | None) -> dict[type, object]:
     if info is None:
         return {GetCurrentProjectRequest: GetCurrentProjectResultFailure(result_details="no current project")}
@@ -120,9 +131,10 @@ class TestListProjects:
         loaded = ProjectTemplateInfo(
             project_id="proj-1", validation=_validation(), name="Proj One", engine_version_compatible=True
         )
-        failed = ProjectTemplateInfo(
-            project_id="proj-2", validation=_validation(ProjectValidationStatus.UNUSABLE), name="Proj Two"
-        )
+        # Matches the engine's own construction of a failed entry exactly
+        # (on_list_project_templates_request: ProjectTemplateInfo(project_id=str(template_path),
+        # validation=validation), nothing else) rather than a name a failed entry never has.
+        failed = ProjectTemplateInfo(project_id="proj-2", validation=_validation(ProjectValidationStatus.UNUSABLE))
         responses = {
             ListProjectTemplatesRequest: ListProjectTemplatesResultSuccess(
                 successfully_loaded=[loaded], failed_to_load=[failed], result_details="ok"
@@ -140,6 +152,29 @@ class TestListProjects:
         assert by_id["proj-2"]["available"] is False
         assert by_id["proj-2"]["current"] is False
         assert by_id["proj-2"]["unavailable_reason"]
+
+    def test_a_failed_entrys_id_is_reused_as_its_file_path_but_never_as_its_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed entry's id is the stringified path that failed to load; a host must never display it as a name."""
+        failed = ProjectTemplateInfo(
+            project_id="/projects/broken/griptape-nodes-project.yml",
+            validation=_validation(ProjectValidationStatus.MISSING),
+        )
+        responses = {
+            ListProjectTemplatesRequest: ListProjectTemplatesResultSuccess(
+                successfully_loaded=[], failed_to_load=[failed], result_details="ok"
+            ),
+            **_current(None),
+        }
+        use_engine(monkeypatch, responses)
+
+        result = handle_list_projects(NukeListProjectsRequest())
+
+        assert isinstance(result, NukeListProjectsResultSuccess)
+        entry = result.projects[0]
+        assert entry["name"] == ""
+        assert entry["file_path"] == "/projects/broken/griptape-nodes-project.yml"
 
     def test_an_engine_incompatible_project_is_unavailable_with_a_reason_a_host_can_show(
         self, monkeypatch: pytest.MonkeyPatch
@@ -204,7 +239,7 @@ class TestGetCurrentProject:
             template=_template("Proj One", "a description"),
             validation=_validation(ProjectValidationStatus.FLAWED, problems=["something is off"]),
         )
-        responses = {**_current(info), **_resolve_workspace("/workspace/proj-1")}
+        responses = {**_current(info), **_workspace("/workspace/proj-1")}
         use_engine(monkeypatch, responses)
 
         result = handle_get_current_project(NukeGetCurrentProjectRequest())
@@ -227,41 +262,38 @@ class TestGetCurrentProject:
         assert isinstance(result, NukeGetCurrentProjectResultFailure)
 
     def test_a_project_with_no_backing_file_reports_an_empty_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The system defaults project has no backing file, but it still has a real, live workspace.
+
+        ``file_path`` is empty because the defaults are not file-backed. ``workspace_dir`` is
+        not: GetWorkspaceRequest names no project id to fail to resolve, so it answers with
+        whatever workspace the engine is actually configured against, defaults included.
+        """
         info = _project_info("<system-defaults>", file_path=None)
-        responses = {**_current(info), **_resolve_workspace(None)}
+        responses = {**_current(info), **_workspace("/workspace/global")}
         use_engine(monkeypatch, responses)
 
         result = handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
         assert result.file_path == ""
-        assert result.workspace_dir == ""
+        assert result.workspace_dir == "/workspace/global"
 
 
 class TestSetCurrentProject:
-    def test_reports_workspace_changed_when_the_resolved_workspace_differs(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        before_info = _project_info("proj-1")
+    def test_reports_workspace_changed_when_the_live_workspace_differs(self, monkeypatch: pytest.MonkeyPatch) -> None:
         after_info = _project_info("proj-2")
         workspaces = iter(["/workspace/proj-1", "/workspace/proj-2"])
-        projects = iter([before_info, after_info])
         fake = use_engine(
             monkeypatch,
             {
-                GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="", result_details="none loaded"),
-                GetFlowStateRequest: IDLE_FLOW,
-                GetCurrentProjectRequest: lambda _req: GetCurrentProjectResultSuccess(
-                    project_info=next(projects), result_details="ok"
-                ),
-                ResolveProjectWorkspaceRequest: lambda _req: ResolveProjectWorkspaceResultSuccess(
-                    workspace_dir=next(workspaces), result_details="resolved"
+                **_nothing_running(),
+                GetCurrentProjectRequest: GetCurrentProjectResultSuccess(project_info=after_info, result_details="ok"),
+                GetWorkspaceRequest: lambda _req: GetWorkspaceResultSuccess(
+                    workspace_path=next(workspaces), result_details="ok"
                 ),
                 SetCurrentProjectRequest: SetCurrentProjectResultSuccess(result_details="switched"),
             },
         )
-        # top_level_flow_name() returning "" makes is_running() treat nothing as running.
-        monkeypatch.setattr("nuke_host_api.engine.top_level_flow_name", lambda: None)
 
         result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
 
@@ -270,23 +302,47 @@ class TestSetCurrentProject:
         assert result.workspace_changed is True
         assert any(isinstance(req, SetCurrentProjectRequest) and req.project_id == "proj-2" for req in fake.requests)
 
-    def test_reports_workspace_unchanged_when_the_resolved_workspace_is_the_same(
+    def test_reports_workspace_unchanged_when_the_live_workspace_is_the_same(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         info = _project_info("proj-1")
         use_engine(
             monkeypatch,
             {
+                **_nothing_running(),
                 GetCurrentProjectRequest: GetCurrentProjectResultSuccess(project_info=info, result_details="ok"),
-                ResolveProjectWorkspaceRequest: ResolveProjectWorkspaceResultSuccess(
-                    workspace_dir="/workspace/proj-1", result_details="resolved"
-                ),
+                **_workspace("/workspace/proj-1"),
                 SetCurrentProjectRequest: SetCurrentProjectResultSuccess(result_details="switched"),
             },
         )
-        monkeypatch.setattr("nuke_host_api.engine.top_level_flow_name", lambda: None)
 
         result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-1"))
+
+        assert isinstance(result, NukeSetCurrentProjectResultSuccess)
+        assert result.workspace_changed is False
+
+    def test_a_switch_onto_system_defaults_sharing_the_outgoing_workspace_reports_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression for the offline resolver's blind spot: it cannot resolve the defaults sentinel at all.
+
+        ResolveProjectWorkspaceRequest answers None for any id with no readable project file,
+        which includes ``<system-defaults>``, so comparing resolved paths around this switch
+        would report a change whenever the defaults share the outgoing project's globally
+        configured workspace. GetWorkspaceRequest has no such gap: it names no project id.
+        """
+        info = _project_info("<system-defaults>", file_path=None)
+        use_engine(
+            monkeypatch,
+            {
+                **_nothing_running(),
+                GetCurrentProjectRequest: GetCurrentProjectResultSuccess(project_info=info, result_details="ok"),
+                **_workspace("/workspace/global"),
+                SetCurrentProjectRequest: SetCurrentProjectResultSuccess(result_details="switched"),
+            },
+        )
+
+        result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id=None))
 
         assert isinstance(result, NukeSetCurrentProjectResultSuccess)
         assert result.workspace_changed is False
@@ -308,18 +364,14 @@ class TestSetCurrentProject:
         assert "already executing" in str(result.result_details)
 
     def test_an_engine_refusal_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        info = _project_info("proj-1")
         use_engine(
             monkeypatch,
             {
-                GetCurrentProjectRequest: GetCurrentProjectResultSuccess(project_info=info, result_details="ok"),
-                ResolveProjectWorkspaceRequest: ResolveProjectWorkspaceResultSuccess(
-                    workspace_dir="/workspace/proj-1", result_details="resolved"
-                ),
+                **_nothing_running(),
+                **_workspace("/workspace/proj-1"),
                 SetCurrentProjectRequest: SetCurrentProjectResultFailure(result_details="engine version mismatch"),
             },
         )
-        monkeypatch.setattr("nuke_host_api.engine.top_level_flow_name", lambda: None)
 
         result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
 

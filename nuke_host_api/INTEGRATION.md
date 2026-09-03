@@ -555,9 +555,9 @@ the next three verbs let a host see which project the engine is on and change it
 | Field | Type | Notes |
 |---|---|---|
 | `id` | `str` | Opaque. Feed to `NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`. Do not parse or display |
-| `name` | `str` | Display label |
+| `name` | `str` | Display label. Empty for a failed entry rather than falling back to the opaque `id` |
 | `description` | `str` | Always empty here. Read `NukeDescribeProjectRequest` for the real value |
-| `file_path` | `str` | Absolute path to the project's YAML, empty for one with no backing file |
+| `file_path` | `str` | Absolute path to the project's YAML. Empty only for a project with no backing file (the system defaults); a failed entry's `id` is already that path, so it is reused here |
 | `parent_id` | `str` | The parent project's id, empty when this project has no parent |
 | `current` | `bool` | True for the project the engine is on right now |
 | `available` | `bool` | False when the template failed validation, or when its adjacent config requires an engine version this engine fails |
@@ -591,7 +591,7 @@ No arguments.
 | `description` | `str` | Empty when the author wrote none |
 | `file_path` | `str` | Empty for a project with no backing file, the system defaults project |
 | `base_dir` | `str` | Directory this project resolves its own relative paths against. Diagnostic |
-| `workspace_dir` | `str` | The workspace directory this project is actually using |
+| `workspace_dir` | `str` | The workspace directory the engine is actually using right now, read live. Never empty, including on the system defaults project |
 | `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING`. `GOOD` and `FLAWED` are usable; the other two are not |
 | `problems` | `list[str]` | Human-readable validation messages, for display. Empty when `validation_status` is `GOOD` |
 
@@ -620,7 +620,7 @@ engine treats as distinct from being on the system defaults project.
 | `NukeSetCurrentProjectResultSuccess` field | Type | Notes |
 |---|---|---|
 | `project_id` | `str` | The id actually activated, resolved from a requested `null` to the engine's system-defaults id |
-| `workspace_changed` | `bool` | Whether this project's resolved workspace directory differs from the one active immediately before this call |
+| `workspace_changed` | `bool` | Whether the engine's live workspace directory differs from the one active immediately before this call |
 
 Refuses while the engine is executing, with `NukeSetCurrentProjectResultFailure` worded like
 `NukeExecuteWorkflowRequest`'s running-guard: reloading libraries under a live run is worse

@@ -335,8 +335,9 @@ class NukeGetCurrentProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadS
             backing file, which is the system defaults project.
         base_dir: The directory this project resolves its own relative paths against.
             Diagnostic; a host does not construct paths from it.
-        workspace_dir: The workspace directory this project is actually using, resolved the
-            same way NukeDescribeProjectRequest previews it for a project not yet active.
+        workspace_dir: The workspace directory the engine is actually using right now,
+            read live rather than resolved from this project's id, so it is never empty,
+            including when this project is the system defaults.
         validation_status: One of ``"GOOD"``, ``"FLAWED"``, ``"UNUSABLE"``, ``"MISSING"``,
             the engine's own ProjectValidationStatus spelled as a plain string. ``GOOD`` and
             ``FLAWED`` are both usable; ``UNUSABLE`` and ``MISSING`` are not.
@@ -383,9 +384,11 @@ class NukeSetCurrentProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadS
     Args:
         project_id: The id actually activated, resolved from a requested ``None`` to
             whatever the engine's system-defaults id is. Opaque; do not parse or construct.
-        workspace_changed: Whether this project's workspace directory differs from the one
-            that was active immediately before this call, read by comparing the engine's
-            own workspace resolution before and after the switch. True means the engine
+        workspace_changed: Whether the engine's active workspace directory differs from the
+            one that was active immediately before this call, read live before and after the
+            switch rather than resolved from either project's id, so a switch onto or off of
+            the system defaults is never mistaken for a change when the workspace it shares
+            with the outgoing or incoming project stayed the same. True means the engine
             re-registered every workflow against the new workspace, so every id from an
             earlier NukeListWorkflowsRequest and every port from an earlier
             NukeDescribeWorkflowRequest is stale and must be re-read.

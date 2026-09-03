@@ -155,10 +155,13 @@ down and rebuilt mid-flight.
 whenever the target project's library-affecting config (which libraries to register or
 download, the required engine version, or the resolved libraries directory) differs from
 the outgoing project's, and that decision is made independently of whether the workspace
-directory changed. `workspace_changed` is computed here by resolving the workspace before
-and after the switch through the same call `NukeDescribeProjectRequest` uses to preview one;
-it answers only "did workflows get re-registered against a new workspace," never "did
-libraries reload." A reload tears down this library's request handlers and its outbound
+directory changed. `workspace_changed` is computed here by reading the engine's live workspace directory
+(`GetWorkspaceRequest`) before and after the switch, not by resolving either project's id
+through the same offline previewer `NukeDescribeProjectRequest` uses: that resolver answers
+none for any id with no readable project file on disk, which includes the system-defaults
+sentinel, so comparing resolved paths around a switch onto or off of system defaults would
+report a change whenever none happened. `workspace_changed` answers only "did workflows get
+re-registered against a new workspace," never "did libraries reload." A reload tears down this library's request handlers and its outbound
 event bridge and rebuilds both (`before_library_unregistered` in
 `nuke_nodes/nuke_library_advanced.py`), so a host must send `NukeConnectRequest` again and
 re-run `NukeListWorkflowsRequest`/`NukeDescribeWorkflowRequest` after every successful
