@@ -11,8 +11,6 @@ from griptape_nodes.retained_mode.events.execution_events import (
     StartFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.parameter_events import (
-    GetParameterValueRequest,
-    GetParameterValueResultSuccess,
     SetParameterValueRequest,
     SetParameterValueResultSuccess,
 )
@@ -35,7 +33,6 @@ from nuke_host_api.events import (
     NukeGetExecutionStateResultSuccess,
 )
 from nuke_host_api.protocol import ExecutionState
-from nuke_host_api.value_types import normalize_value
 
 
 @verb(NukeExecuteWorkflowRequest)
@@ -67,7 +64,7 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    allowed_inputs = _declared_input_ports(request.workflow_id)
+    allowed_inputs = _declared_input_parameters(request.workflow_id)
 
     loaded = engine.request(
         RunWorkflowFromRegistryRequest(workflow_name=request.workflow_id, run_with_clean_slate=True),
@@ -110,12 +107,12 @@ def handle_execute_workflow(
     )
 
 
-def _declared_input_ports(workflow_id: str) -> set[tuple[str, str]]:
-    """Return the ports a host may set, or nothing when the workflow cannot be read."""
+def _declared_input_parameters(workflow_id: str) -> set[tuple[str, str]]:
+    """Return the parameters a host may set, or nothing when the workflow cannot be read."""
     entry = engine.workflow_entry(workflow_id)
     if entry is None:
         return set()
-    return shape.input_port_ids(entry)
+    return shape.input_parameter_ids(entry)
 
 
 def _apply_inputs(
@@ -144,7 +141,7 @@ def _apply_inputs(
                     {
                         "node": node_name,
                         "parameter": parameter_name,
-                        "reason": "Not a declared input port of this workflow.",
+                        "reason": "Not a declared input parameter of this workflow.",
                     }
                 )
                 continue
@@ -162,13 +159,15 @@ def _apply_inputs(
 
 @verb(NukeGetExecutionStateRequest)
 def handle_get_execution_state(
-    request: NukeGetExecutionStateRequest,
+    request: NukeGetExecutionStateRequest,  # noqa: ARG001
 ) -> NukeGetExecutionStateResultSuccess | NukeGetExecutionStateResultFailure:
-    """Translate the engine's flow state and read its current output values.
+    """Translate the engine's flow state.
 
-    Holds no state of its own. Outputs come from the engine's live parameter values, so
-    this cannot drift from the engine's own view the way a cached copy would, and it
-    still works after a host reconnects and has missed every notification.
+    Holds no state of its own, so this cannot drift from the engine's own view the way a
+    cached copy would, and it still works after a host reconnects and has missed every
+    notification. Reports execution state only: a workflow's parameter values are a separate
+    read, ``NukeGetParameterValuesRequest``, because each one costs an engine round trip per
+    parameter and a host polling only for liveness should not pay for it.
     """
     attempted = "to read the engine's execution state"
 
@@ -193,43 +192,14 @@ def handle_get_execution_state(
     running = engine.flow_is_running(state.value)
 
     workflow_id = engine.current_workflow_id()
-    outputs: dict[str, dict[str, Any]] = {}
-    if request.include_outputs and workflow_id:
-        outputs = _read_output_values(workflow_id)
 
     return NukeGetExecutionStateResultSuccess(
         running=running,
         active_nodes=active,
         involved_nodes=involved,
         workflow_id=workflow_id,
-        outputs=outputs,
         result_details=f"Engine is {'running' if running else 'idle'} with {len(involved)} node(s) involved.",
     )
-
-
-def _read_output_values(workflow_id: str) -> dict[str, dict[str, Any]]:
-    """Read the declared output ports' current values, normalized.
-
-    Driven by the same workflow_shape that describe_workflow reports, so what a host can
-    read back is exactly what it was told to expect. Ports the engine cannot answer for
-    are omitted rather than reported as null, so "absent" and "empty" stay distinct.
-    """
-    entry = engine.workflow_entry(workflow_id)
-    if entry is None:
-        return {}
-
-    outputs: dict[str, dict[str, Any]] = {}
-    for port in shape.ports(shape.workflow_shape(entry).get("outputs")):
-        attempt = engine.request(
-            GetParameterValueRequest(node_name=port["node"], parameter_name=port["parameter"]),
-            GetParameterValueResultSuccess,
-        )
-        if attempt.value is None:
-            continue
-        outputs.setdefault(port["node"], {})[port["parameter"]] = normalize_value(
-            attempt.value.value, attempt.value.type
-        )
-    return outputs
 
 
 @verb(NukeCancelExecutionRequest)

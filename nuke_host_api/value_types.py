@@ -63,7 +63,7 @@ _HAS_BRACE_TOKEN = re.compile(r"\{[^{}]*\}")
 _HASH_RUN = re.compile(r"#+")
 
 # A leading '/', a Windows drive prefix ('C:\' or 'C:/'), or a UNC prefix ('\\server\share') --
-# shapes an operating system treats as absolute, regardless of what type a port declares.
+# shapes an operating system treats as absolute, regardless of what type a parameter declares.
 _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 
 # Engine parameter type names mapped to host types. Unrecognized names fall back to
@@ -74,7 +74,7 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
     "ImageUrlArtifact": ValueType.IMAGE,
     # An image sequence is an image with many sources, so both names in use for one land on
     # GTImage rather than degrading to GTFile or GTText. "Sequence" is what this library's
-    # own NukeScriptNode declares on a sequence port.
+    # own NukeScriptNode declares on a sequence parameter.
     "ImageSequenceArtifact": ValueType.IMAGE,
     "Sequence": ValueType.IMAGE,
     "VideoUrlArtifact": ValueType.MOVIE,
@@ -85,7 +85,7 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
     "bool": ValueType.BOOL,
 }
 
-# A container port's declared name wraps its element type, as ``list[ImageUrlArtifact]``
+# A container parameter's declared name wraps its element type, as ``list[ImageUrlArtifact]``
 # (built in the engine's ``core_types.py``). The brackets defeat both the mapping table and
 # the ``Artifact`` suffix test, so the wrapper comes off before either one runs.
 _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
@@ -94,7 +94,7 @@ _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
 def value_type_for_engine_type(engine_type: str | None) -> str:
     """Map a declared engine parameter type name to a value type.
 
-    Used for port metadata in describe_workflow, where only the type *name* is
+    Used for parameter metadata in describe_workflow, where only the type *name* is
     available and no value has been produced yet.
 
     A declared name is a hint for building a knob; the runtime descriptor's ``value_type``
@@ -266,7 +266,7 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
 
     Args:
         value: The engine-side value. Artifact instance, string, bytes, list, or scalar.
-        declared_engine_type: The port's declared type name, when known. Used to
+        declared_engine_type: The parameter's declared type name, when known. Used to
             disambiguate bare strings, which carry no media type of their own.
 
     Returns:
@@ -319,8 +319,8 @@ def _sourceless_descriptor(value_type: str, engine_type: str) -> dict[str, Any]:
     """Assemble a descriptor that carries no source, downgrading any media or file claim to text.
 
     Nothing here can point a host at bytes, so ``GTImage``, ``GTMovie`` and ``GTFile`` are not
-    honest answers: a declared media type describes what a port is *for*, not what this value
-    turned out to be. Prose on an image-declared port is still prose. ``GTText`` is the one
+    honest answers: a declared media type describes what a parameter is *for*, not what this value
+    turned out to be. Prose on an image-declared parameter is still prose. ``GTText`` is the one
     type that means something without a source, so that is what a host is told, keeping the
     published rule that only GTText, GTNumber, GTBool and GTNull arrive sourceless.
     """
@@ -343,7 +343,7 @@ def _normalize_string(value: str, declared_engine_type: str | None, engine_type:
     nothing about media type and must not manufacture a fake path.
 
     An artifact-declared value keeps that declared type when it is locator-shaped, so
-    "/render/mix_final" on an audio port stays GTFile even though the extension is unknown.
+    "/render/mix_final" on an audio parameter stays GTFile even though the extension is unknown.
     With no locator shape there is no source to hand over, so the media claim would be empty and
     collapses to text instead; see ``_sourceless_descriptor``.
     """
