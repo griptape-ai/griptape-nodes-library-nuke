@@ -53,6 +53,7 @@ class Verb:
     DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
     EXECUTE_WORKFLOW = "NukeExecuteWorkflowRequest"
     GET_EXECUTION_STATE = "NukeGetExecutionStateRequest"
+    GET_PORT_VALUES = "NukeGetPortValuesRequest"
     CANCEL_EXECUTION = "NukeCancelExecutionRequest"
 
 
@@ -73,6 +74,23 @@ class NodeState:
     RUNNING = "running"
     RESOLVED = "resolved"
     FAILED = "failed"
+
+
+class PortSection:
+    """The two sides of a workflow's declared shape, matching describe_workflow's fields.
+
+    ``NukeGetPortValuesRequest`` selects one, the other, or both by name, so a host reads
+    every start-flow parameter or every end-flow parameter in one call instead of one
+    ``GetParameterValueRequest`` per port. The names are the same strings
+    ``NukeDescribeWorkflowResultSuccess`` already uses for its two fields, so a host that
+    read describe once already knows the vocabulary this request selects on.
+    """
+
+    INPUTS = "inputs"
+    OUTPUTS = "outputs"
+
+
+PORT_SECTIONS = (PortSection.INPUTS, PortSection.OUTPUTS)
 
 
 class ExecutionState:
@@ -96,10 +114,11 @@ class ExecutionState:
     is not emitted today. A host detects an actual failure only by catching the live
     ``NukeNodeStateEvent`` with ``state="failed"`` as it is pushed.
     ``NukeGetExecutionStateRequest`` cannot recover a missed one after the fact: its result
-    carries running state, active/involved nodes, and output values, never a flow-level
-    outcome, because the engine exposes none. A host that drops its connection or
-    subscribes late and misses that push has no way to learn, after the fact, that a run
-    failed.
+    carries running state and active/involved nodes, never a flow-level outcome, because
+    the engine exposes none. Values live on ``NukeGetPortValuesRequest`` instead, a
+    separate call with a separate purpose, and it carries no outcome either. A host that
+    drops its connection or subscribes late and misses the live push has no way to learn,
+    after the fact, that a run failed.
 
     ``CANCELLED`` may be followed by ``COMPLETED`` for the same run: the engine's cancel and
     error paths both end in the same completion event, and whether a host observes both for

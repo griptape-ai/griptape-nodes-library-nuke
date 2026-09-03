@@ -23,15 +23,11 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.parameter_events import (
-    GetParameterValueRequest,
-    GetParameterValueResultSuccess,
     SetParameterValueRequest,
     SetParameterValueResultFailure,
     SetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
-    ListAllWorkflowsRequest,
-    ListAllWorkflowsResultSuccess,
     RunWorkflowFromRegistryRequest,
     RunWorkflowFromRegistryResultFailure,
 )
@@ -50,8 +46,8 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow, handle_get_execution_state
 from nuke_host_api.handlers.execution import _apply_inputs
-from nuke_host_api.protocol import ExecutionState, ValueType
-from tests.unit.host_api_fakes import SHAPE, execute_responses, use_engine
+from nuke_host_api.protocol import ExecutionState
+from tests.unit.host_api_fakes import execute_responses, use_engine
 
 NOTHING_LOADED = {GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok")}
 
@@ -247,49 +243,13 @@ class TestGetExecutionState:
             },
         )
 
-        result = handle_get_execution_state(NukeGetExecutionStateRequest(include_outputs=False))
+        result = handle_get_execution_state(NukeGetExecutionStateRequest())
 
         assert isinstance(result, NukeGetExecutionStateResultSuccess)
         assert result.running is True
         assert result.active_nodes == ["N1"]
         assert result.involved_nodes == ["N1", "N2"]
         assert result.workflow_id == "wf1"
-        assert result.outputs == {}
-
-    def test_include_outputs_reads_the_declared_output_ports(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def respond_to_get_value(request: GetParameterValueRequest) -> Any:
-            if request.parameter_name == "was_successful":
-                return GetParameterValueResultSuccess(
-                    input_types=["bool"], type="bool", output_type="bool", value=True, result_details="ok"
-                )
-            return GetParameterValueResultSuccess(
-                input_types=["AudioUrlArtifact"],
-                type="AudioUrlArtifact",
-                output_type="AudioUrlArtifact",
-                value="http://x/audio.mp3",
-                result_details="ok",
-            )
-
-        use_engine(
-            monkeypatch,
-            {
-                GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
-                GetFlowStateRequest: GetFlowStateResultSuccess(
-                    control_nodes=[], resolving_nodes=[], involved_nodes=[], result_details="ok"
-                ),
-                GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf1", result_details="ok"),
-                ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
-                    workflows={"wf1": {"workflow_shape": SHAPE}}, result_details="ok"
-                ),
-                GetParameterValueRequest: respond_to_get_value,
-            },
-        )
-
-        result = handle_get_execution_state(NukeGetExecutionStateRequest(include_outputs=True))
-
-        assert isinstance(result, NukeGetExecutionStateResultSuccess)
-        assert result.outputs["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
-        assert result.outputs["End Flow"]["mixed_audio"]["value_type"] == ValueType.FILE
 
     def test_fails_when_no_workflow_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, NOTHING_LOADED)

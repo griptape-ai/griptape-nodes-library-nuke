@@ -192,18 +192,16 @@ class NukeExecuteWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFai
 @dataclass
 @PayloadRegistry.register
 class NukeGetExecutionStateRequest(RequestPayload):
-    """Read what the engine is executing right now, and the outputs it has produced.
+    """Read what the engine is executing right now.
 
-    The recovery path. Notifications are fire-and-forget with no replay, so a host that
-    connected mid-execution or dropped its socket has permanently missed events. This reads
-    current truth from the engine instead.
+    The recovery path for running state. Notifications are fire-and-forget with no replay,
+    so a host that connected mid-execution or dropped its socket has permanently missed
+    events. This reads current truth from the engine instead.
 
-    Args:
-        include_outputs: Read the current workflow's declared output ports. Costs one
-            engine request per port, so a host polling only for liveness can turn it off.
+    Reports execution state only. A workflow's current port values are a separate
+    question with a separate cost (one engine read per port), so they are read with
+    ``NukeGetPortValuesRequest`` instead of being folded in here. One verb, one meaning.
     """
-
-    include_outputs: bool = True
 
 
 @dataclass
@@ -219,22 +217,74 @@ class NukeGetExecutionStateResultSuccess(WorkflowNotAlteredMixin, ResultPayloadS
         active_nodes: Nodes currently being resolved.
         involved_nodes: Nodes participating in the current execution.
         workflow_id: The workflow currently loaded, or empty when none is.
-        outputs: ``{node: {parameter: value_descriptor}}`` read from the engine's live
-            parameter values, not from a cache in this layer. Empty when
-            ``include_outputs`` was false or no workflow is loaded.
     """
 
     running: bool
     active_nodes: list[str]
     involved_nodes: list[str]
     workflow_id: str = ""
-    outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
 @PayloadRegistry.register
 class NukeGetExecutionStateResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
     """The engine could not report its execution state, usually because no flow is loaded."""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeGetPortValuesRequest(RequestPayload):
+    """Read every declared port's current value, selectable by side.
+
+    The bulk-read path: a host that wants every start-flow parameter, or every end-flow
+    parameter, reads them in one call instead of issuing one ``GetParameterValueRequest``
+    per port itself. ``NukeDescribeWorkflowRequest`` already told a host which ports exist;
+    this reads what they currently hold.
+
+    Values exist only for the loaded graph, so this takes no ``workflow_id``: it always
+    answers for whatever ``NukeExecuteWorkflowRequest`` most recently loaded, the same
+    workflow ``NukeGetExecutionStateResultSuccess.workflow_id`` names.
+
+    Args:
+        sections: Which of ``protocol.PORT_SECTIONS`` to read. Empty means every section,
+            which lets a host that wants both sides skip spelling them out. An unknown
+            name is refused rather than silently answering for nothing.
+    """
+
+    sections: list[str] = field(default_factory=list)
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeGetPortValuesResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """Every requested section's port values, read live from the engine.
+
+    Args:
+        workflow_id: The workflow these values belong to. Echoed so a host that reads this
+            after a reconnect can confirm it matches what it expected.
+        requested_sections: The sections actually read, so a host can tell a section it did
+            not ask for from a section it asked for and got nothing back.
+        inputs: ``{node: {parameter: value_descriptor}}`` for the start-flow side. Empty
+            when ``inputs`` was not requested or the workflow declares none.
+        outputs: Same shape, for the end-flow side. The only definition of "outputs" in
+            this protocol, matching ``NukeDescribeWorkflowResultSuccess.outputs``.
+        unavailable: Declared ports the engine would not answer for, as
+            ``{section, node, parameter, reason}``. Reported rather than silently omitted,
+            because a missing entry and an empty one mean different things to a host
+            building a knob: one is unset, the other could not be read at all.
+    """
+
+    workflow_id: str
+    requested_sections: list[str]
+    inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    unavailable: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeGetPortValuesResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """No workflow is loaded, or a requested section name is not in ``protocol.PORT_SECTIONS``."""
 
 
 @dataclass
@@ -308,7 +358,7 @@ class NukeExecutionStateEvent(AppPayload):
     reports values for whichever node control flow happened to end on, which is often not
     a declared output node, so putting them here would give one field two meanings.
 
-    A host reads outputs with ``NukeGetExecutionStateRequest``, which is the same call it
+    A host reads outputs with ``NukeGetPortValuesRequest``, which is the same call it
     needs after a reconnect. One code path, always matching what describe promised.
 
     Keeping this callback free of engine requests also honours the engine's instruction
