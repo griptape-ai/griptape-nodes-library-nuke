@@ -28,7 +28,7 @@ has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest` |
+| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
@@ -540,6 +540,153 @@ No arguments. Cancels whatever is running.
 | Success reply | Cancellation requested only. Not confirmation that execution stopped |
 | Terminal state | Arrives as `NukeExecutionStateEvent` with `state: "cancelled"` |
 | Nothing running | Returns `NukeCancelExecutionResultFailure` rather than a silent no-op |
+
+### NukeListProjectsRequest
+
+Workflows are registered per workspace and a project decides the workspace, so this and
+the next three verbs let a host see which project the engine is on and change it.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `include_system_builtins` | `bool` | `false` | `true` also lists the system defaults entry |
+
+`NukeListProjectsResultSuccess.projects` entries:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `str` | Opaque. Feed to `NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`. Do not parse or display |
+| `name` | `str` | Display label. Empty for a failed entry rather than falling back to the opaque `id` |
+| `description` | `str` | Always empty here. Read `NukeDescribeProjectRequest` for the real value |
+| `file_path` | `str` | Absolute path to the project's YAML. Empty only for a project with no backing file (the system defaults); a failed entry's `id` is already that path, so it is reused here |
+| `parent_id` | `str` | The parent project's id, empty when this project has no parent |
+| `current` | `bool` | True for the project the engine is on right now |
+| `available` | `bool` | False when the template failed validation, or when its adjacent config requires an engine version this engine fails |
+| `unavailable_reason` | `str` | Why an entry is greyed out. Empty when `available` |
+
+```json
+{
+  "projects": [
+    {
+      "id": "proj-1",
+      "name": "Nuke Smoke Project",
+      "description": "",
+      "file_path": "/projects/proj-1/griptape-nodes-project.yml",
+      "parent_id": "",
+      "current": true,
+      "available": true,
+      "unavailable_reason": ""
+    }
+  ]
+}
+```
+
+### NukeGetCurrentProjectRequest
+
+No arguments.
+
+| `NukeGetCurrentProjectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `id` | `str` | Opaque, as above |
+| `name` | `str` | |
+| `description` | `str` | Empty when the author wrote none |
+| `file_path` | `str` | Empty for a project with no backing file, the system defaults project |
+| `base_dir` | `str` | Directory this project resolves its own relative paths against. Diagnostic |
+| `workspace_dir` | `str` | The workspace directory the engine is actually using right now, read live. Never empty, including on the system defaults project |
+| `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING`. `GOOD` and `FLAWED` are usable; the other two are not |
+| `problems` | `list[str]` | Human-readable validation messages, for display. Empty when `validation_status` is `GOOD` |
+
+`NukeGetCurrentProjectResultFailure` means no current project is set at all, which the
+engine treats as distinct from being on the system defaults project.
+
+```json
+{
+  "id": "proj-1",
+  "name": "Nuke Smoke Project",
+  "description": "",
+  "file_path": "/projects/proj-1/griptape-nodes-project.yml",
+  "base_dir": "/projects/proj-1",
+  "workspace_dir": "/workspace/proj-1",
+  "validation_status": "GOOD",
+  "problems": []
+}
+```
+
+### NukeSetCurrentProjectRequest
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `project_id` | `str \| null` | `null` | Id from `NukeListProjectsRequest` or `NukeGetCurrentProjectRequest`. `null` requests the system defaults, mirroring the engine's own request exactly |
+
+| `NukeSetCurrentProjectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `project_id` | `str` | The id actually activated, resolved from a requested `null` to the engine's system-defaults id |
+| `workspace_changed` | `bool` | Whether the engine's live workspace directory differs from the one active immediately before this call |
+
+Refuses while the engine is executing, with `NukeSetCurrentProjectResultFailure` worded like
+`NukeExecuteWorkflowRequest`'s running-guard: reloading libraries under a live run is worse
+than refusing, since the very library driving the run could be torn down and rebuilt
+mid-flight. The engine also leaves the previously active project active on any failure.
+
+**Always reconnect after a successful switch, whatever `workspace_changed` says.** Beyond
+re-registering workflows on a workspace change, the engine separately reloads every
+library, this one included, whenever the target project's library-affecting config differs
+from the outgoing project's, and that decision is made independently of
+`workspace_changed`: a switch can reload every library while its workspace stays the same,
+or leave every library untouched while its workspace changes. The engine exposes no field
+for that decision, so this result cannot say after the fact whether it happened. A reload
+tears down this library's request handlers and its outbound event bridge and rebuilds
+both, so a host that keeps talking on its old connection without reconnecting may find
+every notification has silently stopped, and its cached results from `NukeListWorkflowsRequest`
+and `NukeDescribeWorkflowRequest` are stale regardless of whether the reload happened. Send
+`NukeConnectRequest` again immediately after reading this result, then re-run
+`NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` for anything the host plans to
+run next. This reply itself is unaffected by any of this: the engine performs the reload
+synchronously while handling the request, before the reply is built, so nothing about a
+reload prevents this result from reaching the host.
+
+If the target project's workspace does not configure this library at all, the reload
+removes this library's verbs entirely, and every request after that, including the
+reconnect, fails at the engine's own dispatch layer with an error this layer never shaped,
+because it no longer owns the verb table to shape one. There is nothing a host can do about
+that beyond restoring a project that does configure this library, from outside this
+protocol.
+
+```json
+{ "project_id": "proj-2" }
+```
+
+```json
+{ "project_id": "proj-2", "workspace_changed": true }
+```
+
+### NukeDescribeProjectRequest
+
+Preview a project's workspace and validation before activating it with
+`NukeSetCurrentProjectRequest`.
+
+| Request field | Type | Notes |
+|---|---|---|
+| `project_id` | `str` | Required. From `NukeListProjectsRequest` |
+
+| `NukeDescribeProjectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `project_id` | `str` | Echoed |
+| `name` | `str` | |
+| `description` | `str` | Empty when the author wrote none |
+| `workspace_dir` | `str` | The workspace directory this project would resolve to if activated, empty when the id resolves to no readable project file |
+| `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING` |
+| `problems` | `list[str]` | Human-readable validation messages |
+
+```json
+{
+  "project_id": "proj-2",
+  "name": "Second Unit Project",
+  "description": "",
+  "workspace_dir": "/workspace/proj-2",
+  "validation_status": "GOOD",
+  "problems": []
+}
+```
 
 ## Notifications
 
