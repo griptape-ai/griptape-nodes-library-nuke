@@ -1,4 +1,4 @@
-"""Workflow discovery: what a host may run, and what each one's ports are."""
+"""Workflow discovery: what a host may run, and what each one's parameters are."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def handle_list_workflows(
 def handle_describe_workflow(
     request: NukeDescribeWorkflowRequest,
 ) -> NukeDescribeWorkflowResultSuccess | NukeDescribeWorkflowResultFailure:
-    """Describe one workflow, narrowing every port type on the way out.
+    """Describe one workflow, narrowing every parameter type on the way out.
 
     Reads the table rather than a single entry, because an unreadable registry and an
     unknown id are different answers to a host: one is worth retrying, the other never is.
@@ -84,7 +84,7 @@ def handle_describe_workflow(
         workflow_id=request.workflow_id,
         name=str(entry.get("name") or request.workflow_id),
         description=str(entry.get("description") or ""),
-        inputs=shape.ports(workflow_shape.get("inputs")),
-        outputs=shape.ports(workflow_shape.get("outputs")),
+        inputs=shape.declared_parameters(workflow_shape.get("inputs")),
+        outputs=shape.declared_parameters(workflow_shape.get("outputs")),
         result_details=f"Described workflow '{request.workflow_id}' for a host client.",
     )

@@ -97,7 +97,7 @@ class TestExecuteWorkflow:
         )
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
-    def test_an_input_that_is_not_a_declared_port_is_rejected_without_reaching_the_engine(
+    def test_an_input_that_is_not_a_declared_parameter_is_rejected_without_reaching_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The engine would set a parameter on any node in the loaded graph.
@@ -120,13 +120,13 @@ class TestExecuteWorkflow:
             {
                 "node": "Some Private Node",
                 "parameter": "api_key",
-                "reason": "Not a declared input port of this workflow.",
+                "reason": "Not a declared input parameter of this workflow.",
             }
         ]
         touched = {r.node_name for r in engine.requests if isinstance(r, SetParameterValueRequest)}
         assert touched == {"Start Flow"}
 
-    def test_the_preflight_reads_port_identity_without_normalizing_defaults(
+    def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Normalizing a macro-templated default issues an engine request.
@@ -136,7 +136,7 @@ class TestExecuteWorkflow:
         """
 
         def explode(*_args: Any, **_kwargs: Any) -> Any:
-            msg = "execute must not normalize port defaults; it needs identity only"
+            msg = "execute must not normalize parameter defaults; it needs identity only"
             raise AssertionError(msg)
 
         use_engine(monkeypatch, execute_responses())

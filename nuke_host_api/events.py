@@ -198,9 +198,9 @@ class NukeGetExecutionStateRequest(RequestPayload):
     so a host that connected mid-execution or dropped its socket has permanently missed
     events. This reads current truth from the engine instead.
 
-    Reports execution state only. A workflow's current port values are a separate
-    question with a separate cost (one engine read per port), so they are read with
-    ``NukeGetPortValuesRequest`` instead of being folded in here. One verb, one meaning.
+    Reports execution state only. A workflow's current parameter values are a separate
+    question with a separate cost (one engine read per parameter), so they are read with
+    ``NukeGetParameterValuesRequest`` instead of being folded in here. One verb, one meaning.
     """
 
 
@@ -233,12 +233,12 @@ class NukeGetExecutionStateResultFailure(WorkflowNotAlteredMixin, ResultPayloadF
 
 @dataclass
 @PayloadRegistry.register
-class NukeGetPortValuesRequest(RequestPayload):
-    """Read every declared port's current value, selectable by side.
+class NukeGetParameterValuesRequest(RequestPayload):
+    """Read every declared parameter's current value, selectable by side.
 
     The bulk-read path: a host that wants every start-flow parameter, or every end-flow
     parameter, reads them in one call instead of issuing one ``GetParameterValueRequest``
-    per port itself. ``NukeDescribeWorkflowRequest`` already told a host which ports exist;
+    per parameter itself. ``NukeDescribeWorkflowRequest`` already told a host which parameters exist;
     this reads what they currently hold.
 
     Values exist only for the loaded graph, so this takes no ``workflow_id``: it always
@@ -246,7 +246,7 @@ class NukeGetPortValuesRequest(RequestPayload):
     workflow ``NukeGetExecutionStateResultSuccess.workflow_id`` names.
 
     Args:
-        sections: Which of ``protocol.PORT_SECTIONS`` to read. Empty means every section,
+        sections: Which of ``protocol.PARAMETER_SECTIONS`` to read. Empty means every section,
             which lets a host that wants both sides skip spelling them out. An unknown
             name is refused rather than silently answering for nothing.
     """
@@ -256,8 +256,8 @@ class NukeGetPortValuesRequest(RequestPayload):
 
 @dataclass
 @PayloadRegistry.register
-class NukeGetPortValuesResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
-    """Every requested section's port values, read live from the engine.
+class NukeGetParameterValuesResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """Every requested section's parameter values, read live from the engine.
 
     Args:
         workflow_id: The workflow these values belong to. Echoed so a host that reads this
@@ -268,7 +268,7 @@ class NukeGetPortValuesResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSucce
             when ``inputs`` was not requested or the workflow declares none.
         outputs: Same shape, for the end-flow side. The only definition of "outputs" in
             this protocol, matching ``NukeDescribeWorkflowResultSuccess.outputs``.
-        unavailable: Declared ports the engine would not answer for, as
+        unavailable: Declared parameters the engine would not answer for, as
             ``{section, node, parameter, reason}``. Reported rather than silently omitted,
             because a missing entry and an empty one mean different things to a host
             building a knob: one is unset, the other could not be read at all.
@@ -283,8 +283,8 @@ class NukeGetPortValuesResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSucce
 
 @dataclass
 @PayloadRegistry.register
-class NukeGetPortValuesResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """No workflow is loaded, or a requested section name is not in ``protocol.PORT_SECTIONS``."""
+class NukeGetParameterValuesResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """No workflow is loaded, or a requested section name is not in ``protocol.PARAMETER_SECTIONS``."""
 
 
 @dataclass
@@ -354,11 +354,11 @@ class NukeExecutionStateEvent(AppPayload):
     """Execution reached a terminal state.
 
     Carries no outputs, deliberately. "Outputs" has exactly one meaning in this protocol:
-    the ports ``NukeDescribeWorkflowRequest`` declared. The engine's terminal event
+    the parameters ``NukeDescribeWorkflowRequest`` declared. The engine's terminal event
     reports values for whichever node control flow happened to end on, which is often not
     a declared output node, so putting them here would give one field two meanings.
 
-    A host reads outputs with ``NukeGetPortValuesRequest``, which is the same call it
+    A host reads outputs with ``NukeGetParameterValuesRequest``, which is the same call it
     needs after a reconnect. One code path, always matching what describe promised.
 
     Keeping this callback free of engine requests also honours the engine's instruction

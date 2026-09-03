@@ -194,10 +194,10 @@ class TestDescribe:
             if not entry["runnable"]:
                 assert entry["unavailable_reason"], "an unrunnable entry must say why"
 
-    def test_every_declared_port_is_completely_described(self, client: HostClient) -> None:
+    def test_every_declared_parameter_is_completely_described(self, client: HostClient) -> None:
         """A host builds knobs from this, so every field it indexes must be present.
 
-        This is the assertion the mocked suite cannot make: real ports come from a real
+        This is the assertion the mocked suite cannot make: real parameters come from a real
         workflow_shape, which arrives as a JSON string for some workflows and is absent for
         others.
         """
@@ -206,20 +206,22 @@ class TestDescribe:
         assert succeeded(reply), f"describe failed: {detail_of(reply)}"
         body = result_of(reply)
 
-        ports = body["inputs"] + body["outputs"]
-        assert ports, f"workflow {workflow_id!r} was listed runnable but declares no ports"
-        for port in ports:
-            assert port["node"] and port["parameter"]
-            assert port["name"] == f"{port['node']}.{port['parameter']}"
-            assert port["type"] in VALUE_TYPES, f"{port['name']} escaped the closed set with {port['type']!r}"
-            assert port["default"]["value_type"] in VALUE_TYPES, f"{port['name']} default is not a descriptor"
-            assert isinstance(port["tooltip"], str)
-            assert isinstance(port["settable"], bool)
+        parameters = body["inputs"] + body["outputs"]
+        assert parameters, f"workflow {workflow_id!r} was listed runnable but declares no parameters"
+        for declared in parameters:
+            assert declared["node"] and declared["parameter"]
+            assert declared["name"] == f"{declared['node']}.{declared['parameter']}"
+            assert declared["type"] in VALUE_TYPES, (
+                f"{declared['name']} escaped the closed set with {declared['type']!r}"
+            )
+            assert declared["default"]["value_type"] in VALUE_TYPES, f"{declared['name']} default is not a descriptor"
+            assert isinstance(declared["tooltip"], str)
+            assert isinstance(declared["settable"], bool)
 
-    def test_no_control_flow_port_is_exposed(self, client: HostClient) -> None:
+    def test_no_control_flow_parameter_is_exposed(self, client: HostClient) -> None:
         workflow_id = _smoke_workflow_id(client)
         body = result_of(client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": workflow_id}))
-        names = [port["parameter"] for port in body["inputs"] + body["outputs"]]
+        names = [declared["parameter"] for declared in body["inputs"] + body["outputs"]]
         assert not [name for name in names if name in {"exec_in", "exec_out"}], (
             f"control flow wiring leaked into the host surface: {names}"
         )
@@ -291,7 +293,7 @@ class TestExecute:
     def test_declared_outputs_are_readable_after_a_run(self, client: HostClient) -> None:
         """The recovery path, and the only definition of outputs in this protocol.
 
-        What it returns must be the ports describe promised, not whichever node control flow
+        What it returns must be the parameters describe promised, not whichever node control flow
         happened to end on.
         """
         workflow_id = _smoke_workflow_id(client)
@@ -299,14 +301,14 @@ class TestExecute:
         assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
         client.drain(NOTIFICATION_WINDOW_S)
 
-        reply = client.request(Verb.GET_PORT_VALUES, {"sections": ["outputs"]})
-        assert succeeded(reply), f"reading port values failed: {detail_of(reply)}"
+        reply = client.request(Verb.GET_PARAMETER_VALUES, {"sections": ["outputs"]})
+        assert succeeded(reply), f"reading parameter values failed: {detail_of(reply)}"
         body = result_of(reply)
         assert body["workflow_id"] == workflow_id
 
-        promised = {port["node"] for port in described["outputs"]}
+        promised = {declared["node"] for declared in described["outputs"]}
         assert promised <= set(body["outputs"]), (
-            f"describe promised outputs on {sorted(promised)} but port values returned {sorted(body['outputs'])}"
+            f"describe promised outputs on {sorted(promised)} but parameter values returned {sorted(body['outputs'])}"
         )
         for parameters in body["outputs"].values():
             for descriptor in parameters.values():
@@ -340,24 +342,30 @@ class TestExecute:
         assert succeeded(reply), f"execute failed for a reason other than the bad input: {detail_of(reply)}"
         rejected = result_of(reply)["rejected_inputs"]
         assert rejected == [
-            {"node": "No Such Node", "parameter": "api_key", "reason": "Not a declared input port of this workflow."}
+            {
+                "node": "No Such Node",
+                "parameter": "api_key",
+                "reason": "Not a declared input parameter of this workflow.",
+            }
         ]
 
     def test_a_declared_input_is_applied(self, client: HostClient) -> None:
         workflow_id = _smoke_workflow_id(client)
         described = result_of(client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": workflow_id}))
-        text_ports = [port for port in described["inputs"] if port["type"] == "GTText" and port["settable"]]
-        if not text_ports:
+        text_parameters = [
+            declared for declared in described["inputs"] if declared["type"] == "GTText" and declared["settable"]
+        ]
+        if not text_parameters:
             pytest.skip(f"workflow {workflow_id!r} has no settable text input to drive")
 
-        port = text_ports[0]
+        declared = text_parameters[0]
         reply = client.request(
             Verb.EXECUTE_WORKFLOW,
-            {"workflow_id": workflow_id, "inputs": {port["node"]: {port["parameter"]: "nuke smoke test"}}},
+            {"workflow_id": workflow_id, "inputs": {declared["node"]: {declared["parameter"]: "nuke smoke test"}}},
         )
         assert succeeded(reply), f"execute failed: {detail_of(reply)}"
         body = result_of(reply)
-        assert {"node": port["node"], "parameter": port["parameter"]} in body["applied_inputs"]
+        assert {"node": declared["node"], "parameter": declared["parameter"]} in body["applied_inputs"]
         assert body["rejected_inputs"] == []
 
 

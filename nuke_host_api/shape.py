@@ -1,7 +1,7 @@
-"""Projection of the engine's workflow_shape into host-visible ports.
+"""Projection of the engine's workflow_shape into host-visible parameters.
 
 Reads registry entries and shape sections only, so it never issues an engine request of its
-own and needs no engine fake to test. Both verbs that publish ports and both that consume
+own and needs no engine fake to test. Both verbs that publish parameters and both that consume
 them go through here, so a host cannot be told one thing by describe and another by
 execute.
 """
@@ -37,7 +37,7 @@ def workflow_shape(entry: dict) -> dict:
         try:
             parsed = json.loads(raw_shape)
         except json.JSONDecodeError:
-            logger.warning("Could not parse workflow_shape JSON; reporting no ports.")
+            logger.warning("Could not parse workflow_shape JSON; reporting no parameters.")
             return {}
         if isinstance(parsed, dict):
             return parsed
@@ -73,7 +73,7 @@ def data_parameters(section: object) -> Iterator[tuple[str, str, dict]]:
 
     Control-flow parameters are execution wiring rather than data, so they never reach a
     host. Shared by the describe path and the input allow-list so the two cannot disagree
-    about which ports exist.
+    about which parameters exist.
     """
     if not isinstance(section, dict):
         return
@@ -88,8 +88,8 @@ def data_parameters(section: object) -> Iterator[tuple[str, str, dict]]:
             yield str(node_name), str(parameter_name), parameter
 
 
-def ports(section: object) -> list[dict[str, Any]]:
-    """Flatten a workflow_shape section into host-visible ports.
+def declared_parameters(section: object) -> list[dict[str, Any]]:
+    """Flatten a workflow_shape section into host-visible parameters.
 
     The engine hands back ``{node: {parameter: {...20+ keys...}}}`` where the inner dict
     changes shape between releases. A host needs enough to build a knob and nothing that
@@ -97,7 +97,7 @@ def ports(section: object) -> list[dict[str, Any]]:
     author's default, help text, and whether it may be set. Unrecognized types degrade into
     the closed host set.
 
-    ``default`` is a normalized descriptor rather than a raw engine value, so a port's
+    ``default`` is a normalized descriptor rather than a raw engine value, so a parameter's
     default and its live value arrive in the same shape.
     """
     return [
@@ -114,10 +114,10 @@ def ports(section: object) -> list[dict[str, Any]]:
     ]
 
 
-def input_port_ids(entry: dict) -> set[tuple[str, str]]:
+def input_parameter_ids(entry: dict) -> set[tuple[str, str]]:
     """Return the (node, parameter) pairs a host may set on this workflow.
 
-    Reads identity only. Building full port descriptors here would normalize every default,
+    Reads identity only. Building full parameter descriptors here would normalize every default,
     and normalizing a macro-templated one issues an engine request whose result this caller
     then discards.
     """

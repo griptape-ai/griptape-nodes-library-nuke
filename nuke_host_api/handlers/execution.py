@@ -64,7 +64,7 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    allowed_inputs = _declared_input_ports(request.workflow_id)
+    allowed_inputs = _declared_input_parameters(request.workflow_id)
 
     loaded = engine.request(
         RunWorkflowFromRegistryRequest(workflow_name=request.workflow_id, run_with_clean_slate=True),
@@ -107,12 +107,12 @@ def handle_execute_workflow(
     )
 
 
-def _declared_input_ports(workflow_id: str) -> set[tuple[str, str]]:
-    """Return the ports a host may set, or nothing when the workflow cannot be read."""
+def _declared_input_parameters(workflow_id: str) -> set[tuple[str, str]]:
+    """Return the parameters a host may set, or nothing when the workflow cannot be read."""
     entry = engine.workflow_entry(workflow_id)
     if entry is None:
         return set()
-    return shape.input_port_ids(entry)
+    return shape.input_parameter_ids(entry)
 
 
 def _apply_inputs(
@@ -141,7 +141,7 @@ def _apply_inputs(
                     {
                         "node": node_name,
                         "parameter": parameter_name,
-                        "reason": "Not a declared input port of this workflow.",
+                        "reason": "Not a declared input parameter of this workflow.",
                     }
                 )
                 continue
@@ -165,9 +165,9 @@ def handle_get_execution_state(
 
     Holds no state of its own, so this cannot drift from the engine's own view the way a
     cached copy would, and it still works after a host reconnects and has missed every
-    notification. Reports execution state only: a workflow's port values are a separate
-    read, ``NukeGetPortValuesRequest``, because each one costs an engine round trip per
-    port and a host polling only for liveness should not pay for it.
+    notification. Reports execution state only: a workflow's parameter values are a separate
+    read, ``NukeGetParameterValuesRequest``, because each one costs an engine round trip per
+    parameter and a host polling only for liveness should not pay for it.
     """
     attempted = "to read the engine's execution state"
 

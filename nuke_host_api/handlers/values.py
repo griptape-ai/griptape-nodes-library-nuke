@@ -1,7 +1,7 @@
-"""Bulk port-value reads: every start-flow or end-flow parameter in one call.
+"""Bulk value reads: every declared start-flow or end-flow parameter in one call.
 
-``NukeGetPortValuesRequest`` is one host verb answered by one engine request per declared
-port, looped rather than batched through the engine's own ``GetAllNodeInfoRequest``. That
+``NukeGetParameterValuesRequest`` is one host verb answered by one engine request per declared
+parameter, looped rather than batched through the engine's own ``GetAllNodeInfoRequest``. That
 choice was not obvious, so it is recorded here rather than left for a later reader to
 re-derive from behaviour.
 
@@ -21,13 +21,13 @@ for three reasons found by reading ``node_manager.py`` rather than the event's d
    than a wrong answer that shows up in a test.
 3. It drops a parameter whose value is ``None`` outright (``if value is not None:``), which
    collides with this verb's own rule that a value the engine truly holds as absent is not
-   the same thing as a port the engine would not answer for, tracked instead in
+   the same thing as a parameter the engine would not answer for, tracked instead in
    ``unavailable``.
 
 ``GetParameterValueRequest`` (``parameter_events.py``) has none of those problems: it hands
 back the live value alongside ``type``, the exact declared-type hint ``normalize_value``
-needs to disambiguate a bare string, for the one port asked about. The cost is one engine
-request per declared port, and a workflow's declared surface is knobs, not hundreds of
+needs to disambiguate a bare string, for the one parameter asked about. The cost is one engine
+request per declared parameter, and a workflow's declared surface is knobs, not hundreds of
 them.
 """
 
@@ -43,52 +43,52 @@ from griptape_nodes.retained_mode.events.parameter_events import (
 from nuke_host_api import engine, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
-    NukeGetPortValuesRequest,
-    NukeGetPortValuesResultFailure,
-    NukeGetPortValuesResultSuccess,
+    NukeGetParameterValuesRequest,
+    NukeGetParameterValuesResultFailure,
+    NukeGetParameterValuesResultSuccess,
 )
-from nuke_host_api.protocol import PORT_SECTIONS, PortSection
+from nuke_host_api.protocol import PARAMETER_SECTIONS, ParameterSection
 from nuke_host_api.value_types import normalize_value
 
 
-@verb(NukeGetPortValuesRequest)
-def handle_get_port_values(
-    request: NukeGetPortValuesRequest,
-) -> NukeGetPortValuesResultSuccess | NukeGetPortValuesResultFailure:
-    """Read every declared port's current value for one or both sides of the loaded workflow.
+@verb(NukeGetParameterValuesRequest)
+def handle_get_parameter_values(
+    request: NukeGetParameterValuesRequest,
+) -> NukeGetParameterValuesResultSuccess | NukeGetParameterValuesResultFailure:
+    """Read every declared parameter's current value for one or both sides of the loaded workflow.
 
     Driven by the same ``workflow_shape`` that ``describe_workflow`` reports, so what a host
-    can read back here is exactly what it was told to expect: the same ports, the same
-    normalized descriptor shape as a port's ``default`` and as a live
+    can read back here is exactly what it was told to expect: the same parameters, the same
+    normalized descriptor shape as a parameter's ``default`` and as a live
     ``NukeParameterValueEvent``.
     """
-    attempted = "to read declared port values"
+    attempted = "to read declared parameter values"
 
     # Deduplicated before the unknown-name check, not after: a repeated name must not
     # inflate requested_sections or the "N section(s)" count below, since that field's
     # whole job is telling a host what was actually read apart from what came back empty.
-    sections: list[str] = list(dict.fromkeys(request.sections)) if request.sections else list(PORT_SECTIONS)
-    unknown = [section for section in sections if section not in PORT_SECTIONS]
+    sections: list[str] = list(dict.fromkeys(request.sections)) if request.sections else list(PARAMETER_SECTIONS)
+    unknown = [section for section in sections if section not in PARAMETER_SECTIONS]
     if unknown:
         return failure(
-            NukeGetPortValuesResultFailure,
+            NukeGetParameterValuesResultFailure,
             attempted=attempted,
-            because=f"section(s) {unknown} are not recognized. Use one or more of {list(PORT_SECTIONS)}.",
+            because=f"section(s) {unknown} are not recognized. Use one or more of {list(PARAMETER_SECTIONS)}.",
             error=ValueError,
         )
 
     workflow_id = engine.current_workflow_id()
     if not workflow_id:
         return failure(
-            NukeGetPortValuesResultFailure,
+            NukeGetParameterValuesResultFailure,
             attempted=attempted,
-            because="no workflow is loaded, so there are no ports to read.",
+            because="no workflow is loaded, so there are no parameters to read.",
         )
 
     entry = engine.workflow_entry(workflow_id)
     if entry is None:
         return failure(
-            NukeGetPortValuesResultFailure,
+            NukeGetParameterValuesResultFailure,
             attempted=attempted,
             because=f"the loaded workflow '{workflow_id}' is no longer in the registry.",
         )
@@ -98,41 +98,41 @@ def handle_get_port_values(
     outputs: dict[str, dict[str, Any]] = {}
     unavailable: list[dict[str, str]] = []
 
-    if PortSection.INPUTS in sections:
+    if ParameterSection.INPUTS in sections:
         inputs, missing = _read_section_values(declared_shape.get("inputs"))
-        unavailable.extend({"section": PortSection.INPUTS, **entry} for entry in missing)
-    if PortSection.OUTPUTS in sections:
+        unavailable.extend({"section": ParameterSection.INPUTS, **entry} for entry in missing)
+    if ParameterSection.OUTPUTS in sections:
         outputs, missing = _read_section_values(declared_shape.get("outputs"))
-        unavailable.extend({"section": PortSection.OUTPUTS, **entry} for entry in missing)
+        unavailable.extend({"section": ParameterSection.OUTPUTS, **entry} for entry in missing)
 
-    return NukeGetPortValuesResultSuccess(
+    return NukeGetParameterValuesResultSuccess(
         workflow_id=workflow_id,
         requested_sections=sections,
         inputs=inputs,
         outputs=outputs,
         unavailable=unavailable,
-        result_details=f"Read {len(sections)} section(s) of port values for '{workflow_id}'.",
+        result_details=f"Read {len(sections)} section(s) of parameter values for '{workflow_id}'.",
     )
 
 
 def _read_section_values(section: object) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
-    """Read one shape section's declared ports, reporting what the engine would not answer for.
+    """Read one shape section's declared parameters, reporting what the engine would not answer for.
 
-    Omitting an unreadable port would read to a host as an empty knob rather than one it
+    Omitting an unreadable parameter would read to a host as an empty knob rather than one it
     could not fetch, so every miss is reported in the second return value instead.
     """
     values: dict[str, dict[str, Any]] = {}
     missing: list[dict[str, str]] = []
 
-    for port in shape.ports(section):
+    for declared in shape.declared_parameters(section):
         attempt = engine.request(
-            GetParameterValueRequest(node_name=port["node"], parameter_name=port["parameter"]),
+            GetParameterValueRequest(node_name=declared["node"], parameter_name=declared["parameter"]),
             GetParameterValueResultSuccess,
         )
         if attempt.value is None:
-            missing.append({"node": port["node"], "parameter": port["parameter"], "reason": attempt.details})
+            missing.append({"node": declared["node"], "parameter": declared["parameter"], "reason": attempt.details})
             continue
-        values.setdefault(port["node"], {})[port["parameter"]] = normalize_value(
+        values.setdefault(declared["node"], {})[declared["parameter"]] = normalize_value(
             attempt.value.value, attempt.value.type
         )
 
