@@ -416,3 +416,12 @@ Load-bearing for the design, and documented nowhere obvious.
   `NukeSessionRevokedEvent`, which the transport may drop. A plugin author who wants a
   "someone else is using this" prompt owns that UX; this layer only makes the underlying
   facts available.
+- **Stale-lease displacement checks the engine, not the holder.** `session._is_stale` asks
+  `engine.is_running()` to keep a quiet lease alive through a long render, but that query is
+  engine-global: it cannot tell the holder's own run from a run started by anything else,
+  including the editor. A holder that crashed before starting anything, followed by an
+  unrelated render from elsewhere, keeps that holder's dead lease alive past the idle window
+  for the render's full duration, and only `force` frees it. The same absence of an engine-side
+  execution id is why `NukeCancelExecutionRequest` cancels whatever is running rather than a
+  named run; fixing either one properly is an engine change, not something this layer can
+  paper over with local state without inventing an id the engine does not hand it.
