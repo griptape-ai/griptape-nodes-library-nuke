@@ -28,10 +28,11 @@ has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest` |
+| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetPortValuesRequest`, `NukeCancelExecutionRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
+| Port sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `running`, `completed`, `failed`, `cancelled` |
 
@@ -162,8 +163,7 @@ Heartbeat: send `{ "type": "ping", "id": "..." }` and the engine answers
 `{ "type": "pong", "id": "..." }` on the same connection, without the frame reaching the
 engine's event dispatch. Nothing pings the host, and WebSocket protocol-level ping frames
 are not part of what this driver answers. A dead engine otherwise shows up as a closed
-connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest` with
-`include_outputs: false`.
+connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest`.
 
 ### Requests
 
@@ -186,6 +186,46 @@ somewhere this host is not listening.
   }
 }
 ```
+
+### Batching many requests in one frame
+
+`EventRequestBatch` is the engine's wire-only envelope for sending several requests in one
+WebSocket message instead of one message each. It fans out into individual `EventRequest`
+frames on ingest, so nothing here needs a batch-aware verb: each inner request still carries
+its own `request_id` and `response_topic`, and results come back as ordinary
+`success_result`/`failure_result` frames correlated by `request_id`, exactly as if each had
+been sent separately. There is no batched reply to wait for.
+
+```json
+{
+  "payload": {
+    "event_type": "EventRequestBatch",
+    "requests": [
+      {
+        "event_type": "EventRequest",
+        "request_type": "NukeGetPortValuesRequest",
+        "request": { "sections": ["inputs"] },
+        "request_id": "batch-1a",
+        "response_topic": "nuke/reply"
+      },
+      {
+        "event_type": "EventRequest",
+        "request_type": "NukeGetExecutionStateRequest",
+        "request": {},
+        "request_id": "batch-1b",
+        "response_topic": "nuke/reply"
+      }
+    ]
+  }
+}
+```
+
+This shape is derived from the envelope's own `dict()`/`from_dict()` contract
+(`retained_mode/events/base_events.py`), not confirmed against a live `websocket_direct`
+round trip, so treat it as the documented contract rather than a captured transcript like
+every other frame here. Useful for a plugin that wants several verbs answered in one
+network round trip, for example reading port values and execution state together on a
+single poll tick, without paying one WebSocket message per verb.
 
 ### Results
 
@@ -483,14 +523,14 @@ added field, which a tolerant parser already handles.
 
 ### NukeGetExecutionStateRequest
 
-The output-reading and recovery path. Notifications have no replay, so a host that
-connected mid-execution or dropped its connection has permanently missed events; this call returns
-current truth read live from the engine, with no cache that could disagree. It is also how a
-host checks whether it may start another run.
+The running-state recovery path. Notifications have no replay, so a host that connected
+mid-execution or dropped its connection has permanently missed events; this call returns
+current truth read live from the engine, with no cache that could disagree. It is also how
+a host checks whether it may start another run.
 
-| Request field | Type | Default | Notes |
-|---|---|---|---|
-| `include_outputs` | `bool` | `true` | Set `false` when polling only for liveness. Each output port costs one engine read |
+No request fields. Reports execution state only; a workflow's port values are a separate
+read, `NukeGetPortValuesRequest`, because each one costs an engine round trip per port and
+a host polling only for liveness should not pay for it.
 
 | `NukeGetExecutionStateResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -498,14 +538,50 @@ host checks whether it may start another run.
 | `active_nodes` | `list[str]` | Nodes currently resolving |
 | `involved_nodes` | `list[str]` | Nodes in the current execution |
 | `workflow_id` | `str` | Loaded workflow, empty when none |
-| `outputs` | `dict` | `{node: {parameter: value_descriptor}}`, matching describe. Empty when `include_outputs` was false or no workflow is loaded |
 
 ```json
 {
   "running": false,
   "active_nodes": [],
   "involved_nodes": [],
+  "workflow_id": "nuke_api_smoke"
+}
+```
+
+### NukeGetPortValuesRequest
+
+The bulk value-reading path. Reads every declared start-flow or end-flow parameter's
+current value in one call instead of one `GetParameterValueRequest`-per-port round trip a
+host would otherwise have to issue itself. Values exist only for the loaded graph, so this
+takes no `workflow_id`: it always answers for whatever `NukeExecuteWorkflowRequest` most
+recently loaded.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `sections` | `list[str]` | `[]` | One or more of `inputs`, `outputs`. Empty means both. An unrecognized name is refused, not silently ignored |
+
+| `NukeGetPortValuesResultSuccess` field | Type | Notes |
+|---|---|---|
+| `workflow_id` | `str` | The workflow these values belong to |
+| `requested_sections` | `list[str]` | The sections actually read, so a host can tell "not asked for" from "asked for, got nothing" |
+| `inputs` | `dict` | `{node: {parameter: value_descriptor}}` for the start-flow side, matching describe's `inputs`. Empty when `inputs` was not requested or the workflow declares none |
+| `outputs` | `dict` | Same shape, for the end-flow side, matching describe's `outputs` |
+| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared ports the engine would not answer for. Reported, not omitted: an absent entry and an empty one mean different things to a host building a knob |
+
+```json
+{
   "workflow_id": "nuke_api_smoke",
+  "requested_sections": ["inputs", "outputs"],
+  "inputs": {
+    "Start Flow": {
+      "topic": {
+        "value_type": "GTText",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "str"
+      }
+    }
+  },
   "outputs": {
     "End Flow": {
       "was_successful": {
@@ -527,6 +603,32 @@ host checks whether it may start another run.
         "engine_type": "str"
       }
     }
+  },
+  "unavailable": []
+}
+```
+
+Asking for only one side:
+
+```json
+{ "sections": ["inputs"] }
+```
+
+A name outside `inputs`/`outputs` fails rather than answering with nothing:
+
+```json
+{ "sections": ["sideways"] }
+```
+
+```json
+{
+  "result_details": {
+    "result_details": [
+      {
+        "level": 40,
+        "message": "Attempted to read declared port values. Failed because section(s) ['sideways'] are not recognized. Use one or more of ['inputs', 'outputs']."
+      }
+    ]
   }
 }
 ```
@@ -607,9 +709,11 @@ carries no status field, so this layer has nothing else to report. `failed` is r
 for the day the engine exposes that outcome on an event; it is not emitted today. The
 only way to detect an actual failure is to catch the live `NukeNodeStateEvent` with
 `state: "failed"` as it is pushed. `NukeGetExecutionStateRequest` cannot recover a missed
-one after the fact: its result carries running state, active/involved nodes, and output
-values, never a flow-level outcome, because the engine exposes none. A host that drops
-its connection or connects late has no way to learn, after the fact, that a run failed.
+one after the fact: its result carries running state and active/involved nodes, never a
+flow-level outcome, because the engine exposes none. `NukeGetPortValuesRequest` reads
+values, a separate call with a separate purpose, and it carries no outcome either. A host
+that drops its connection or connects late has no way to learn, after the fact, that a run
+failed.
 
 May also receive `cancelled` followed by `completed` for one run: the engine's cancel and
 error paths both end in the same completion event, and whether a host observes both for a
@@ -617,11 +721,12 @@ single run is a timing question this layer cannot settle by reading engine sourc
 the first terminal state received as authoritative and ignore a later one for the same run.
 
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the ports
-`NukeDescribeWorkflowRequest` declared. Read them with `NukeGetExecutionStateRequest`.
+`NukeDescribeWorkflowRequest` declared. Read them with `NukeGetPortValuesRequest`.
 
 ## Value descriptors
 
-Every value, in a notification or in `outputs`, has this shape:
+Every value, in a notification or in `inputs`/`outputs` from `NukeGetPortValuesRequest`,
+has this shape:
 
 ```json
 {
@@ -713,7 +818,8 @@ Verified against the transport implementation.
 | No auth, no TLS | Anything that can reach the port can drive the engine. The loopback bind is the only access control there is |
 | No continuity across reconnects | After a drop: reconnect, re-subscribe both topics, re-issue `NukeConnectRequest`, re-read state |
 
-`NukeGetExecutionStateRequest` is the authority whenever state is uncertain.
+`NukeGetExecutionStateRequest` is the authority whenever running state is uncertain, and
+`NukeGetPortValuesRequest` whenever a port's value is.
 
 ## Version compatibility
 

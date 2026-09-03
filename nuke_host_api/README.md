@@ -19,6 +19,7 @@ nuke_host_api/
     connect.py                       version negotiation, event stream opening
     workflows.py                     list, describe
     execution.py                     execute, state, cancel
+    values.py                        bulk port-value reads, selectable by side
   engine.py                        engine request narrowing and shared queries
   shape.py                         workflow_shape -> host-visible ports
   dispatch.py                      handler calling convention: request guard, failure wording
@@ -37,6 +38,7 @@ tests/unit/
   test_handlers_connect.py         negotiation, event stream gating
   test_handlers_workflows.py       discovery and port publication
   test_handlers_execution.py       run guards, input allow-list, state, cancel
+  test_handlers_values.py          section selection, unavailable reporting, normalization
   test_execution_bridge.py         subscription symmetry, event translation
 ```
 
@@ -54,7 +56,7 @@ make test/unit
 There is no reference client in the repo. `INTEGRATION.md` is the contract; a host is
 verified against a running engine by hand until the plugin exists.
 
-## The four capabilities
+## The five capabilities
 
 ### 1. Connect
 
@@ -100,13 +102,36 @@ alongside its type, because a host builds knobs from this and a knob with no def
 nothing to initialize to. The default is a value descriptor, so a port's default and its
 live value are one shape.
 
-### 3. Node execution changes
+### 3. Read every declared port value
+
+`NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and
+which nodes are involved. `NukeGetPortValuesRequest` answers a different one: what does
+every declared start-flow or end-flow parameter currently hold. They used to be one verb,
+with an `include_outputs` flag bolted onto the state request to cover only the output
+side; splitting them gives each verb one meaning and lets a host read every input-side
+parameter too, which the old shape could not do at all.
+
+`sections` selects `"inputs"`, `"outputs"`, or both (the default, when the list is empty),
+so a host reads a start node's parameters, an end node's parameters, or everything in one
+call instead of one `GetParameterValueRequest` per port. `requested_sections` echoes what
+was actually read, so a host can tell a section it did not ask for from a section that came
+back empty. `unavailable` reports, rather than silently omits, any declared port the engine
+would not answer for, because an absent entry and an empty one mean different things when
+a host is deciding what to show on a knob.
+
+Answered by one engine request per declared port rather than the engine's own
+`GetAllNodeInfoRequest`, which batches a node's info into one call but keys its parameter
+values by internal element id, hands artifacts back display-serialized into plain dicts
+rather than the instances the normalizer inspects, and drops any parameter whose value is
+`None`. See `handlers/values.py` for the full comparison.
+
+### 4. Node execution changes
 
 Eight engine execution events collapse into four states (`unresolved`, `running`,
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`. The ratio is the point: the
 engine can add a ninth event type without the host learning anything.
 
-### 4. Parameter value changes
+### 5. Parameter value changes
 
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.
 The same normalizer that types ports in `describe_workflow` shapes every live update, so
@@ -140,12 +165,12 @@ delays delivery to the editor. `websocket_direct` gives each connection its own 
 queue and writer task, so a slow reader costs engine memory instead of frames and stalls
 nobody. A plugin still reads on a dedicated thread that never blocks.
 
-`NukeGetExecutionStateRequest` is therefore the recovery path for running state and output
-values: it reads flow state and the declared output values straight from the engine, so a
-reconnecting host that missed everything can still get current truth about what is
-running and what a workflow's output ports currently hold. It holds no cache, which is why
-it cannot drift. It is **not** a recovery path for a run's outcome: the engine exposes no
-flow-level success/failure field anywhere, on this request or any other, so a host that
+`NukeGetExecutionStateRequest` and `NukeGetPortValuesRequest` together are the recovery
+path: a reconnecting host that missed every notification reads what is running from the
+first and what every declared port currently holds from the second. Both read straight from
+the engine on every call, holding no cache, which is why neither can drift from the
+engine's own view. Neither is a recovery path for a run's outcome: the engine exposes no
+flow-level success/failure field anywhere, on either request or any other, so a host that
 misses the live `NukeNodeStateEvent` with `state: "failed"` has no way to learn afterward
 that a run failed.
 
@@ -370,3 +395,10 @@ Load-bearing for the design, and documented nowhere obvious.
   inside `process()` is unverified. If it does not, only an engine restart recovers.
 - **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
+- **`NukeGetPortValuesRequest` costs one engine request per declared port, with no
+  transport-level batching in this layer.** A workflow's declared surface is knobs, not
+  hundreds of them, so the cost has not mattered in practice. If it ever does, the fix is
+  the engine's own `EventRequestBatch` wire envelope (`INTEGRATION.md`, Frame formats),
+  which packs many host verb frames into one WebSocket message; it is a transport
+  optimization a host applies itself, not something this verb's handler can opt into on a
+  host's behalf.
