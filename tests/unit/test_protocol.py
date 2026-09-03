@@ -99,6 +99,17 @@ def test_source_kind_set_is_closed_and_consistent() -> None:
     assert set(protocol.SOURCE_KINDS) == declared
 
 
+def test_parameter_section_wire_strings_are_exactly_these() -> None:
+    """Also the strings ``NukeDescribeWorkflowResultSuccess`` already uses for its two fields."""
+    assert protocol.ParameterSection.INPUTS == "inputs"
+    assert protocol.ParameterSection.OUTPUTS == "outputs"
+
+
+def test_parameter_section_set_is_closed_and_consistent() -> None:
+    declared = {value for name, value in vars(protocol.ParameterSection).items() if not name.startswith("_")}
+    assert set(protocol.PARAMETER_SECTIONS) == declared
+
+
 def test_current_protocol_version_is_inside_the_support_window() -> None:
     """Shipping a version the library will not accept would refuse every host."""
     assert protocol.PROTOCOL_VERSION in protocol.SUPPORTED_PROTOCOL_VERSIONS

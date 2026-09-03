@@ -32,8 +32,19 @@ One rename happened without a version bump: ``ExecutionState``'s ``SUCCEEDED`` b
 ``COMPLETED``, both a rename and a meaning change, which the rule above says should bump
 the version. It did not, because it happened before this protocol's first release: no
 compiled plugin has ever spoken ``PROTOCOL_VERSION`` 1, so none depends on the old name.
-This is a one-time exception for a value that never shipped, not a precedent. A rename
-after release, of this or anything else in this file, MUST bump ``PROTOCOL_VERSION``.
+A second removal happened the same way: ``NukeGetExecutionStateRequest`` dropped
+``include_outputs`` and its result dropped ``outputs`` when ``NukeGetParameterValuesRequest``
+took over reading parameter values, again free only because no compiled plugin has spoken this
+version yet. A third change was a pure rename: every ``Port`` in this surface became
+``Parameter``, so ``NukeGetPortValuesRequest`` is now ``NukeGetParameterValuesRequest`` and
+``PortSection`` is ``ParameterSection``. The engine calls these parameters, the editor
+already uses "port" for the connection anchor drawn on one, and the second word bought no
+decoupling: a descriptor's keys were always ``node`` and ``parameter``. The section strings
+``inputs`` and ``outputs`` did not change. None of the three is a precedent for a version
+that has shipped. The actual rule for this file, until the day a plugin is compiled against
+``PROTOCOL_VERSION`` 1, is: a removal or rename here is free before the first compiled
+plugin, and MUST bump the version after it. Read every entry above under that rule, not as
+a promise that removals are always free.
 """
 
 from __future__ import annotations
@@ -53,6 +64,7 @@ class Verb:
     DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
     EXECUTE_WORKFLOW = "NukeExecuteWorkflowRequest"
     GET_EXECUTION_STATE = "NukeGetExecutionStateRequest"
+    GET_PARAMETER_VALUES = "NukeGetParameterValuesRequest"
     CANCEL_EXECUTION = "NukeCancelExecutionRequest"
 
 
@@ -73,6 +85,23 @@ class NodeState:
     RUNNING = "running"
     RESOLVED = "resolved"
     FAILED = "failed"
+
+
+class ParameterSection:
+    """The two sides of a workflow's declared shape, matching describe_workflow's fields.
+
+    ``NukeGetParameterValuesRequest`` selects one, the other, or both by name, so a host reads
+    every start-flow parameter or every end-flow parameter in one call instead of one
+    ``GetParameterValueRequest`` per parameter. The names are the same strings
+    ``NukeDescribeWorkflowResultSuccess`` already uses for its two fields, so a host that
+    read describe once already knows the vocabulary this request selects on.
+    """
+
+    INPUTS = "inputs"
+    OUTPUTS = "outputs"
+
+
+PARAMETER_SECTIONS = (ParameterSection.INPUTS, ParameterSection.OUTPUTS)
 
 
 class ExecutionState:
@@ -96,10 +125,11 @@ class ExecutionState:
     is not emitted today. A host detects an actual failure only by catching the live
     ``NukeNodeStateEvent`` with ``state="failed"`` as it is pushed.
     ``NukeGetExecutionStateRequest`` cannot recover a missed one after the fact: its result
-    carries running state, active/involved nodes, and output values, never a flow-level
-    outcome, because the engine exposes none. A host that drops its connection or
-    subscribes late and misses that push has no way to learn, after the fact, that a run
-    failed.
+    carries running state and active/involved nodes, never a flow-level outcome, because
+    the engine exposes none. Values live on ``NukeGetParameterValuesRequest`` instead, a
+    separate call with a separate purpose, and it carries no outcome either. A host that
+    drops its connection or subscribes late and misses the live push has no way to learn,
+    after the fact, that a run failed.
 
     ``CANCELLED`` may be followed by ``COMPLETED`` for the same run: the engine's cancel and
     error paths both end in the same completion event, and whether a host observes both for
