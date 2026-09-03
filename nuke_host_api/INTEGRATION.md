@@ -29,7 +29,7 @@ has been compiled against this version, so the surface can still change.
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeSessionRevokedEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
@@ -142,6 +142,29 @@ Topic routing narrows the stream; it does not make the stream yours.
 So the discard rule stands: drop any frame whose `request_id` is not one this host sent and
 whose `payload_type` does not begin with `Nuke`.
 
+### 5. Claim this engine's exclusive lease
+
+Nuke drives the engine as if it owns it: it loads whole graphs, applies inputs, starts and
+cancels flows. Two connected Nuke clients would race each other, so exactly one holds this
+engine at a time. `NukeConnectRequest` both connects and claims; there is no separate verb
+for it.
+
+Send a stable `client_id`, minted once per Nuke session (e.g. a `uuid4` generated when the
+plugin loads) and reused across every reconnect that session makes. An empty `client_id` is
+refused. If a different, live `client_id` currently holds the engine, connecting is refused
+naming that holder's `client_name` and how long it has been idle; retry with `force: true`
+to take it over. A holder idle beyond the idle window is displaced automatically, without
+`force`.
+
+A successful connect returns `session_token`. Carry it on every other request. A request
+sent without it, with an unrecognized one, or with one a later takeover superseded, is
+refused with `NukeSessionExpiredResultFailure` (see [Errors](#errors)) regardless of what
+that request was asking for: reconnect and retry.
+
+This lease is process memory, not disk state. It is lost whenever the library reloads, so a
+host that held the engine through a reload sees its next request refused and must connect
+again, which succeeds immediately since nobody holds a fresh lease yet.
+
 ## Frame formats
 
 One JSON object per WebSocket text message. No newline framing, no length prefix: the
@@ -245,14 +268,24 @@ returns after one read.
 
 ## Verbs
 
+Every verb but `NukeConnectRequest` carries a `session_token` field, defaulted to `""` and
+omitted from the per-verb tables below since it is identical everywhere: the token
+`NukeConnectResultSuccess` returned. A request sent without a current one is refused with
+`NukeSessionExpiredResultFailure`; see [Claim this engine's exclusive lease](#5-claim-this-engines-exclusive-lease)
+and [Errors](#errors).
+
 ### NukeConnectRequest
 
-Subscribe to a reply topic first, then connect. Required before anything else.
+Subscribe to a reply topic first, then connect. Required before anything else, and also how
+a host claims this engine's exclusive lease; see
+[Claim this engine's exclusive lease](#5-claim-this-engines-exclusive-lease).
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `client_protocol_versions` | `list[int]` | `[]` | Every version the host can speak. Empty means "assume current" |
 | `client_name` | `str` | `""` | Free text for logs and support tickets |
+| `client_id` | `str` | `""` | Required. A stable id for this Nuke session, reused across reconnects. Empty is refused |
+| `force` | `bool` | `false` | Take the engine over even if a different, live `client_id` holds it |
 
 | `NukeConnectResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -262,6 +295,7 @@ Subscribe to a reply topic first, then connect. Required before anything else.
 | `library_version` | `str` | Display only |
 | `event_topic` | `str` | The topic notifications are published on. Subscribe to it or receive none |
 | `value_types` | `list[str]` | Closed value type set for this version |
+| `session_token` | `str` | Carry this on every other request |
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
@@ -277,21 +311,44 @@ yet.
   "engine_version": "0.97.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
-  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTNumber", "GTBool", "GTNull"]
+  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTNumber", "GTBool", "GTNull"],
+  "session_token": "jjcfggRkb1XTg2Rd_V2l6fbS_ohgajpM8rTVHROPICU"
 }
 ```
 
 `NukeConnectResultFailure` carries `supported_protocol_versions` and a message naming the
-window, suitable for display to a user:
+window, suitable for display to a user. A version mismatch is refused before the lease is
+even considered:
 
 ```json
 {
   "supported_protocol_versions": [1],
+  "holder_client_name": "",
+  "holder_idle_seconds": 0.0,
   "result_details": {
     "result_details": [
       {
         "level": 40,
         "message": "Attempted to connect a host speaking protocol version(s) [99]. Failed because this library supports [1]. Update the host plugin, or install a library version that still supports it."
+      }
+    ]
+  }
+}
+```
+
+A live, different `client_id` refuses with the holder named, never its `client_id` or
+`session_token`:
+
+```json
+{
+  "supported_protocol_versions": [1],
+  "holder_client_name": "Nuke 16.0v7",
+  "holder_idle_seconds": 12.0,
+  "result_details": {
+    "result_details": [
+      {
+        "level": 40,
+        "message": "Attempted to connect Nuke 15.1v3 to this engine. Failed because host 'Nuke 16.0v7' holds this engine (last seen 12s ago). Retry with force=true to take over."
       }
     ]
   }
@@ -533,7 +590,8 @@ host checks whether it may start another run.
 
 ### NukeCancelExecutionRequest
 
-No arguments. Cancels whatever is running.
+No arguments beyond the `session_token` every verb but connect carries. Cancels whatever is
+running.
 
 | Behaviour | Detail |
 |---|---|
@@ -619,6 +677,30 @@ the first terminal state received as authoritative and ignore a later one for th
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the ports
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetExecutionStateRequest`.
 
+### NukeSessionRevokedEvent
+
+Pushed when this engine's exclusive lease is taken from one `client_id` and handed to
+another, whether by a forced takeover or an automatic stale one.
+
+| Field | Type | Notes |
+|---|---|---|
+| `revoked_client_id` | `str` | The `client_id` that just lost the lease. If this host's own `client_id`, it lost the engine |
+| `new_holder_client_name` | `str` | The `client_name` of whoever holds the engine now |
+| `reason` | `str` | `"forced"` or `"stale"` |
+
+```json
+{
+  "revoked_client_id": "nuke-1",
+  "new_holder_client_name": "Nuke 15.1v3",
+  "reason": "forced"
+}
+```
+
+Best effort like every notification: the transport drops send errors on the floor and there
+is no replay. A host that misses this learns the same fact, more reliably, the moment it
+next sends any other verb and gets `NukeSessionExpiredResultFailure` back instead: that is
+the real enforcement, this is the chance to react before the next request.
+
 ## Value descriptors
 
 Every value, in a notification or in `outputs`, has this shape:
@@ -699,6 +781,12 @@ Every failure is a typed result, never a dropped frame or a raw exception.
 | Message | `payload.result.result_details.result_details[0].message`, written for display to an artist |
 | Log | Include `payload.result_type` so support can identify the exact failure |
 | Diagnostics | `payload.result.exception` may carry a type and message. Do not parse it |
+
+**`NukeSessionExpiredResultFailure` can answer any verb but connect**, not only the one it
+looks like it was for. It means this host's `session_token` was missing, unrecognized, or
+superseded by another client's takeover, and it means the same thing regardless of which
+request triggered it: reconnect with `NukeConnectRequest` and retry. Check
+`payload.result_type` for this value before assuming a failure is specific to the verb sent.
 
 ## Transport limits
 

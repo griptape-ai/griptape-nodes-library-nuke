@@ -12,7 +12,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api import library_version
+from nuke_host_api import library_version, session
 from nuke_host_api.execution_bridge import uninstall as uninstall_host_api_bridge
 from nuke_host_api.handlers import ROUTES
 from nuke_host_api.protocol import PROTOCOL_VERSION
@@ -74,6 +74,10 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
         # bridge above needs an explicit uninstall). An in-place library upgrade must not keep
         # serving the pre-upgrade version to a host that connects after the reload.
         library_version.reset()
+        # A held lease is this process's alone to honour. A reload drops it, so a host that
+        # held the engine gets a session-expired refusal on its next request and must
+        # connect again, which succeeds immediately since nobody holds a fresh lease yet.
+        session.reset()
 
     def get_request_handlers(
         self,

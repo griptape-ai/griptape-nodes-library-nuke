@@ -15,6 +15,9 @@ from griptape_nodes.retained_mode.events.base_events import (
     ResultPayloadFailure,
 )
 
+from nuke_host_api import session
+from nuke_host_api.events import NukeConnectRequest, NukeSessionExpiredResultFailure
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -22,12 +25,18 @@ if TYPE_CHECKING:
 def verb[R: RequestPayload](
     expected: type[R],
 ) -> Callable[[Callable[[R], ResultPayload]], Callable[[RequestPayload], ResultPayload]]:
-    """Bind a handler to the one request type it accepts.
+    """Bind a handler to the one request type it accepts, and gate it on the session lease.
 
     The engine's handler table is typed as ``RequestPayload`` in and ``ResultPayload`` out,
     so without this each handler starts by re-narrowing its own argument and a mix-up in the
     registry would otherwise reach the body as a wrong-typed payload. Guarding here lets the
     body declare the type it actually wants and be checked against it.
+
+    Every routed verb funnels through here, which is also why the session check lives here
+    rather than in each handler: ``NukeConnectRequest`` is the sole exception, since it is
+    how a host obtains a token rather than something it is expected to already carry one
+    for. Every other verb is refused with ``NukeSessionExpiredResultFailure`` unless its
+    ``session_token`` matches the engine's current lease; see ``session.authorize``.
     """
 
     def decorate(handler: Callable[[R], ResultPayload]) -> Callable[[RequestPayload], ResultPayload]:
@@ -36,6 +45,19 @@ def verb[R: RequestPayload](
             if not isinstance(request, expected):
                 msg = f"Expected {expected.__name__}, got {type(request).__name__}"
                 raise TypeError(msg)
+            if expected is not NukeConnectRequest:
+                token = getattr(request, "session_token", "")
+                if not session.authorize(token):
+                    return failure(
+                        NukeSessionExpiredResultFailure,
+                        attempted=f"to call {expected.__name__}",
+                        because=(
+                            "this host's session token is missing, unknown, or was superseded "
+                            "by another client's takeover. Send NukeConnectRequest again to "
+                            "claim a new one."
+                        ),
+                        error=PermissionError,
+                    )
             return handler(request)
 
         return guarded

@@ -16,25 +16,28 @@ nuke_host_api/
   events.py                        request/result/notification payloads
   handlers/                        host verb in, engine request out
     __init__.py                      ROUTES: the only verb -> handler binding
-    connect.py                       version negotiation, event stream opening
+    connect.py                        version negotiation, session lease, event stream opening
     workflows.py                     list, describe
     execution.py                     execute, state, cancel
-  engine.py                        engine request narrowing and shared queries
+  engine.py                        engine request narrowing, shared queries, notification emission
+  session.py                       one client owns this engine at a time: the exclusive lease
   shape.py                         workflow_shape -> host-visible ports
-  dispatch.py                      handler calling convention: request guard, failure wording
+  dispatch.py                      handler calling convention: request guard, session gate, failure wording
   library_version.py               the shipped version, read from the manifest
   execution_bridge.py              engine execution events -> host notifications
   value_types.py                   value normalizer
 tests/unit/
+  conftest.py                       shared bypass of the session gate for tests about something else
   test_protocol.py                 verb/notification names resolve to real payload classes
-  test_value_types.py              value mapping table and descriptor shape
-  test_macros.py                   macro resolution, patterns, unresolved tokens
-  test_shape.py                    shape parsing, port narrowing, runnability
+  test_value_types.py               value mapping table and descriptor shape
+  test_macros.py                    macro resolution, patterns, unresolved tokens
+  test_shape.py                     shape parsing, port narrowing, runnability
   test_engine.py                   narrowing, event topic, shared queries
-  test_dispatch.py                 request guard, failure wording
+  test_session.py                  the exclusive lease: claim, renew, refuse, stale and forced takeover
+  test_dispatch.py                 request guard, session gate, failure wording
   test_library_version.py          manifest read and reload reset
   test_handlers_routes.py          every declared verb is routed exactly once
-  test_handlers_connect.py         negotiation, event stream gating
+  test_handlers_connect.py         negotiation, session lease, event stream gating
   test_handlers_workflows.py       discovery and port publication
   test_handlers_execution.py       run guards, input allow-list, state, cancel
   test_execution_bridge.py         subscription symmetry, event translation
@@ -56,11 +59,32 @@ verified against a running engine by hand until the plugin exists.
 
 ## The four capabilities
 
-### 1. Connect
+### 1. Connect, and claim this engine exclusively
 
 `NukeConnectRequest` negotiates a protocol version and returns the engine version, the
 closed host type set, and the event topic. Offering an unsupported version gets a clean
 refusal naming the support window.
+
+It also claims this engine's exclusive lease. Nuke drives an engine as if it owns it: it
+loads whole graphs, applies inputs, starts and cancels flows, with no execution id (see
+capability 2) to tell one run's notifications from another's. Two connected Nuke clients
+would corrupt each other's runs, so exactly one may hold the engine at a time.
+
+`session.py` tracks this as a single lease: a `client_id`, a minted `session_token`, and
+when it was last heard from. A host sends a stable `client_id`, minted once per Nuke session
+and reused across reconnects, so the same session reclaims its own lease without `force`
+after a crash or reload. A different, live `client_id` is refused, naming the current
+holder's `client_name` and idle time; `force: true` takes over regardless, and a holder idle
+past `session.IDLE_WINDOW_SECONDS` is displaced automatically. The transport gives Python no
+disconnect signal (see capability 5), so idleness, not a socket closing, is what frees a
+slot, and a lease is never considered idle while the engine is executing: a host waiting
+quietly through a long render cannot be stolen from.
+
+Every other verb carries the `session_token` connect handed back, checked in
+`dispatch.verb`, the one place every routed verb already funnels through. A missing,
+unrecognized, or superseded token is refused with `NukeSessionExpiredResultFailure`
+regardless of what the request was asking for, and a takeover pushes
+`NukeSessionRevokedEvent`, best effort, to whoever was watching.
 
 Finding an engine to connect to happens off the wire, because a host has no connection yet:
 a host holds the `websocket_direct` URL as its own setting, defaulted to
@@ -340,6 +364,15 @@ Load-bearing for the design, and documented nowhere obvious.
     both wrong for Nuke, since `FAIL` rejects every sequence and resolving to one frame
     loses the range.
 
+11. **The engine has no notion of a client at all, let alone one it should refuse.**
+    Every constraint above about listeners and handlers being process- or engine-global
+    applies here too: nothing below this library would stop a second Nuke process from
+    connecting and driving the same engine. `session.py`'s lease is entirely this layer's
+    invention, held in a module-global exactly like `execution_bridge`'s install latch, and
+    lost the same way on a library reload; see `session.reset()` and constraint 3's own
+    reload discussion. A host observes that as a refused request followed by a successful
+    connect, not as anything the engine itself reports.
+
 ## Known gaps
 
 - **Audio lands in `GTFile`.** v1 covers images and movies. Promoting it to `GTAudio` is a
@@ -370,3 +403,16 @@ Load-bearing for the design, and documented nowhere obvious.
   inside `process()` is unverified. If it does not, only an engine restart recovers.
 - **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
+- **The idle window is one constant for every host.** `session.IDLE_WINDOW_SECONDS` does not
+  vary per client, so a host with an unusually slow polling cadence and one with none at all
+  are held to the same clock. A per-client window would need the plugin to declare its own
+  polling interval at connect, which nothing today asks for.
+- **No verb reports who currently holds the lease**, short of trying to connect and reading
+  a refusal's `holder_client_name`. A read-only "who owns this engine" query was left out
+  deliberately: nothing in this layer needs it yet, and adding it later costs no version
+  bump.
+- **A forced takeover has no confirmation step.** `force: true` displaces a live holder
+  immediately; the only warning the incumbent gets is the best-effort
+  `NukeSessionRevokedEvent`, which the transport may drop. A plugin author who wants a
+  "someone else is using this" prompt owns that UX; this layer only makes the underlying
+  facts available.
