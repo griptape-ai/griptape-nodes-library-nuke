@@ -165,16 +165,8 @@ def handle_set_current_project(
     NukeExecuteWorkflowRequest for the same reason that verb refuses to start a second run.
 
     ``workspace_changed`` is computed here rather than read from the engine's own result, by
-    reading GetWorkspaceRequest's live ``workspace_path`` before and after the switch, the
-    same value ``ProjectManager._activate_project`` compares against
-    ``config_manager.workspace_path`` to decide whether to call ``refresh_workflow_registry``.
-    That is deliberately not ResolveProjectWorkspaceRequest, the offline previewer
-    NukeDescribeProjectRequest uses for a project that is not current: its resolver answers
-    ``None`` for any id with no readable project file on disk, which includes the
-    system-defaults sentinel, so comparing resolved paths around a switch onto or off of
-    system defaults would report a change whenever none happened. GetWorkspaceRequest has no
-    such gap, because it names no project id at all; it just reads whatever workspace the
-    engine is actually configured against right now, defaults included. The engine's
+    comparing ``_current_workspace_dir`` before and after the switch. See that helper for why
+    it reads the live workspace rather than the offline resolver. The engine's
     SetCurrentProjectResultSuccess itself carries no field for this; it only ever gains one
     as a side effect of a GUI-facing "should I treat my local model as stale" flag that is
     not documented to mean workspace change specifically and is not safe to depend on here.
