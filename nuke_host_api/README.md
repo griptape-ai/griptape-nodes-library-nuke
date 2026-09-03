@@ -21,6 +21,7 @@ nuke_host_api/
     load.py                          load one workflow, describe and read it back
     execution.py                     execute, state, cancel
     values.py                        bulk parameter-value reads, selectable by side
+    projects.py                      list, current, switch, describe a project
   engine.py                        engine request narrowing and shared queries
   shape.py                         workflow_shape -> host-visible parameters
   parameter_values.py              reading a loaded workflow's values, shared by load and values
@@ -43,6 +44,7 @@ tests/unit/
   test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
   test_handlers_values.py          section selection, unavailable reporting, normalization
+  test_handlers_projects.py        project narrowing, running-engine refusal, workspace-change detection
   test_execution_bridge.py         subscription symmetry, event translation
 ```
 
@@ -213,6 +215,61 @@ engine can add a ninth event type without the host learning anything.
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.
 The same normalizer that types parameters in `describe_workflow` shapes every live update, so
 a host has one value format rather than two.
+
+### 5. Projects
+
+Workflows are registered per workspace and a project decides the workspace, so
+`NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` always answer for whichever
+project happens to be current, with no way for a host to see that project or change it
+until now. `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`,
+`NukeSetCurrentProjectRequest`, and `NukeDescribeProjectRequest` wrap the engine's project
+surface (`retained_mode/events/project_events.py`, handled in
+`retained_mode/managers/project_manager.py`).
+
+Narrowing is the whole job. `ProjectTemplate` is a pydantic model with dozens of fields,
+`ProjectValidationInfo` and `ProjectTemplateInfo` are engine dataclasses, and `ProjectInfo`
+additionally carries parsed macro caches. None of them cross the boundary; every field a
+host reads is a named primitive, exactly the way `shape.ports` narrows a parameter dict.
+Project ids are opaque the same way workflow ids are: `NukeListProjectsRequest` and
+`NukeGetCurrentProjectRequest` hand one back, a host feeds it to
+`NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`, and it is never parsed or
+constructed. `NukeSetCurrentProjectRequest.project_id: None` asks for the system defaults,
+mirroring the engine's own `SetCurrentProjectRequest` exactly rather than inventing a
+sentinel string a host would have to know about.
+
+`NukeListProjectsRequest` folds the engine's separate `successfully_loaded` and
+`failed_to_load` lists into one, the way `NukeListWorkflowsRequest` reports every workflow
+with a single `runnable` flag rather than two lists a host must merge itself. It also folds
+two unrelated engine mechanisms, a validation failure and an engine-version incompatibility
+declared in a project's adjacent config, into one `available` flag and a human-readable
+`unavailable_reason`, because a host disabling a menu entry does not need to know which
+mechanism fired. `description` is always empty in the list, because the engine's listing
+does not carry each template's description, only `NukeDescribeProjectRequest` and
+`NukeGetCurrentProjectRequest` read the full template that has one.
+
+`NukeSetCurrentProjectRequest` refuses while the engine is executing, with the same wording
+`NukeExecuteWorkflowRequest`'s running-guard uses: reloading libraries out from under a live
+run is worse than refusing outright, because the very library driving the run could be torn
+down and rebuilt mid-flight.
+
+**A successful switch is a hazard to the host's own connection, always, not only when its
+`workspace_changed` field is true.** The engine reloads every library, this one included,
+whenever the target project's library-affecting config (which libraries to register or
+download, the required engine version, or the resolved libraries directory) differs from
+the outgoing project's, and that decision is made independently of whether the workspace
+directory changed. `workspace_changed` is computed here by resolving the workspace before
+and after the switch through the same call `NukeDescribeProjectRequest` uses to preview one;
+it answers only "did workflows get re-registered against a new workspace," never "did
+libraries reload." A reload tears down this library's request handlers and its outbound
+event bridge and rebuilds both (`before_library_unregistered` in
+`nuke_nodes/nuke_library_advanced.py`), so a host must send `NukeConnectRequest` again and
+re-run `NukeListWorkflowsRequest`/`NukeDescribeWorkflowRequest` after every successful
+switch, unconditionally. The reply to the switch itself is unaffected by any of this: the
+engine performs the reload synchronously while handling the request, before the reply is
+built, so the reply reaches the host regardless. If the target project's workspace does not
+configure this library at all, the reload removes this library's verbs entirely, and every
+request after that, including the reconnect, fails at the engine's own dispatch layer with
+an error this layer never shaped, because it no longer owns the verb table to shape one.
 
 ### Push, with a recovery path
 
@@ -487,3 +544,10 @@ Load-bearing for the design, and documented nowhere obvious.
   does, the fix is the engine's own `EventRequestBatch` wire envelope (`INTEGRATION.md`, Frame
   formats), which packs many host verb frames into one WebSocket message; it is a transport
   optimization a host applies itself, not something a handler can opt into on a host's behalf.
+- **A project switch cannot say whether it reloaded libraries.** The engine's own
+  `SetCurrentProjectRequest` exposes `workspace_changed` (whether workflows were
+  re-registered against a new workspace) but no field for whether libraries were reloaded,
+  which is gated on a separate, unexposed signal: whether the target project's
+  library-affecting config differs from the outgoing project's. `NukeSetCurrentProjectRequest`
+  therefore documents that a host must reconnect after every successful switch,
+  unconditionally, rather than only when `workspace_changed` is true.
