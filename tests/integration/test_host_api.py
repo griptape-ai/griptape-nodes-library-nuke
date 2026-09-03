@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import os
 import sys
-import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -50,11 +49,15 @@ ENGINE = running_engine()
 NAMED_WORKFLOW = os.environ.get("GRIPTAPE_NODES_SMOKE_WORKFLOW")
 NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "30"))
 
-# Stable for the whole run, minted once at import time the way NukeConnectRequest.client_id's
-# own docstring tells a plugin to: one id, reused across every connect this suite makes. Every
-# connect below is then a renewal of the same lease rather than a competing claim that would
-# need force=True, which is what lets three separate tests reconnect without racing each other.
-SMOKE_CLIENT_ID = f"nuke-smoke-{uuid.uuid4().hex}"
+# A fixed string, not a fresh id per invocation. NukeConnectRequest.client_id's own docstring
+# asks for an id "minted once per Nuke session and reused across every reconnect that session
+# makes", and this suite is one logical session across every test in it, and across every
+# separate `pytest` invocation too: the engine's lease is process-global and outlives any one
+# run (nothing here ever disconnects), so a uuid4 minted at import time would be reused within
+# a run but be a competing claim on the next one, refused for up to IDLE_WINDOW_SECONDS after
+# the previous run exited. Every connect below is a renewal of this same lease, which is what
+# lets three separate tests reconnect without racing each other or needing force=True.
+SMOKE_CLIENT_ID = "nuke-smoke-tests"
 
 pytestmark = [
     pytest.mark.skipif(
