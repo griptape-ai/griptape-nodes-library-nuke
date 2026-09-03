@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from griptape_nodes.retained_mode.events.config_events import GetWorkspaceRequest, GetWorkspaceResultSuccess
 from griptape_nodes.retained_mode.events.project_events import (
     GetCurrentProjectRequest,
     GetCurrentProjectResultSuccess,
@@ -64,8 +65,12 @@ def handle_list_projects(
         )
 
     current_id = _current_project_id()
-    projects = [_describe_loaded(info, current_id=current_id) for info in listed.value.successfully_loaded]
-    projects.extend(_describe_failed(info, current_id=current_id) for info in listed.value.failed_to_load)
+    projects = [
+        _describe_project(info, current_id=current_id, loaded=True) for info in listed.value.successfully_loaded
+    ]
+    projects.extend(
+        _describe_project(info, current_id=current_id, loaded=False) for info in listed.value.failed_to_load
+    )
 
     return NukeListProjectsResultSuccess(
         projects=projects,
@@ -73,29 +78,39 @@ def handle_list_projects(
     )
 
 
-def _describe_loaded(info: ProjectTemplateInfo, *, current_id: str) -> dict[str, Any]:
+def _describe_project(info: ProjectTemplateInfo, *, current_id: str, loaded: bool) -> dict[str, Any]:
+    """Narrow one ProjectTemplateInfo, loaded or failed, to the one shape NukeListProjectsRequest reports.
+
+    The engine builds the two kinds identically except for which fields it bothers to fill
+    in: a failed entry (``on_list_project_templates_request``) is constructed as
+    ``ProjectTemplateInfo(project_id=str(template_path), validation=validation)`` and
+    nothing else, so ``name``, ``project_file_path``, and ``parent_project_id`` are always
+    ``None`` on one, and its ``project_id`` is always the stringified path of the file that
+    failed to load. That guarantee (true only for a failed entry; a loaded one's id may be a
+    real GUID, a legacy canonical path, or the system-defaults sentinel) is what lets a
+    failed entry's missing ``file_path`` fall back to its own id instead of to an empty
+    string, while a missing ``name`` falls back to an explicit empty string on both kinds
+    rather than to the opaque id, which this protocol's own rule says a host must never
+    parse, construct, or display.
+    """
+    file_path = info.project_file_path
+    if file_path is None and not loaded:
+        file_path = info.project_id
+
+    available = loaded and info.validation.is_usable() and info.engine_version_compatible
+    unavailable_reason = _unavailable_reason(info)
+    if not unavailable_reason and not loaded:
+        unavailable_reason = "The project template failed to load."
+
     return {
         "id": info.project_id,
-        "name": info.name or info.project_id,
+        "name": info.name or "",
         "description": "",
-        "file_path": info.project_file_path or "",
+        "file_path": file_path or "",
         "parent_id": info.parent_project_id or "",
         "current": info.project_id == current_id,
-        "available": info.validation.is_usable() and info.engine_version_compatible,
-        "unavailable_reason": _unavailable_reason(info),
-    }
-
-
-def _describe_failed(info: ProjectTemplateInfo, *, current_id: str) -> dict[str, Any]:
-    return {
-        "id": info.project_id,
-        "name": info.name or info.project_id,
-        "description": "",
-        "file_path": info.project_file_path or "",
-        "parent_id": info.parent_project_id or "",
-        "current": info.project_id == current_id,
-        "available": False,
-        "unavailable_reason": _unavailable_reason(info) or "The project template failed to load.",
+        "available": available,
+        "unavailable_reason": unavailable_reason,
     }
 
 
@@ -132,7 +147,7 @@ def handle_get_current_project(
         description=info.template.description or "",
         file_path=str(info.project_file_path) if info.project_file_path is not None else "",
         base_dir=str(info.project_base_dir),
-        workspace_dir=_resolve_workspace_dir(str(info.project_id)),
+        workspace_dir=_current_workspace_dir(),
         validation_status=str(info.validation.status),
         problems=[problem.message for problem in info.validation.problems],
         result_details=f"Current project is '{info.project_id}'.",
@@ -149,12 +164,20 @@ def handle_set_current_project(
     driving the run could be torn down and rebuilt out from under it. Serial with
     NukeExecuteWorkflowRequest for the same reason that verb refuses to start a second run.
 
-    ``workspace_changed`` is computed here rather than read from the engine's own result,
-    by resolving the workspace before and after the switch through the same
-    ResolveProjectWorkspaceRequest NukeDescribeProjectRequest uses. The engine's
-    SetCurrentProjectResultSuccess carries no field for this; it only ever gains one as a
-    side effect of a GUI-facing "should I treat my local model as stale" flag that is not
-    documented to mean workspace change specifically and is not safe to depend on here.
+    ``workspace_changed`` is computed here rather than read from the engine's own result, by
+    reading GetWorkspaceRequest's live ``workspace_path`` before and after the switch, the
+    same value ``ProjectManager._activate_project`` compares against
+    ``config_manager.workspace_path`` to decide whether to call ``refresh_workflow_registry``.
+    That is deliberately not ResolveProjectWorkspaceRequest, the offline previewer
+    NukeDescribeProjectRequest uses for a project that is not current: its resolver answers
+    ``None`` for any id with no readable project file on disk, which includes the
+    system-defaults sentinel, so comparing resolved paths around a switch onto or off of
+    system defaults would report a change whenever none happened. GetWorkspaceRequest has no
+    such gap, because it names no project id at all; it just reads whatever workspace the
+    engine is actually configured against right now, defaults included. The engine's
+    SetCurrentProjectResultSuccess itself carries no field for this; it only ever gains one
+    as a side effect of a GUI-facing "should I treat my local model as stale" flag that is
+    not documented to mean workspace change specifically and is not safe to depend on here.
     """
     attempted = f"to set the current project to '{request.project_id}'"
 
@@ -168,7 +191,7 @@ def handle_set_current_project(
             ),
         )
 
-    before_workspace = _resolve_workspace_dir(_current_project_id())
+    before_workspace = _current_workspace_dir()
 
     switched = engine.request(SetCurrentProjectRequest(project_id=request.project_id), SetCurrentProjectResultSuccess)
     if switched.value is None:
@@ -179,7 +202,7 @@ def handle_set_current_project(
         )
 
     current_id = _current_project_id()
-    after_workspace = _resolve_workspace_dir(current_id)
+    after_workspace = _current_workspace_dir()
 
     return NukeSetCurrentProjectResultSuccess(
         project_id=current_id,
@@ -223,8 +246,31 @@ def _current_project_id() -> str:
     return str(current.value.project_info.project_id)
 
 
+def _current_workspace_dir() -> str:
+    """Return the workspace directory the engine is actually configured against right now.
+
+    Reads GetWorkspaceRequest, not ResolveProjectWorkspaceRequest: this is the live value a
+    caller wants when asking about the project that is current, the same value
+    ``ProjectManager._activate_project`` itself compares before and after a switch to decide
+    whether to reload the workflow registry. Unlike the resolver, it never answers empty,
+    because it names no project id to fail to resolve; it just reads whatever the engine's
+    ``config_manager.workspace_path`` is, defaults included.
+    """
+    workspace = engine.request(GetWorkspaceRequest(), GetWorkspaceResultSuccess)
+    if workspace.value is None:
+        return ""
+    return workspace.value.workspace_path
+
+
 def _resolve_workspace_dir(project_id: str) -> str:
-    """Return the workspace directory a project id resolves to, or empty when it resolves to none."""
+    """Return the workspace directory a project id would resolve to if activated, or empty when it resolves to none.
+
+    The offline previewer: used only by NukeDescribeProjectRequest, for a project that is
+    not current, where there is no live workspace to read and a resolved guess is the whole
+    point. Answers ``None`` (narrowed here to empty) for any id with no readable project file
+    on disk, which includes the system-defaults sentinel, so it must never be used for the
+    project that is actually current; see ``_current_workspace_dir``.
+    """
     resolved = engine.request(
         ResolveProjectWorkspaceRequest(project_id=project_id), ResolveProjectWorkspaceResultSuccess
     )
