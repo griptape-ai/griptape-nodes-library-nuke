@@ -162,7 +162,7 @@ class ExecutionBridge:
 
         Control parameters are skipped. The engine streams a value update for ``exec_in``
         like any other parameter, and forwarding it would contradict describe_workflow,
-        which never lists control ports, and would type execution wiring as GTText because
+        which never lists control parameters, and would type execution wiring as GTText because
         the normalizer has no case for a control type.
         """
         if event.data_type == CONTROL_PARAM_TYPE:

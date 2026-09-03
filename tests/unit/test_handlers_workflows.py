@@ -68,32 +68,32 @@ class TestDescribeWorkflow:
         result = handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
-        assert {port["parameter"] for port in result.inputs} == {"topic", "plate"}
-        assert {port["parameter"] for port in result.outputs} == {"was_successful", "mixed_audio"}
+        assert {declared["parameter"] for declared in result.inputs} == {"topic", "plate"}
+        assert {declared["parameter"] for declared in result.outputs} == {"was_successful", "mixed_audio"}
 
-    def test_ports_carry_the_authors_default_its_help_text_and_whether_it_may_be_set(
+    def test_parameters_carry_the_authors_default_its_help_text_and_whether_it_may_be_set(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A host builds knobs from this, so a port with no default has nothing to initialize to.
+        """A host builds knobs from this, so a parameter with no default has nothing to initialize to.
 
         The default arrives as a normalized descriptor rather than a raw engine value, so a
-        port's default and its live value are the same shape.
+        parameter's default and its live value are the same shape.
         """
         use_engine(monkeypatch, _registry(WORKFLOW_TABLE))
 
         result = handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
-        ports = {port["parameter"]: port for port in result.inputs}
+        parameters = {declared["parameter"]: declared for declared in result.inputs}
 
-        assert ports["topic"]["default"]["value_type"] == ValueType.TEXT
-        assert ports["topic"]["tooltip"] == "What the shot is about."
-        assert ports["topic"]["settable"] is True
+        assert parameters["topic"]["default"]["value_type"] == ValueType.TEXT
+        assert parameters["topic"]["tooltip"] == "What the shot is about."
+        assert parameters["topic"]["settable"] is True
 
-        assert ports["plate"]["default"]["value_type"] == ValueType.NULL
-        assert ports["plate"]["settable"] is False
+        assert parameters["plate"]["default"]["value_type"] == ValueType.NULL
+        assert parameters["plate"]["settable"] is False
 
-    def test_a_port_the_engine_gave_no_metadata_for_still_describes_completely(
+    def test_a_parameter_the_engine_gave_no_metadata_for_still_describes_completely(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Older workflow_shape entries carry only a type, and every field must still be present.
@@ -105,7 +105,7 @@ class TestDescribeWorkflow:
         result = handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
-        bare = next(port for port in result.outputs if port["parameter"] == "was_successful")
+        bare = next(declared for declared in result.outputs if declared["parameter"] == "was_successful")
         assert bare["default"]["value_type"] == ValueType.NULL
         assert bare["tooltip"] == ""
         assert bare["settable"] is True
@@ -141,12 +141,12 @@ class TestDescribeWorkflow:
         assert isinstance(result, NukeDescribeWorkflowResultFailure)
 
 
-def test_describe_lists_the_same_ports_execute_will_accept(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_describe_lists_the_same_parameters_execute_will_accept(monkeypatch: pytest.MonkeyPatch) -> None:
     """A host sets what describe published, so the two must be built from one projection."""
     use_engine(monkeypatch, _registry(WORKFLOW_TABLE))
 
     result = handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
 
     assert isinstance(result, NukeDescribeWorkflowResultSuccess)
-    described = {(port["node"], port["parameter"]) for port in result.inputs}
-    assert described == shape.input_port_ids({"workflow_shape": SHAPE})
+    described = {(declared["node"], declared["parameter"]) for declared in result.inputs}
+    assert described == shape.input_parameter_ids({"workflow_shape": SHAPE})
