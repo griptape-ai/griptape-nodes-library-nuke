@@ -230,7 +230,7 @@ class TestTranslation:
     def test_a_control_flow_parameter_update_is_not_forwarded(self, event_manager: FakeEventManager) -> None:
         """The engine streams a value update for exec_in like any other parameter.
 
-        Forwarding it would contradict describe_workflow, which never lists control ports,
+        Forwarding it would contradict describe_workflow, which never lists control parameters,
         and would type execution wiring as GTText, since the normalizer has no case for a
         control type. Observed live before this was filtered: a host received
         'End Flow.exec_in' as a GTText value.

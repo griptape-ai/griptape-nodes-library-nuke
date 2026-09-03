@@ -1,7 +1,7 @@
 """Tests for the value normalizer.
 
 Asserts on narrowed output rather than on "it did not raise". An earlier version of this
-layer silently produced zero ports for every workflow while every call still reported
+layer silently produced zero parameters for every workflow while every call still reported
 success, which is the failure mode these tests exist to catch.
 """
 
@@ -38,14 +38,14 @@ STATIC_URL = "http://localhost:8124/workspace/static_files/render.png"
         # An image sequence is an image with many sources, under either name in use for one.
         ("Sequence", ValueType.IMAGE),
         ("ImageSequenceArtifact", ValueType.IMAGE),
-        # The engine wraps a container port's element type, and the brackets must not defeat
+        # The engine wraps a container parameter's element type, and the brackets must not defeat
         # the mapping table or the Artifact suffix test.
         ("list[ImageUrlArtifact]", ValueType.IMAGE),
         ("list[VideoUrlArtifact]", ValueType.MOVIE),
         ("list[int]", ValueType.NUMBER),
         ("list[str]", ValueType.TEXT),
         ("list[AudioUrlArtifact]", ValueType.FILE),
-        # A wildcard port declares only that it accepts anything, so the most permissive
+        # A wildcard parameter declares only that it accepts anything, so the most permissive
         # host control is the honest answer and the runtime descriptor is authoritative.
         ("any", ValueType.TEXT),
         ("all", ValueType.TEXT),
@@ -71,11 +71,11 @@ def test_engine_type_names_map_into_the_closed_set(engine_type: str | None, expe
         ("int", 7),
     ],
 )
-def test_declared_port_type_agrees_with_the_type_its_values_normalize_to(declared: str, value: Any) -> None:
+def test_declared_parameter_type_agrees_with_the_type_its_values_normalize_to(declared: str, value: Any) -> None:
     """A host builds a knob from the declared type and then receives values on it.
 
     The two disagreeing is worse than either being wrong alone: the plugin builds a text
-    field for a port that goes on to stream image sequences. Sequence ports are the case
+    field for a parameter that goes on to stream image sequences. Sequence parameters are the case
     this library itself produces, so they are the case most likely to regress.
     """
     assert (
@@ -92,7 +92,7 @@ def test_declared_port_type_agrees_with_the_type_its_values_normalize_to(declare
         ("ThreeDUrlArtifact", "/show/model.obj", ValueType.FILE),
     ],
 )
-def test_a_port_whose_declared_type_carries_no_media_information_may_narrow_at_runtime(
+def test_a_parameter_whose_declared_type_carries_no_media_information_may_narrow_at_runtime(
     declared: str, value: Any, runtime: str
 ) -> None:
     """An unmapped artifact class describes as GTFile, and its values may narrow to media.
@@ -170,7 +170,7 @@ def test_format_is_never_guessed() -> None:
 
 
 def test_declared_type_outranks_the_extension() -> None:
-    """The port author knew the media type; the filename may not carry it."""
+    """The parameter author knew the media type; the filename may not carry it."""
     descriptor = value_types.normalize_value("/mnt/show/no_extension", "ImageUrlArtifact")
     assert descriptor["value_type"] == ValueType.IMAGE
 
@@ -294,8 +294,8 @@ def test_a_media_or_file_type_never_arrives_without_a_source(value: Any, declare
     """GTImage, GTMovie and GTFile promise a host somewhere to get bytes, so they must carry a source.
 
     Both docs publish the inverse rule too: only GTText, GTNumber, GTBool and GTNull arrive
-    sourceless. A declared media type describes what a port is for, not what a value turned out
-    to be, so prose on an image port must not be announced as an image a host can open.
+    sourceless. A declared media type describes what a parameter is for, not what a value turned out
+    to be, so prose on an image parameter must not be announced as an image a host can open.
     """
     descriptor = value_types.normalize_value(value, declared)
     value_type = descriptor["value_type"]

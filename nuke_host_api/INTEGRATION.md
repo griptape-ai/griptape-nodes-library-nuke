@@ -28,10 +28,11 @@ has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest` |
+| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeCancelExecutionRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
+| Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `running`, `completed`, `failed`, `cancelled` |
 
@@ -162,8 +163,7 @@ Heartbeat: send `{ "type": "ping", "id": "..." }` and the engine answers
 `{ "type": "pong", "id": "..." }` on the same connection, without the frame reaching the
 engine's event dispatch. Nothing pings the host, and WebSocket protocol-level ping frames
 are not part of what this driver answers. A dead engine otherwise shows up as a closed
-connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest` with
-`include_outputs: false`.
+connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest`.
 
 ### Requests
 
@@ -186,6 +186,49 @@ somewhere this host is not listening.
   }
 }
 ```
+
+### Batching many requests in one frame
+
+`EventRequestBatch` is the engine's wire-only envelope for sending several requests in one
+WebSocket message instead of one message each. It fans out into individual `EventRequest`
+frames on ingest, so nothing here needs a batch-aware verb: each inner request still carries
+its own `request_id` and `response_topic`, and results come back as ordinary
+`success_result`/`failure_result` frames correlated by `request_id`, exactly as if each had
+been sent separately. There is no batched reply to wait for.
+
+```json
+{
+  "payload": {
+    "event_type": "EventRequestBatch",
+    "requests": [
+      {
+        "event_type": "EventRequest",
+        "request_type": "NukeGetParameterValuesRequest",
+        "request": { "sections": ["inputs"] },
+        "request_id": "batch-1a",
+        "response_topic": "nuke/reply"
+      },
+      {
+        "event_type": "EventRequest",
+        "request_type": "NukeGetExecutionStateRequest",
+        "request": {},
+        "request_id": "batch-1b",
+        "response_topic": "nuke/reply"
+      }
+    ]
+  }
+}
+```
+
+This shape is derived from the envelope's own `dict()`/`from_dict()` contract
+(`retained_mode/events/base_events.py`), not confirmed against a live `websocket_direct`
+round trip, so treat it as the documented contract rather than a captured transcript like
+every other frame here. `EventRequestBatch` itself is unversioned engine surface, not part
+of the `Verb` list or the Bound surface table above, so this hedge is about whether the
+envelope's shape can change out from under a host, not merely about whether this JSON was
+captured from a live round trip like the others. Useful for a plugin that wants several
+verbs answered in one network round trip, for example reading parameter values and execution
+state together on a single poll tick, without paying one WebSocket message per verb.
 
 ### Results
 
@@ -339,10 +382,10 @@ window, suitable for display to a user:
 | `workflow_id` | `str` | Echoed |
 | `name` | `str` | |
 | `description` | `str` | |
-| `inputs` | `list[dict]` | Port descriptors |
-| `outputs` | `list[dict]` | Port descriptors. The only definition of "outputs" in this protocol |
+| `inputs` | `list[dict]` | Parameter descriptors |
+| `outputs` | `list[dict]` | Parameter descriptors. The only definition of "outputs" in this protocol |
 
-Port descriptor fields:
+Parameter descriptor fields:
 
 | Field | Notes |
 |---|---|
@@ -354,15 +397,15 @@ Port descriptor fields:
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 
-`default` is a full value descriptor rather than a raw value, so a port's default and its
-live value are the same shape and one code path renders both. A port with no author default
+`default` is a full value descriptor rather than a raw value, so a parameter's default and its
+live value are the same shape and one code path renders both. A parameter with no author default
 reports `GTNull` with no sources.
 
-Every field is always present. A port the engine gave no metadata for reports `GTNull`, an
+Every field is always present. A parameter the engine gave no metadata for reports `GTNull`, an
 empty tooltip, and `settable: true` rather than omitting keys.
 
-**`type` can be narrower at runtime.** For a port whose declared type names a media type or
-a scalar, `type` and the value's `value_type` always match. For a port whose declared type
+**`type` can be narrower at runtime.** For a parameter whose declared type names a media type or
+a scalar, `type` and the value's `value_type` always match. For a parameter whose declared type
 carries no media information, they can differ, and only in one direction:
 
 | Declared type says | `type` reports | A value may arrive as |
@@ -371,7 +414,7 @@ carries no media information, they can differ, and only in one direction:
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, or `GTMovie` |
 | A wildcard (`any`, `all`) | `GTText` | anything |
 
-A `GenericArtifact` port holding `https://cdn.example.com/still.jpg` is genuinely an image,
+A `GenericArtifact` parameter holding `https://cdn.example.com/still.jpg` is genuinely an image,
 and nothing at describe time can know that, because no value exists yet. So build the knob
 from `type` and always switch on the descriptor's `value_type` when a value actually
 arrives. Never branch on the declared type at runtime.
@@ -420,7 +463,7 @@ arrives. Never branch on the declared type at runtime.
 }
 ```
 
-Build host knobs from this. Control-flow ports are already removed, so every listed port
+Build host knobs from this. Control-flow parameters are already removed, so every listed parameter
 carries data.
 
 ### NukeExecuteWorkflowRequest
@@ -469,8 +512,8 @@ Check `rejected_inputs` on every execution. A rejection does not fail the execut
 workflow executes with whatever value was already present and returns plausible output
 computed from the wrong input. Surface rejections immediately.
 
-A pair that is not a declared input port is rejected with
-`"Not a declared input port of this workflow."` and never reaches the engine. Address
+A pair that is not a declared input parameter is rejected with
+`"Not a declared input parameter of this workflow."` and never reaches the engine. Address
 inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` returned.
 
 One execution at a time. Starting a run while one is in progress returns
@@ -483,14 +526,14 @@ added field, which a tolerant parser already handles.
 
 ### NukeGetExecutionStateRequest
 
-The output-reading and recovery path. Notifications have no replay, so a host that
-connected mid-execution or dropped its connection has permanently missed events; this call returns
-current truth read live from the engine, with no cache that could disagree. It is also how a
-host checks whether it may start another run.
+The running-state recovery path. Notifications have no replay, so a host that connected
+mid-execution or dropped its connection has permanently missed events; this call returns
+current truth read live from the engine, with no cache that could disagree. It is also how
+a host checks whether it may start another run.
 
-| Request field | Type | Default | Notes |
-|---|---|---|---|
-| `include_outputs` | `bool` | `true` | Set `false` when polling only for liveness. Each output port costs one engine read |
+No request fields. Reports execution state only; a workflow's parameter values are a separate
+read, `NukeGetParameterValuesRequest`, because each one costs an engine round trip per parameter and
+a host polling only for liveness should not pay for it.
 
 | `NukeGetExecutionStateResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -498,14 +541,50 @@ host checks whether it may start another run.
 | `active_nodes` | `list[str]` | Nodes currently resolving |
 | `involved_nodes` | `list[str]` | Nodes in the current execution |
 | `workflow_id` | `str` | Loaded workflow, empty when none |
-| `outputs` | `dict` | `{node: {parameter: value_descriptor}}`, matching describe. Empty when `include_outputs` was false or no workflow is loaded |
 
 ```json
 {
   "running": false,
   "active_nodes": [],
   "involved_nodes": [],
+  "workflow_id": "nuke_api_smoke"
+}
+```
+
+### NukeGetParameterValuesRequest
+
+The bulk value-reading path. Reads every declared start-flow or end-flow parameter's
+current value in one call instead of one `GetParameterValueRequest`-per-parameter round trip a
+host would otherwise have to issue itself. Values exist only for the loaded graph, so this
+takes no `workflow_id`: it always answers for whatever `NukeExecuteWorkflowRequest` most
+recently loaded.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `sections` | `list[str]` | `[]` | One or more of `inputs`, `outputs`. Empty means both. An unrecognized name is refused, not silently ignored |
+
+| `NukeGetParameterValuesResultSuccess` field | Type | Notes |
+|---|---|---|
+| `workflow_id` | `str` | The workflow these values belong to |
+| `requested_sections` | `list[str]` | The sections actually read, so a host can tell "not asked for" from "asked for, got nothing" |
+| `inputs` | `dict` | `{node: {parameter: value_descriptor}}` for the start-flow side, matching describe's `inputs`. Empty when `inputs` was not requested or the workflow declares none |
+| `outputs` | `dict` | Same shape, for the end-flow side, matching describe's `outputs` |
+| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not answer for. Reported, not omitted: an absent entry and an empty one mean different things to a host building a knob |
+
+```json
+{
   "workflow_id": "nuke_api_smoke",
+  "requested_sections": ["inputs", "outputs"],
+  "inputs": {
+    "Start Flow": {
+      "topic": {
+        "value_type": "GTText",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "str"
+      }
+    }
+  },
   "outputs": {
     "End Flow": {
       "was_successful": {
@@ -527,6 +606,32 @@ host checks whether it may start another run.
         "engine_type": "str"
       }
     }
+  },
+  "unavailable": []
+}
+```
+
+Asking for only one side:
+
+```json
+{ "sections": ["inputs"] }
+```
+
+A name outside `inputs`/`outputs` fails rather than answering with nothing:
+
+```json
+{ "sections": ["sideways"] }
+```
+
+```json
+{
+  "result_details": {
+    "result_details": [
+      {
+        "level": 40,
+        "message": "Attempted to read declared parameter values. Failed because section(s) ['sideways'] are not recognized. Use one or more of ['inputs', 'outputs']."
+      }
+    ]
   }
 }
 ```
@@ -607,21 +712,24 @@ carries no status field, so this layer has nothing else to report. `failed` is r
 for the day the engine exposes that outcome on an event; it is not emitted today. The
 only way to detect an actual failure is to catch the live `NukeNodeStateEvent` with
 `state: "failed"` as it is pushed. `NukeGetExecutionStateRequest` cannot recover a missed
-one after the fact: its result carries running state, active/involved nodes, and output
-values, never a flow-level outcome, because the engine exposes none. A host that drops
-its connection or connects late has no way to learn, after the fact, that a run failed.
+one after the fact: its result carries running state and active/involved nodes, never a
+flow-level outcome, because the engine exposes none. `NukeGetParameterValuesRequest` reads
+values, a separate call with a separate purpose, and it carries no outcome either. A host
+that drops its connection or connects late has no way to learn, after the fact, that a run
+failed.
 
 May also receive `cancelled` followed by `completed` for one run: the engine's cancel and
 error paths both end in the same completion event, and whether a host observes both for a
 single run is a timing question this layer cannot settle by reading engine source. Treat
 the first terminal state received as authoritative and ignore a later one for the same run.
 
-Carries no outputs by design. Outputs mean exactly one thing in this protocol: the ports
-`NukeDescribeWorkflowRequest` declared. Read them with `NukeGetExecutionStateRequest`.
+Carries no outputs by design. Outputs mean exactly one thing in this protocol: the parameters
+`NukeDescribeWorkflowRequest` declared. Read them with `NukeGetParameterValuesRequest`.
 
 ## Value descriptors
 
-Every value, in a notification or in `outputs`, has this shape:
+Every value, in a notification or in `inputs`/`outputs` from `NukeGetParameterValuesRequest`,
+has this shape:
 
 ```json
 {
@@ -713,7 +821,8 @@ Verified against the transport implementation.
 | No auth, no TLS | Anything that can reach the port can drive the engine. The loopback bind is the only access control there is |
 | No continuity across reconnects | After a drop: reconnect, re-subscribe both topics, re-issue `NukeConnectRequest`, re-read state |
 
-`NukeGetExecutionStateRequest` is the authority whenever state is uncertain.
+`NukeGetExecutionStateRequest` is the authority whenever running state is uncertain, and
+`NukeGetParameterValuesRequest` whenever a parameter's value is.
 
 ## Version compatibility
 

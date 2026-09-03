@@ -114,7 +114,7 @@ def execute_responses(overrides: dict[type, Any] | None = None) -> dict[type, An
     """Engine responses for a clean execute, so each test overrides only what it is about.
 
     Execute preflights twice before it loads anything: once to refuse starting over a run in
-    progress, once to learn which ports it may set.
+    progress, once to learn which parameters it may set.
     """
     responses: dict[type, Any] = {
         ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok"),

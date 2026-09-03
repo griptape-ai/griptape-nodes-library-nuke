@@ -19,8 +19,9 @@ nuke_host_api/
     connect.py                       version negotiation, event stream opening
     workflows.py                     list, describe
     execution.py                     execute, state, cancel
+    values.py                        bulk parameter-value reads, selectable by side
   engine.py                        engine request narrowing and shared queries
-  shape.py                         workflow_shape -> host-visible ports
+  shape.py                         workflow_shape -> host-visible parameters
   dispatch.py                      handler calling convention: request guard, failure wording
   library_version.py               the shipped version, read from the manifest
   execution_bridge.py              engine execution events -> host notifications
@@ -29,14 +30,15 @@ tests/unit/
   test_protocol.py                 verb/notification names resolve to real payload classes
   test_value_types.py              value mapping table and descriptor shape
   test_macros.py                   macro resolution, patterns, unresolved tokens
-  test_shape.py                    shape parsing, port narrowing, runnability
+  test_shape.py                    shape parsing, parameter narrowing, runnability
   test_engine.py                   narrowing, event topic, shared queries
   test_dispatch.py                 request guard, failure wording
   test_library_version.py          manifest read and reload reset
   test_handlers_routes.py          every declared verb is routed exactly once
   test_handlers_connect.py         negotiation, event stream gating
-  test_handlers_workflows.py       discovery and port publication
+  test_handlers_workflows.py       discovery and parameter publication
   test_handlers_execution.py       run guards, input allow-list, state, cancel
+  test_handlers_values.py          section selection, unavailable reporting, normalization
   test_execution_bridge.py         subscription symmetry, event translation
 ```
 
@@ -54,7 +56,7 @@ make test/unit
 There is no reference client in the repo. `INTEGRATION.md` is the contract; a host is
 verified against a running engine by hand until the plugin exists.
 
-## The four capabilities
+## The five capabilities
 
 ### 1. Connect
 
@@ -91,25 +93,46 @@ have to know that sequence, or that it may change.
 
 `NukeExecuteWorkflowResultSuccess` reports `applied_inputs` and `rejected_inputs`, because a
 silently dropped input is worse than a failed execution: the workflow produces plausible
-output from the wrong values. Inputs are checked against the ports `describe_workflow`
+output from the wrong values. Inputs are checked against the parameters `describe_workflow`
 declared before they reach the engine, which would otherwise set a parameter on any node in
 the loaded graph for a caller this transport never authenticated.
 
-`NukeDescribeWorkflowRequest` carries each port's `default`, `tooltip`, and `settable`
+`NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
 alongside its type, because a host builds knobs from this and a knob with no default has
-nothing to initialize to. The default is a value descriptor, so a port's default and its
+nothing to initialize to. The default is a value descriptor, so a parameter's default and its
 live value are one shape.
 
-### 3. Node execution changes
+### 3. Read every declared parameter value
+
+`NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and
+which nodes are involved. `NukeGetParameterValuesRequest` answers a different one: what does
+every declared start-flow or end-flow parameter currently hold. Each verb has one meaning,
+and a host reads every input-side parameter as readily as every output-side one.
+
+`sections` selects `"inputs"`, `"outputs"`, or both (the default, when the list is empty),
+so a host reads a start node's parameters, an end node's parameters, or everything in one
+call instead of one `GetParameterValueRequest` per parameter. `requested_sections` echoes what
+was actually read, so a host can tell a section it did not ask for from a section that came
+back empty. `unavailable` reports, rather than silently omits, any declared parameter the engine
+would not answer for, because an absent entry and an empty one mean different things when
+a host is deciding what to show on a knob.
+
+Answered by one engine request per declared parameter rather than the engine's own
+`GetAllNodeInfoRequest`, which batches a node's info into one call but keys its parameter
+values by internal element id, hands artifacts back display-serialized into plain dicts
+rather than the instances the normalizer inspects, and drops any parameter whose value is
+`None`. See `handlers/values.py` for the full comparison.
+
+### 4. Node execution changes
 
 Eight engine execution events collapse into four states (`unresolved`, `running`,
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`. The ratio is the point: the
 engine can add a ninth event type without the host learning anything.
 
-### 4. Parameter value changes
+### 5. Parameter value changes
 
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.
-The same normalizer that types ports in `describe_workflow` shapes every live update, so
+The same normalizer that types parameters in `describe_workflow` shapes every live update, so
 a host has one value format rather than two.
 
 ### Push, with a recovery path
@@ -140,16 +163,16 @@ delays delivery to the editor. `websocket_direct` gives each connection its own 
 queue and writer task, so a slow reader costs engine memory instead of frames and stalls
 nobody. A plugin still reads on a dedicated thread that never blocks.
 
-`NukeGetExecutionStateRequest` is therefore the recovery path for running state and output
-values: it reads flow state and the declared output values straight from the engine, so a
-reconnecting host that missed everything can still get current truth about what is
-running and what a workflow's output ports currently hold. It holds no cache, which is why
-it cannot drift. It is **not** a recovery path for a run's outcome: the engine exposes no
-flow-level success/failure field anywhere, on this request or any other, so a host that
+`NukeGetExecutionStateRequest` and `NukeGetParameterValuesRequest` together are the recovery
+path: a reconnecting host that missed every notification reads what is running from the
+first and what every declared parameter currently holds from the second. Both read straight from
+the engine on every call, holding no cache, which is why neither can drift from the
+engine's own view. Neither is a recovery path for a run's outcome: the engine exposes no
+flow-level success/failure field anywhere, on either request or any other, so a host that
 misses the live `NukeNodeStateEvent` with `state: "failed"` has no way to learn afterward
 that a run failed.
 
-**Outputs have exactly one meaning:** the ports `NukeDescribeWorkflowRequest` declared.
+**Outputs have exactly one meaning:** the parameters `NukeDescribeWorkflowRequest` declared.
 The engine's terminal event reports values for whichever node control flow ended on, which
 is often not a declared output node, so `NukeExecutionStateEvent` carries only
 `terminal_node` and never outputs. Reading values in that callback would also violate the
@@ -183,7 +206,7 @@ library already consumes are not in the SDK at all: `ThreeDUrlArtifact`,
 GTImage    <- ImageUrlArtifact, static server URL          [url/png]
 GTImage    <- ImageUrlArtifact, remote URL no extension    [url/?]
 GTImage    <- ImageArtifact, inline bytes                  [inline/png]
-GTImage    <- "Sequence" or list[ImageUrlArtifact] port    [many sources]
+GTImage    <- "Sequence" or list[ImageUrlArtifact]         [many sources]
 GTMovie    <- VideoUrlArtifact                             [url/mov]
 GTImage    <- bare string, absolute path                   [path/exr]
 GTText     <- bare string, prose                           [no sources]
@@ -205,7 +228,7 @@ Rules:
 - **Never guesses a format.** Unknown is `null`.
 - **`kind` is explicit**, so a host never sniffs whether a string is a URL, path, macro,
   or prose.
-- **A declared port type outranks the extension**, except for an artifact class this version
+- **A declared parameter type outranks the extension**, except for an artifact class this version
   does not map: there the extension is the only media information there is, so an unmapped
   class describes as `GTFile` and its values may narrow to `GTImage` or `GTMovie`. Narrowing
   never leaves the sourced types.
@@ -308,7 +331,7 @@ Load-bearing for the design, and documented nowhere obvious.
 
 5. **Result shapes are not stable in type, only in key.** `workflow_shape` arrives as a
     JSON string for some workflows and null for others. An early version assumed a dict
-    and silently returned zero ports for every workflow while every request still
+    and silently returned zero parameters for every workflow while every request still
     reported success.
 
 6. **A library with zero nodes fails to load** with "no nodes were loaded". Not an issue
@@ -355,7 +378,7 @@ Load-bearing for the design, and documented nowhere obvious.
 - **Registry entries can be stale.** `NukeListWorkflowsRequest` checks that a workflow's
   file still exists, because the registry keeps entries for deleted files and its own
   `is_saved` flag stays true for them.
-- **Port metadata stops at `default`, `tooltip`, and `settable`.** The engine also carries
+- **Parameter metadata stops at `default`, `tooltip`, and `settable`.** The engine also carries
   `ui_options`, holding slider ranges (`range_slider`, `step`), dropdown choices
   (`simple_dropdown`, `multi_options`), and `multiline`. Passing that dict through raw would
   hand a plugin author editor vocabulary to bind to, so whatever a Nuke knob needs from it
@@ -370,3 +393,10 @@ Load-bearing for the design, and documented nowhere obvious.
   inside `process()` is unverified. If it does not, only an engine restart recovers.
 - **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
+- **`NukeGetParameterValuesRequest` costs one engine request per declared parameter, with no
+  transport-level batching in this layer.** A workflow's declared surface is knobs, not
+  hundreds of them, so the cost has not mattered in practice. If it ever does, the fix is
+  the engine's own `EventRequestBatch` wire envelope (`INTEGRATION.md`, Frame formats),
+  which packs many host verb frames into one WebSocket message; it is a transport
+  optimization a host applies itself, not something this verb's handler can opt into on a
+  host's behalf.
