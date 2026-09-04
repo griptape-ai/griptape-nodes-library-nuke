@@ -40,6 +40,11 @@ nuke_plugin/             Griptape Annotator — dockable panel that runs inside 
   nuke14/ … nuke17/        Version-specific menu.py registrations
 tests/integration/fixtures/canary/  Shared canary-workflow builder used by tests/integration
   canary_workflow_builder.py  Registers canary_library, builds/saves/publishes the canary gizmo bundle
+  canary_library/canary_library_schema.json  Fixture library schema. Deliberately NOT named
+                           griptape[_-]nodes[_-]library.json: that glob is how the engine finds
+                           libraries under a registered directory, and this fixture must never be
+                           discovered as an installable one. Materialized under the canonical name
+                           into a temp dir at test time.
 presets/                 (planned) Bundled preset .nk scripts
 griptape-nodes-library.json   Library manifest — register nodes here
 pyproject.toml           Dependencies and tool config

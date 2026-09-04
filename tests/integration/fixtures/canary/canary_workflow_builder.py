@@ -44,6 +44,16 @@ if TYPE_CHECKING:
 CANARY_LIBRARY_DIR = Path(__file__).parent / "canary_library"
 NUKE_LIBRARY_DIR = Path(__file__).parents[4]
 
+# The committed fixture schema deliberately does NOT use the engine's library manifest name
+# (``griptape[_-]nodes[_-]library.json``). The engine discovers libraries by globbing that name
+# under every registered directory, with no way to mark a manifest as not-for-installation, so a
+# canonically-named file here turns the fixture into a real library candidate in the editor of
+# anyone who registers this checkout. It cannot work as one -- CanaryNode.process() requires
+# workspace assets that only the test harness writes -- so it must stay unglobbable.
+# ``_materialize_canary_library`` writes the canonical name into a temp dir at test time.
+CANARY_LIBRARY_SCHEMA = CANARY_LIBRARY_DIR / "canary_library_schema.json"
+MATERIALIZED_SCHEMA_NAME = "griptape_nodes_library.json"
+
 WORKFLOW_NAME = "canary_workflow"
 GIZMO_NODE_NAME = versioned_node_name(WORKFLOW_NAME, 1)
 
@@ -236,15 +246,21 @@ def publish_canary_bundle(
 
 
 def _materialize_canary_library(target_dir: Path) -> Path:
-    """Copy fixtures/canary/canary_library into a tmp dir, pinned to the running engine version."""
+    """Copy fixtures/canary/canary_library into a tmp dir, pinned to the running engine version.
+
+    The committed schema is named so the engine's discovery glob cannot see it (see
+    ``CANARY_LIBRARY_SCHEMA``); the copy written here takes the canonical manifest name. Nothing
+    requires that name on this path -- registration is by explicit ``file_path`` -- but keeping it
+    means the fixture the tests register is shaped exactly like a real installed library.
+    """
     target_dir.mkdir(parents=True, exist_ok=True)
-    schema = json.loads((CANARY_LIBRARY_DIR / "griptape_nodes_library.json").read_text())
+    schema = json.loads(CANARY_LIBRARY_SCHEMA.read_text())
     schema["metadata"]["engine_version"] = engine_version
-    (target_dir / "griptape_nodes_library.json").write_text(json.dumps(schema, indent=2))
+    (target_dir / MATERIALIZED_SCHEMA_NAME).write_text(json.dumps(schema, indent=2))
     for node_entry in schema["nodes"]:
         source = CANARY_LIBRARY_DIR / node_entry["file_path"]
         (target_dir / node_entry["file_path"]).write_text(source.read_text())
-    return target_dir / "griptape_nodes_library.json"
+    return target_dir / MATERIALIZED_SCHEMA_NAME
 
 
 def _create_node(node_type: str, node_name: str, flow_name: str) -> None:
