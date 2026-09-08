@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from griptape_nodes.retained_mode.events.app_events import (
+    GetEngineNameRequest,
+    GetEngineNameResultSuccess,
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
 )
@@ -88,6 +90,30 @@ def engine_version() -> str:
     if attempt.value is None:
         return "unknown"
     return f"{attempt.value.major}.{attempt.value.minor}.{attempt.value.patch}"
+
+
+def engine_id() -> str:
+    """Return the engine's own id, or empty when the engine has not set one."""
+    return GriptapeNodes.get_engine_id() or ""
+
+
+def session_id() -> str:
+    """Return the current session's id, or empty when no session is open."""
+    return GriptapeNodes.get_session_id() or ""
+
+
+def engine_name() -> str:
+    """Return the engine's human-readable name, or empty when the engine could not report one.
+
+    Unlike ``engine_version``, a refusal here is not "unknown": the engine's own handler only
+    fails on an unexpected exception reading its identity store, not on an unset name, so an
+    empty string is reserved for that path and never stands in for a name the engine actually
+    has.
+    """
+    attempt = request(GetEngineNameRequest(), GetEngineNameResultSuccess)
+    if attempt.value is None:
+        return ""
+    return attempt.value.engine_name
 
 
 def top_level_flow_name() -> str | None:

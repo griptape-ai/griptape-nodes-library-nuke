@@ -79,6 +79,13 @@ until the plugin exists.
 closed host type set, and the event topic. Offering an unsupported version gets a clean
 refusal naming the support window.
 
+`NukeConnectResultSuccess` also carries `engine_id`, `session_id`, and `engine_name`, so a
+plugin reads identity from the versioned handshake reply rather than from the result
+envelope, which carries the first two as well but makes no compatibility promise about
+doing so. All three are empty string, never null, when the engine has not set one, and a
+connect that cannot name the engine is still a successful handshake: a bare connectivity
+check has to succeed with none of them set.
+
 Finding an engine to connect to happens off the wire, because a host has no connection yet:
 a host holds the `websocket_direct` URL as its own setting, defaulted to
 `ws://127.0.0.1:18125/`, and a completed handshake is the liveness check. The engine's

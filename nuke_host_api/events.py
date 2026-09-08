@@ -54,6 +54,20 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
         event_topic: The topic notifications are published on. A host subscribes to it to
             receive them; it cannot derive the value.
         value_types: The closed value type set for this protocol version.
+        engine_id: The engine's own id. Empty when the engine has not set one.
+        session_id: The session this connection joined. Empty when no session is open,
+            which is the case for a direct engine connection with no session layered on top.
+        engine_name: The engine's human-readable name. Empty when the engine could not
+            report one.
+
+        The three identity fields are read from the versioned handshake reply rather than
+        from the result envelope, which also carries ``engine_id`` and ``session_id`` but
+        makes no compatibility promise about doing so: envelope shape belongs to the wire
+        protocol between the engine and every client, not to this library, and a plugin
+        binding to it would be binding to a surface this file does not own. A connect that
+        cannot name the engine is still a successful handshake, not a failure: a bare
+        connectivity check has to succeed with none of the three set, so all three are
+        empty string rather than a refusal when identity is unavailable.
     """
 
     protocol_version: int
@@ -62,6 +76,9 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     library_version: str
     event_topic: str
     value_types: list[str]
+    engine_id: str = ""
+    session_id: str = ""
+    engine_name: str = ""
 
 
 @dataclass
