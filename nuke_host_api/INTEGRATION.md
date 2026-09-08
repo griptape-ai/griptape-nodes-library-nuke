@@ -28,7 +28,7 @@ has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeCancelExecutionRequest` |
+| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
@@ -42,20 +42,25 @@ Binding rules:
 |---|---|
 | Bind to nothing outside the table above | Engine request and event types travel the same connection and change every release |
 | Ignore unknown fields | Fields are added without a version bump; a strict parser breaks on a routine engine upgrade |
-| Ignore unknown enum values, never treat as fatal | New value types and states may appear within a version |
+| Ignore unknown enum values, never treat as fatal | A node or execution state may gain a member within a version, and a plugin binary outlives the version bump a new value type or source kind costs |
 | Never branch on `engine_version` or `engine_type` | Both are diagnostic only |
 
 ### Which verbs need a loaded workflow
 
 `NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` read the engine's registry and
-answer for any registered workflow, loaded or not. Everything else answers for the graph the
-engine currently holds and needs `NukeLoadWorkflowRequest` first:
+answer for any registered workflow, loaded or not. The execution and parameter-value verbs
+answer for the graph the engine currently holds and need `NukeLoadWorkflowRequest` first. The
+project verbs read and change engine-wide project state and need no loaded workflow:
 
 | Verb | Needs a loaded workflow | Takes a `workflow_id` |
 |---|---|---|
 | `NukeConnectRequest` | no | no |
 | `NukeListWorkflowsRequest` | no | no |
 | `NukeDescribeWorkflowRequest` | no | yes, required |
+| `NukeListProjectsRequest` | no | no |
+| `NukeGetCurrentProjectRequest` | no | no |
+| `NukeSetCurrentProjectRequest` | no | no |
+| `NukeDescribeProjectRequest` | no | no |
 | `NukeLoadWorkflowRequest` | no, it is what loads one | yes, or a `file_path` |
 | `NukeExecuteWorkflowRequest` | yes | optional, and must match what is loaded |
 | `NukeGetParameterValuesRequest` | yes | no |
@@ -68,6 +73,13 @@ make one readable, and it is destructive, so it is a verb of its own rather than
 read does on a host's behalf.
 
 ## Connecting
+
+This section and [Transport limits](#transport-limits) are read from the engine's own
+`websocket_direct` implementation, at the engine floor this library declares
+(`griptape-nodes-engine>=0.99.0`). No test in this repo exercises that transport: the live
+smoke suite (`make test/integration/host-api`) drives `local_socket` instead. Treat config
+keys, accepted paths, handshake behaviour, control frames, and queueing below as documented
+engine behaviour rather than as behaviour this library pins.
 
 A host connects over `websocket_direct`, a WebSocket server the engine binds on loopback.
 The engine has two other IPC drivers and neither is the one to build a plugin on:
@@ -242,15 +254,14 @@ been sent separately. There is no batched reply to wait for.
 }
 ```
 
-This shape is derived from the envelope's own `dict()`/`from_dict()` contract
-(`retained_mode/events/base_events.py`), not confirmed against a live `websocket_direct`
-round trip, so treat it as the documented contract rather than a captured transcript like
-every other frame here. `EventRequestBatch` itself is unversioned engine surface, not part
-of the `Verb` list or the Bound surface table above, so this hedge is about whether the
-envelope's shape can change out from under a host, not merely about whether this JSON was
-captured from a live round trip like the others. Useful for a plugin that wants several
-verbs answered in one network round trip, for example reading parameter values and execution
-state together on a single poll tick, without paying one WebSocket message per verb.
+`EventRequestBatch` belongs to the engine's own wire envelope
+(`retained_mode/events/base_events.py`), not to this protocol: it appears in neither the `Verb`
+list nor the Bound surface table, so its shape can change without a `PROTOCOL_VERSION` bump.
+The shape above is read from the envelope's `dict()`/`from_dict()` contract and has not been
+exercised through `websocket_direct`. A host that uses it must tolerate engine-level changes
+to the envelope. It is worth that for a plugin wanting several verbs answered in one network
+round trip, for example reading parameter values and execution state on a single poll tick,
+instead of one WebSocket message per verb.
 
 ### Results
 
@@ -312,7 +323,8 @@ returns after one read.
 
 ### NukeConnectRequest
 
-Subscribe to a reply topic first, then connect. Required before anything else.
+Subscribe to a reply topic first, then connect. Required before expecting notifications; the
+other verbs answer without it.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -339,7 +351,7 @@ yet.
 {
   "protocol_version": 1,
   "supported_protocol_versions": [1],
-  "engine_version": "0.97.0",
+  "engine_version": "0.99.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
   "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTNumber", "GTBool", "GTNull"]
@@ -426,15 +438,23 @@ reports `GTNull` with no sources.
 Every field is always present. A parameter the engine gave no metadata for reports `GTNull`, an
 empty tooltip, and `settable: true` rather than omitting keys.
 
-**`type` can be narrower at runtime.** For a parameter whose declared type names a media type or
-a scalar, `type` and the value's `value_type` always match. For a parameter whose declared type
-carries no media information, they can differ, and only in one direction:
+**`type` can be narrower at runtime.** `type` is built from the declared type name, before any
+value exists; a descriptor's `value_type` is built from the value itself. They differ in one
+direction only, by narrowing:
 
 | Declared type says | `type` reports | A value may arrive as |
 |---|---|---|
-| A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | the same type |
-| An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, or `GTMovie` |
+| A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
+| An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
 | A wildcard (`any`, `all`) | `GTText` | anything |
+
+Two overrides apply to every parameter, whatever it declares:
+
+- **Unset is `GTNull`.** An image parameter holding nothing reports `GTNull` with no sources,
+  not `GTImage`.
+- **Pointing at no bytes is `GTText`.** A value with no usable locator reports `GTText`, because
+  prose on an image parameter is still prose and `GTImage` with an empty `sources` would promise
+  bytes that do not exist. So `GTImage`, `GTMovie`, and `GTFile` never arrive sourceless.
 
 A `GenericArtifact` parameter holding `https://cdn.example.com/still.jpg` is genuinely an image,
 and nothing at describe time can know that, because no value exists yet. So build the knob
@@ -467,19 +487,43 @@ arrives. Never branch on the declared type at runtime.
       "node": "End Flow",
       "parameter": "was_successful",
       "name": "End Flow.was_successful",
-      "type": "GTBool"
+      "type": "GTBool",
+      "default": {
+        "value_type": "GTNull",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "NoneType"
+      },
+      "tooltip": "",
+      "settable": true
     },
     {
       "node": "End Flow",
       "parameter": "result_details",
       "name": "End Flow.result_details",
-      "type": "GTText"
+      "type": "GTText",
+      "default": {
+        "value_type": "GTNull",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "NoneType"
+      },
+      "tooltip": "",
+      "settable": true
     },
     {
       "node": "End Flow",
       "parameter": "summary",
       "name": "End Flow.summary",
-      "type": "GTText"
+      "type": "GTText",
+      "default": {
+        "value_type": "GTNull",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "NoneType"
+      },
+      "tooltip": "",
+      "settable": true
     }
   ]
 }
@@ -611,11 +655,13 @@ Refused, and nothing is loaded:
 | The registry cannot be read | that the engine could not read it, which is worth retrying |
 | The engine could not load the workflow | the engine's own reason, and that the previous graph is already gone |
 
-Every row but the last is decided before the engine's state is touched, so those refusals leave
-the previous graph exactly as it was. The last one cannot: `run_with_clean_slate` makes the
-engine clear all object state before it builds the graph, so a workflow that fails inside its
-own file, on a missing library or an exception, leaves nothing loaded. That failure alone
-carries `engine_state_cleared: true`.
+Every row but the last leaves the loaded graph exactly as it was, so the knobs a host is
+showing still match what the engine holds. A `file_path` request is the one that touches
+anything else: the file is imported and registered before the rows below it are checked, so a
+refusal there can leave a new registry entry behind. The last row cannot leave the graph alone:
+`run_with_clean_slate` makes the engine clear all object state before it builds the graph, so a
+workflow that fails inside its own file, on a missing library or an exception, leaves nothing
+loaded. That failure alone carries `engine_state_cleared: true`.
 
 Branch on `engine_state_cleared`, not on the reason text. When it is `false`, the knobs a host
 is showing still match what the engine holds and a retry is free. When it is `true`, the graph
@@ -848,6 +894,157 @@ No arguments. Cancels whatever is running.
 | Terminal state | Arrives as `NukeExecutionStateEvent` with `state: "cancelled"` |
 | Nothing running | Returns `NukeCancelExecutionResultFailure` rather than a silent no-op |
 
+### NukeListProjectsRequest
+
+Workflows are registered per workspace and a project decides the workspace, so this and
+the next three verbs let a host see which project the engine is on and change it.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `include_system_builtins` | `bool` | `false` | `true` also lists the system defaults entry |
+
+`NukeListProjectsResultSuccess.projects` entries:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `str` | Opaque. Feed to `NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`. Do not parse or display |
+| `name` | `str` | Display label. Empty for a failed entry rather than falling back to the opaque `id` |
+| `description` | `str` | Always empty here. Read `NukeDescribeProjectRequest` for the real value |
+| `file_path` | `str` | Absolute path to the project's YAML. Empty only for a project with no backing file (the system defaults); a failed entry's `id` is already that path, so it is reused here |
+| `parent_id` | `str` | The parent project's id, empty when this project has no parent |
+| `current` | `bool` | True for the project the engine is on right now |
+| `available` | `bool` | False when the template failed validation, or when its adjacent config requires an engine version this engine fails |
+| `unavailable_reason` | `str` | Why an entry is greyed out. Empty when `available` |
+
+```json
+{
+  "projects": [
+    {
+      "id": "proj-1",
+      "name": "Nuke Smoke Project",
+      "description": "",
+      "file_path": "/projects/proj-1/griptape-nodes-project.yml",
+      "parent_id": "",
+      "current": true,
+      "available": true,
+      "unavailable_reason": ""
+    }
+  ]
+}
+```
+
+### NukeGetCurrentProjectRequest
+
+No arguments.
+
+| `NukeGetCurrentProjectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `id` | `str` | Opaque, as above |
+| `name` | `str` | |
+| `description` | `str` | Empty when the author wrote none |
+| `file_path` | `str` | Empty for a project with no backing file, the system defaults project |
+| `base_dir` | `str` | Directory this project resolves its own relative paths against. Diagnostic |
+| `workspace_dir` | `str` | The workspace directory the engine is actually using right now, read live. Never empty, including on the system defaults project |
+| `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING`. `GOOD` and `FLAWED` are usable; the other two are not |
+| `problems` | `list[str]` | Human-readable validation messages, for display. Empty when `validation_status` is `GOOD` |
+
+`NukeGetCurrentProjectResultFailure` means no current project is set at all, which the
+engine treats as distinct from being on the system defaults project.
+
+```json
+{
+  "id": "proj-1",
+  "name": "Nuke Smoke Project",
+  "description": "",
+  "file_path": "/projects/proj-1/griptape-nodes-project.yml",
+  "base_dir": "/projects/proj-1",
+  "workspace_dir": "/workspace/proj-1",
+  "validation_status": "GOOD",
+  "problems": []
+}
+```
+
+### NukeSetCurrentProjectRequest
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `project_id` | `str \| null` | `null` | Id from `NukeListProjectsRequest` or `NukeGetCurrentProjectRequest`. `null` requests the system defaults, mirroring the engine's own request exactly |
+
+| `NukeSetCurrentProjectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `project_id` | `str` | The id actually activated, resolved from a requested `null` to the engine's system-defaults id |
+| `workspace_changed` | `bool` | Whether the engine's live workspace directory differs from the one active immediately before this call |
+
+Refuses while the engine is executing, with `NukeSetCurrentProjectResultFailure` worded like
+`NukeExecuteWorkflowRequest`'s running-guard: reloading libraries under a live run is worse
+than refusing, since the very library driving the run could be torn down and rebuilt
+mid-flight. The engine also leaves the previously active project active on any failure.
+
+**Always reconnect after a successful switch, whatever `workspace_changed` says.** Beyond
+re-registering workflows on a workspace change, the engine separately reloads every
+library, this one included, whenever the target project's library-affecting config differs
+from the outgoing project's, and that decision is made independently of
+`workspace_changed`: a switch can reload every library while its workspace stays the same,
+or leave every library untouched while its workspace changes. The engine exposes no field
+for that decision, so this result cannot say after the fact whether it happened. A reload
+tears down this library's request handlers and its outbound event bridge and rebuilds
+both, so a host that keeps talking on its old connection without reconnecting may find
+every notification has silently stopped, and its cached results from `NukeListWorkflowsRequest`
+and `NukeDescribeWorkflowRequest` are stale regardless of whether the reload happened. Send
+`NukeConnectRequest` again immediately after reading this result, then re-run
+`NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` for anything the host plans to
+run next.
+
+The reload behaviour above is read from the engine's project manager, not pinned by a test in
+this repo: this handler only sends `SetCurrentProjectRequest` and compares the engine's live
+workspace directory before and after. That the reply survives a reload has the same standing,
+and rests on the engine reloading synchronously while handling the request, before the reply is
+built. Reconnecting unconditionally is what makes a host correct either way.
+
+If the target project's workspace does not configure this library at all, the reload
+removes this library's verbs entirely, and every request after that, including the
+reconnect, fails at the engine's own dispatch layer with an error this layer never shaped,
+because it no longer owns the verb table to shape one. There is nothing a host can do about
+that beyond restoring a project that does configure this library, from outside this
+protocol.
+
+```json
+{ "project_id": "proj-2" }
+```
+
+```json
+{ "project_id": "proj-2", "workspace_changed": true }
+```
+
+### NukeDescribeProjectRequest
+
+Preview a project's workspace and validation before activating it with
+`NukeSetCurrentProjectRequest`.
+
+| Request field | Type | Notes |
+|---|---|---|
+| `project_id` | `str` | Required. From `NukeListProjectsRequest` |
+
+| `NukeDescribeProjectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `project_id` | `str` | Echoed |
+| `name` | `str` | |
+| `description` | `str` | Empty when the author wrote none |
+| `workspace_dir` | `str` | The workspace directory this project would resolve to if activated, empty when the id resolves to no readable project file |
+| `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING` |
+| `problems` | `list[str]` | Human-readable validation messages |
+
+```json
+{
+  "project_id": "proj-2",
+  "name": "Second Unit Project",
+  "description": "",
+  "workspace_dir": "/workspace/proj-2",
+  "validation_status": "GOOD",
+  "problems": []
+}
+```
+
 ## Notifications
 
 Pushed without a request, labelled with `event_topic`. Eight engine execution event types
@@ -1012,7 +1209,8 @@ Every failure is a typed result, never a dropped frame or a raw exception.
 
 ## Transport limits
 
-Verified against the transport implementation.
+Read from the engine's `websocket_direct` implementation, as noted under
+[Connecting](#connecting). No test in this repo exercises that transport.
 
 | Limit | Consequence for the host |
 |---|---|
@@ -1035,5 +1233,6 @@ Verified against the transport implementation.
 | New field on a request, result, or event | No | None, if unknown fields are ignored |
 | New verb or notification type | No | None, if unknown `payload_type` is ignored |
 | New engine artifact class mapped to an existing value type | No | None |
+| New value type or source kind | Yes | Breaks; a host switches on a closed set |
 | Verb, notification, field, value type, or source kind removed or renamed | Yes | Breaks; a new version is published |
 | Optional field becomes required | Yes | Breaks |
