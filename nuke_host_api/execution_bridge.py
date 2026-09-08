@@ -18,7 +18,7 @@ see ``ensure_installed``.
 
 Stateless by design. The bridge holds no execution state beyond its own subscription
 flag. Values a host wants are read from the engine on demand via
-NukeGetExecutionStateRequest, so there is no copy of engine state here to go stale.
+NukeGetParameterValuesRequest, so there is no copy of engine state here to go stale.
 
 One callback is not request-free. ``_on_parameter_value`` normalizes every streamed
 value through the same ``normalize_value`` used everywhere else, and that normalizer
@@ -183,7 +183,7 @@ class ExecutionBridge:
         Values are deliberately not gathered here. The engine asks listeners to stay
         cheap and non-blocking, and issuing engine requests from inside an execution
         event callback would violate that. A host reads outputs with
-        NukeGetExecutionStateRequest instead.
+        NukeGetParameterValuesRequest instead.
 
         ControlFlowResolvedEvent fires on both a clean run and an errored one, and carries
         no status field, so COMPLETED is all this layer actually knows. It must not infer

@@ -28,7 +28,7 @@ has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeCancelExecutionRequest` |
+| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeCancelExecutionRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
@@ -44,6 +44,28 @@ Binding rules:
 | Ignore unknown fields | Fields are added without a version bump; a strict parser breaks on a routine engine upgrade |
 | Ignore unknown enum values, never treat as fatal | New value types and states may appear within a version |
 | Never branch on `engine_version` or `engine_type` | Both are diagnostic only |
+
+### Which verbs need a loaded workflow
+
+`NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` read the engine's registry and
+answer for any registered workflow, loaded or not. Everything else answers for the graph the
+engine currently holds and needs `NukeLoadWorkflowRequest` first:
+
+| Verb | Needs a loaded workflow | Takes a `workflow_id` |
+|---|---|---|
+| `NukeConnectRequest` | no | no |
+| `NukeListWorkflowsRequest` | no | no |
+| `NukeDescribeWorkflowRequest` | no | yes, required |
+| `NukeLoadWorkflowRequest` | no, it is what loads one | yes, or a `file_path` |
+| `NukeExecuteWorkflowRequest` | yes | optional, and must match what is loaded |
+| `NukeGetParameterValuesRequest` | yes | no |
+| `NukeGetExecutionStateRequest` | yes | no |
+| `NukeCancelExecutionRequest` | yes | no |
+
+A parameter's live value exists on a loaded node, so no read verb can select one by
+`workflow_id`: for an unloaded workflow there is nothing to read. Loading is the only way to
+make one readable, and it is destructive, so it is a verb of its own rather than something a
+read does on a host's behalf.
 
 ## Connecting
 
@@ -466,19 +488,148 @@ arrives. Never branch on the declared type at runtime.
 Build host knobs from this. Control-flow parameters are already removed, so every listed parameter
 carries data.
 
-### NukeExecuteWorkflowRequest
+### NukeLoadWorkflowRequest
 
-Returns once execution has started. Progress and the terminal state arrive as
-notifications.
+Puts a workflow in the engine and returns everything needed to build and initialize knobs:
+the declared parameters and their current values, for both sides, in one reply. Required
+before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
+`NukeGetExecutionStateRequest` can answer for the workflow a host means.
+
+**Destructive.** The engine clears all object state to load a graph, so this discards whatever
+was loaded before, including a graph an editor user has open on the same engine. Confirm with
+the artist before sending it.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
-| `workflow_id` | `str` | required | From `NukeListWorkflowsRequest` |
+| `workflow_id` | `str` | `""` | From `NukeListWorkflowsRequest`. Mutually exclusive with `file_path` |
+| `file_path` | `str` | `""` | Absolute path to a workflow file the engine has not registered. Imported, registered, then loaded. Mutually exclusive with `workflow_id` |
+
+Send exactly one. Both is refused rather than resolved, because they can name different
+workflows; neither is refused too.
+
+| `NukeLoadWorkflowResultSuccess` field | Type | Notes |
+|---|---|---|
+| `workflow_id` | `str` | The loaded workflow's id. Resolved from `file_path` when that is what was sent, so this is how a host learns the id to use afterwards |
+| `name` | `str` | Display label |
+| `description` | `str` | |
+| `inputs` | `list[dict]` | Declared start-flow parameter descriptors, identical to `NukeDescribeWorkflowResultSuccess.inputs`. Build knobs from these |
+| `outputs` | `list[dict]` | Declared end-flow parameter descriptors |
+| `input_values` | `dict` | `{node: {parameter: value_descriptor}}`, identical in shape to `NukeGetParameterValuesResultSuccess.inputs`. Initialize knobs to these |
+| `output_values` | `dict` | Same shape, end-flow side. Carries real values for a workflow that has run before, empty descriptors for one that has not |
+| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not read. Reported, not omitted |
+
+Four fields rather than two because a parameter's declaration and its current value are
+different questions: the declaration is fixed for the workflow, the value changes on every
+run. Both shapes are ones a host already parses from describe and from the bulk read verb, so
+there is nothing new to write.
+
+**Initialize knobs from `input_values`, not from a descriptor's `default`.** `default` is the
+workflow author's value; `input_values` is what the graph currently holds. They differ for any
+workflow whose inputs have been touched.
+
+```json
+{ "workflow_id": "nuke_api_smoke" }
+```
+
+```json
+{
+  "workflow_id": "nuke_api_smoke",
+  "name": "Nuke API Smoke",
+  "description": "",
+  "inputs": [
+    {
+      "node": "Start Flow",
+      "parameter": "topic",
+      "name": "Start Flow.topic",
+      "type": "GTText",
+      "default": {
+        "value_type": "GTText",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "str"
+      },
+      "tooltip": "What the shot is about.",
+      "settable": true
+    }
+  ],
+  "outputs": [
+    {
+      "node": "End Flow",
+      "parameter": "was_successful",
+      "name": "End Flow.was_successful",
+      "type": "GTBool",
+      "default": {
+        "value_type": "GTNull",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "NoneType"
+      },
+      "tooltip": "",
+      "settable": true
+    }
+  ],
+  "input_values": {
+    "Start Flow": {
+      "topic": {
+        "value_type": "GTText",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "str"
+      }
+    }
+  },
+  "output_values": {
+    "End Flow": {
+      "was_successful": {
+        "value_type": "GTNull",
+        "sources": [],
+        "colorspace": null,
+        "engine_type": "NoneType"
+      }
+    }
+  },
+  "unavailable": []
+}
+```
+
+Loading a file the engine has never seen:
+
+```json
+{ "file_path": "/shots/sq010/comp_v012.py" }
+```
+
+Refused, and nothing is loaded or discarded:
+
+| Condition | `because` names |
+|---|---|
+| Both `workflow_id` and `file_path` | that they may name different workflows |
+| Neither | that there is nothing to load |
+| A run is in progress | that loading discards the running graph, and `NukeCancelExecutionRequest` |
+| The file cannot be imported | the engine's own reason |
+| The id is not registered | that no workflow with that name exists |
+| The registry cannot be read | that the engine could not read it, which is worth retrying |
+
+Every one of those is decided before the engine's state is touched, so a refused load leaves
+the previous graph exactly as it was.
+
+### NukeExecuteWorkflowRequest
+
+Applies inputs to the loaded workflow and starts it. Loads nothing: call
+`NukeLoadWorkflowRequest` first. Returns once execution has started; progress and the terminal
+state arrive as notifications.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `workflow_id` | `str` | `""` | Optional. Empty runs whatever is loaded. Set, it must be the loaded workflow or the request is refused |
 | `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values |
+
+Send `workflow_id` if the host tracks what it loaded. It costs nothing and turns a graph
+swapped out from under the host, by an editor user or another tool, into a refusal instead of a
+run of the wrong workflow. Leave it empty to drive a graph the host did not load itself.
 
 | `NukeExecuteWorkflowResultSuccess` field | Type | Notes |
 |---|---|---|
-| `workflow_id` | `str` | Echoed |
+| `workflow_id` | `str` | The workflow that ran. Always the loaded one, so a host that sent no id still learns what it started |
 | `state` | `str` | An execution state |
 | `applied_inputs` | `list[dict]` | `{node, parameter}` the engine accepted |
 | `rejected_inputs` | `list[dict]` | `{node, parameter, reason}` |
@@ -514,7 +665,14 @@ computed from the wrong input. Surface rejections immediately.
 
 A pair that is not a declared input parameter is rejected with
 `"Not a declared input parameter of this workflow."` and never reaches the engine. Address
-inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` returned.
+inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` or
+`NukeLoadWorkflowRequest` returned.
+
+A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.
+Honouring it would make execute destructive; ignoring it would run a workflow the host did not
+ask for while reporting success. The refusal names both ids and says to load first.
+
+Nothing loaded is also a refusal, naming `NukeLoadWorkflowRequest`.
 
 One execution at a time. Starting a run while one is in progress returns
 `NukeExecuteWorkflowResultFailure` rather than displacing it, because the engine threads no
@@ -556,8 +714,12 @@ a host polling only for liveness should not pay for it.
 The bulk value-reading path. Reads every declared start-flow or end-flow parameter's
 current value in one call instead of one `GetParameterValueRequest`-per-parameter round trip a
 host would otherwise have to issue itself. Values exist only for the loaded graph, so this
-takes no `workflow_id`: it always answers for whatever `NukeExecuteWorkflowRequest` most
-recently loaded.
+takes no `workflow_id`: it always answers for whatever `NukeLoadWorkflowRequest` most recently
+loaded.
+
+`NukeLoadWorkflowRequest` already returns these values once. This is the verb for reading them
+again: after a run finishes, or after a reconnect that missed every notification. Both go
+through one reader in the library, so they cannot disagree.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|

@@ -14,10 +14,6 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueRequest,
     SetParameterValueResultSuccess,
 )
-from griptape_nodes.retained_mode.events.workflow_events import (
-    RunWorkflowFromRegistryRequest,
-    RunWorkflowFromRegistryResultSuccess,
-)
 
 from nuke_host_api import engine, shape
 from nuke_host_api.dispatch import failure, verb
@@ -39,19 +35,19 @@ from nuke_host_api.protocol import ExecutionState
 def handle_execute_workflow(
     request: NukeExecuteWorkflowRequest,
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
-    """Load the workflow, apply inputs, then start the flow.
+    """Apply inputs to the loaded workflow, then start the flow.
 
-    Three engine requests behind one host verb. The engine has no execute-with-inputs entry
-    point: RunWorkflowFromRegistryRequest loads the graph, parameter values are set on
-    the loaded start node, and StartFlowRequest executes. A host should not have to know
-    that sequence, or that it may change.
+    Loads nothing. ``NukeLoadWorkflowRequest`` owns that, so this verb cannot discard the
+    graph whose parameters a host has just been setting, and a host can set values, read them
+    back, and run without the engine rebuilding the graph in between.
 
-    Refuses to start over a run already in progress. Loading a second graph would discard
-    the first mid-flight, and with no execution id in the engine's events a host could not
-    tell which run the notifications that followed belonged to, nor which one a cancel
-    would stop. Serial execution is what makes those two gaps survivable.
+    Refuses to start over a run already in progress. With no execution id in the engine's
+    events a host could not tell which run the notifications that followed belonged to, nor
+    which one a cancel would stop. Serial execution is what makes those two gaps survivable.
     """
-    attempted = f"to execute workflow '{request.workflow_id}'"
+    attempted = (
+        f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
+    )
 
     if engine.is_running():
         return failure(
@@ -64,21 +60,29 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    allowed_inputs = _declared_input_parameters(request.workflow_id)
-
-    loaded = engine.request(
-        RunWorkflowFromRegistryRequest(workflow_name=request.workflow_id, run_with_clean_slate=True),
-        RunWorkflowFromRegistryResultSuccess,
-    )
-    if loaded.value is None:
+    loaded_id = engine.current_workflow_id()
+    if not loaded_id:
         return failure(
             NukeExecuteWorkflowResultFailure,
             attempted=attempted,
-            because=f"the engine could not load it. {loaded.details}",
+            because="no workflow is loaded, so there is nothing to run. Load one with NukeLoadWorkflowRequest.",
             workflow_id=request.workflow_id,
         )
 
-    applied, rejected = _apply_inputs(request.inputs, allowed_inputs)
+    # Refused rather than loaded. Honouring the id would put loading back inside execute, and
+    # ignoring it would run a workflow the host did not ask for while reporting success.
+    if request.workflow_id and request.workflow_id != loaded_id:
+        return failure(
+            NukeExecuteWorkflowResultFailure,
+            attempted=attempted,
+            because=(
+                f"the engine has '{loaded_id}' loaded, not '{request.workflow_id}'. "
+                f"Load it with NukeLoadWorkflowRequest first, then execute."
+            ),
+            workflow_id=request.workflow_id,
+        )
+
+    applied, rejected = _apply_inputs(request.inputs, _declared_input_parameters(loaded_id))
 
     flow_name = engine.top_level_flow_name()
     if flow_name is None:
@@ -86,7 +90,7 @@ def handle_execute_workflow(
             NukeExecuteWorkflowResultFailure,
             attempted=attempted,
             because="the loaded workflow has no top-level flow to start.",
-            workflow_id=request.workflow_id,
+            workflow_id=loaded_id,
         )
 
     started = engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
@@ -95,20 +99,25 @@ def handle_execute_workflow(
             NukeExecuteWorkflowResultFailure,
             attempted=attempted,
             because=f"the engine would not start the flow. {started.details}",
-            workflow_id=request.workflow_id,
+            workflow_id=loaded_id,
         )
 
     return NukeExecuteWorkflowResultSuccess(
-        workflow_id=request.workflow_id,
+        workflow_id=loaded_id,
         state=ExecutionState.RUNNING,
         applied_inputs=applied,
         rejected_inputs=rejected,
-        result_details=f"Started workflow '{request.workflow_id}'.",
+        result_details=f"Started workflow '{loaded_id}'.",
     )
 
 
 def _declared_input_parameters(workflow_id: str) -> set[tuple[str, str]]:
-    """Return the parameters a host may set, or nothing when the workflow cannot be read."""
+    """Return the parameters a host may set, or nothing when the workflow cannot be read.
+
+    An empty set is the safe answer, not a failure: a workflow the registry cannot describe
+    still runs, it just accepts no inputs, and every one a host sent is reported rejected
+    rather than silently dropped.
+    """
     entry = engine.workflow_entry(workflow_id)
     if entry is None:
         return set()
@@ -176,7 +185,7 @@ def handle_get_execution_state(
         return failure(
             NukeGetExecutionStateResultFailure,
             attempted=attempted,
-            because="no workflow is loaded, so there is no flow to report on.",
+            because="no workflow is loaded, so there is no flow to report on. Load one with NukeLoadWorkflowRequest.",
         )
 
     state = engine.flow_state(flow_name)

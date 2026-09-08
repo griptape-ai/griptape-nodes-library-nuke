@@ -136,25 +136,116 @@ class NukeDescribeWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFa
     workflow_id: str
 
 
+# Loading
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeLoadWorkflowRequest(RequestPayload):
+    """Load a workflow into the engine and read back everything a host needs to drive it.
+
+    The only verb that changes which workflow is loaded, and the only one a host must call
+    before ``NukeExecuteWorkflowRequest``, ``NukeGetParameterValuesRequest``, or
+    ``NukeGetExecutionStateRequest`` can answer for the workflow it means.
+
+    Destructive on purpose, and worth a confirmation in a host's UI: the engine clears all
+    object state to load a graph, so this discards whatever was loaded before, including a
+    graph an editor user has open on the same engine.
+
+    Args:
+        workflow_id: Id from NukeListWorkflowsRequest. Mutually exclusive with file_path.
+        file_path: Absolute path to a workflow file the engine has not registered yet. It is
+            imported, registered, and then loaded, so a host can hand over a file an artist
+            picked without a separate registration step. Mutually exclusive with workflow_id.
+    """
+
+    workflow_id: str = ""
+    file_path: str = ""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeLoadWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """The workflow is loaded, described, and read back in one reply.
+
+    Four fields rather than two, because a parameter's declaration and its current value are
+    different questions with different lifetimes, and no field in this protocol carries two
+    meanings. Both shapes are ones a host already parses: ``inputs`` and ``outputs`` are
+    exactly ``NukeDescribeWorkflowResultSuccess``'s lists, and ``input_values`` and
+    ``output_values`` are exactly ``NukeGetParameterValuesResultSuccess``'s maps. A host that
+    reads both of those verbs today needs no new parsing for this one.
+
+    Args:
+        workflow_id: The loaded workflow's id. Resolved from ``file_path`` when that was
+            what the host sent, so this is how a host learns the id to use afterwards.
+        name: Display label.
+        description: Author's description, empty when there is none.
+        inputs: Declared start-flow parameter descriptors. Build knobs from these.
+        outputs: Declared end-flow parameter descriptors.
+        input_values: ``{node: {parameter: value_descriptor}}`` for the start-flow side.
+            Initialize knobs to these rather than to a descriptor's ``default``, which is the
+            author's value and not what the graph currently holds.
+        output_values: Same shape, for the end-flow side. Populated for a workflow that has
+            run before; empty descriptors for one that has not.
+        unavailable: Declared parameters the engine would not read, as
+            ``{section, node, parameter, reason}``. Reported rather than omitted, for the same
+            reason as on NukeGetParameterValuesRequest: an absent entry and an empty one mean
+            different things to a host building a knob.
+    """
+
+    workflow_id: str
+    name: str
+    description: str
+    inputs: list[dict[str, Any]] = field(default_factory=list)
+    outputs: list[dict[str, Any]] = field(default_factory=list)
+    input_values: dict[str, dict[str, Any]] = field(default_factory=dict)
+    output_values: dict[str, dict[str, Any]] = field(default_factory=dict)
+    unavailable: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeLoadWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """Nothing was loaded, and whatever was loaded before is untouched.
+
+    Covers an ambiguous or empty request, an unknown id, a file the engine could not import,
+    a workflow the engine could not load, and a run already in progress.
+
+    Args:
+        workflow_id: The id asked for, or the one resolved from ``file_path``. Empty when the
+            request never got far enough to name one.
+    """
+
+    workflow_id: str = ""
+
+
 # Execution
 
 
 @dataclass
 @PayloadRegistry.register
 class NukeExecuteWorkflowRequest(RequestPayload):
-    """Load a workflow, apply inputs, and start it.
+    """Apply inputs to the loaded workflow and start it.
+
+    Loads nothing. A host loads with ``NukeLoadWorkflowRequest`` and starts with this, so
+    starting a run costs one engine round trip per input plus one to start, and never a
+    clear-and-reload of the graph the host just set up.
 
     Returns once execution has started. Progress and the terminal result arrive as
     notifications on ``event_topic``.
 
     Args:
-        workflow_id: Id from NukeListWorkflowsRequest.
+        workflow_id: Optional. When set, it must be the workflow already loaded, and the
+            request is refused if it is not. Empty runs whatever is loaded. Send it if the
+            host tracks what it loaded, which turns a graph swapped out from under it, by an
+            editor user or another tool, into a refusal instead of a run of the wrong
+            workflow.
         inputs: ``{node_name: {parameter_name: value}}``. Values are plain JSON. Only pairs
             NukeDescribeWorkflowRequest declared as inputs are accepted; anything else is
             reported in ``rejected_inputs``.
     """
 
-    workflow_id: str
+    workflow_id: str = ""
     inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -168,7 +259,8 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
     that follow. Adding one once the engine supports it is an additive change.
 
     Args:
-        workflow_id: Echoed for convenience.
+        workflow_id: The workflow that ran. Always the loaded workflow's id, so a host that
+            sent none still learns which workflow it started.
         state: One of ``protocol.ExecutionState``.
         applied_inputs: Inputs the engine accepted, so a host can detect a silently
             dropped input rather than wondering why the output looks wrong.
@@ -184,9 +276,13 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
 @dataclass
 @PayloadRegistry.register
 class NukeExecuteWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """Execution could not be started, including when a run is already in progress."""
+    """Execution could not be started.
 
-    workflow_id: str
+    Covers a run already in progress, nothing loaded to run, and a ``workflow_id`` naming a
+    workflow other than the loaded one.
+    """
+
+    workflow_id: str = ""
 
 
 @dataclass
@@ -242,8 +338,10 @@ class NukeGetParameterValuesRequest(RequestPayload):
     this reads what they currently hold.
 
     Values exist only for the loaded graph, so this takes no ``workflow_id``: it always
-    answers for whatever ``NukeExecuteWorkflowRequest`` most recently loaded, the same
-    workflow ``NukeGetExecutionStateResultSuccess.workflow_id`` names.
+    answers for whatever ``NukeLoadWorkflowRequest`` most recently loaded, the same workflow
+    ``NukeGetExecutionStateResultSuccess.workflow_id`` names. Load already returns these
+    values once, so this is the verb for reading them *again*: after a run finishes, or after
+    a reconnect that missed every notification.
 
     Args:
         sections: Which of ``protocol.PARAMETER_SECTIONS`` to read. Empty means every section,

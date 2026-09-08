@@ -28,6 +28,28 @@ Bumps the version:
 binaries in service for years, so entries leave this list on a stated schedule and
 not before.
 
+How a verb is addressed
+-----------------------
+
+Two kinds of verb, and a host must know which kind it is holding.
+
+*Registry-addressed* verbs name a ``workflow_id`` and read the engine's workflow registry:
+``NukeListWorkflowsRequest`` and ``NukeDescribeWorkflowRequest``. They report what a workflow
+declares, so they answer for any registered workflow whether or not it is loaded, and they
+change no engine state.
+
+*Loaded-state-addressed* verbs answer for whatever graph the engine currently holds:
+``NukeGetParameterValuesRequest``, ``NukeGetExecutionStateRequest``,
+``NukeCancelExecutionRequest``, and ``NukeExecuteWorkflowRequest``. None of them takes a
+``workflow_id`` to select with, because there is nothing to select from: a parameter's live
+value exists on a loaded node, and a flow can only be started or cancelled where it is.
+
+``NukeLoadWorkflowRequest`` is the one verb that moves a workflow from the first group into
+the second, and the only verb that changes which workflow is loaded. That transition is
+destructive: the engine clears all object state to load a graph, discarding whatever was
+loaded before, including a graph an editor user had open. So a host calls it deliberately,
+rather than getting it as a side effect of asking for something else.
+
 One rename happened without a version bump: ``ExecutionState``'s ``SUCCEEDED`` became
 ``COMPLETED``, both a rename and a meaning change, which the rule above says should bump
 the version. It did not, because it happened before this protocol's first release: no
@@ -40,7 +62,14 @@ version yet. A third change was a pure rename: every ``Port`` in this surface be
 ``PortSection`` is ``ParameterSection``. The engine calls these parameters, the editor
 already uses "port" for the connection anchor drawn on one, and the second word bought no
 decoupling: a descriptor's keys were always ``node`` and ``parameter``. The section strings
-``inputs`` and ``outputs`` did not change. None of the three is a precedent for a version
+``inputs`` and ``outputs`` did not change. A fourth change was a change of meaning:
+``NukeExecuteWorkflowRequest.workflow_id`` was required and named the workflow to load and
+run; it is now optional and names the workflow a host believes is already loaded. Loading
+moved to ``NukeLoadWorkflowRequest``, so execute selects nothing and a mismatched id is
+refused rather than honoured. A host that keeps sending the id it loaded sees the same
+behaviour, which is why this is not a removal, but the field means something else than it did
+and that alone would bump the version after the first compiled plugin. None of the four is a
+precedent for a version
 that has shipped. The actual rule for this file, until the day a plugin is compiled against
 ``PROTOCOL_VERSION`` 1, is: a removal or rename here is free before the first compiled
 plugin, and MUST bump the version after it. Read every entry above under that rule, not as
@@ -62,6 +91,7 @@ class Verb:
     CONNECT = "NukeConnectRequest"
     LIST_WORKFLOWS = "NukeListWorkflowsRequest"
     DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
+    LOAD_WORKFLOW = "NukeLoadWorkflowRequest"
     EXECUTE_WORKFLOW = "NukeExecuteWorkflowRequest"
     GET_EXECUTION_STATE = "NukeGetExecutionStateRequest"
     GET_PARAMETER_VALUES = "NukeGetParameterValuesRequest"
