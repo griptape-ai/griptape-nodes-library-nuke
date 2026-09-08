@@ -477,12 +477,10 @@ wheels = [
 name = "griptape-nodes-library-nuke"
 version = "0.1.0"
 source = { editable = "." }
-dependencies = [
-    { name = "griptape-nodes-engine" },
-]
 
 [package.dev-dependencies]
 dev = [
+    { name = "griptape-nodes-engine" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -490,10 +488,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "griptape-nodes-engine", specifier = ">=0.99.0" }]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griptape-nodes-engine", specifier = ">=0.99.0" },
     { name = "pyright", specifier = ">=1.1.396" },
     { name = "pytest" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
