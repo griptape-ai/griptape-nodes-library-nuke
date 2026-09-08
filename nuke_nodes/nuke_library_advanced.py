@@ -28,6 +28,7 @@ logger = logging.getLogger("griptape_nodes")
 # reads as belonging to this library rather than picking a generic Lucide glyph.
 PUBLISH_TARGET_ICON = "logos/nuke.png"
 
+
 def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
     if not isinstance(request, PublishWorkflowRequest):
         msg = f"Expected PublishWorkflowRequest, got {type(request).__name__}"
