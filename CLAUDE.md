@@ -64,7 +64,7 @@ Makefile                 All dev workflows (check, fix, version, deps)
 - `make fix` auto-corrects format and lint issues.
 - No comments unless the WHY is non-obvious (a hidden constraint, a workaround, a subtle invariant). Do not describe what the code does.
 - One-sentence docstrings max on public classes. No multi-line docstrings.
-- Exception: `nuke_host_api/` is a frozen protocol surface a Nuke plugin binds to for years. Engine-constraint rationale (what the engine does not expose, why a value is reserved, why a version was not bumped) belongs next to the code there, so multi-paragraph module, class, and function docstrings are expected in that package only.
+- Exception: `nuke_host_api/` is the protocol surface a Nuke plugin binds to for years, and must stay stable once the first plugin ships. Engine-constraint rationale (what the engine does not expose, why a value is reserved, why a version was not bumped) belongs next to the code there, so multi-paragraph module, class, and function docstrings are expected in that package only.
 - `from __future__ import annotations` first in every file. Stdlib → third-party → local import order.
 
 ---

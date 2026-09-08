@@ -96,6 +96,10 @@ class Verb:
     GET_EXECUTION_STATE = "NukeGetExecutionStateRequest"
     GET_PARAMETER_VALUES = "NukeGetParameterValuesRequest"
     CANCEL_EXECUTION = "NukeCancelExecutionRequest"
+    LIST_PROJECTS = "NukeListProjectsRequest"
+    GET_CURRENT_PROJECT = "NukeGetCurrentProjectRequest"
+    SET_CURRENT_PROJECT = "NukeSetCurrentProjectRequest"
+    DESCRIBE_PROJECT = "NukeDescribeProjectRequest"
 
 
 # Notifications. The engine pushes these; a host filters on `payload_type`.

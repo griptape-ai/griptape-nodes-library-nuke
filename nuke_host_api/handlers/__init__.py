@@ -14,12 +14,16 @@ from typing import TYPE_CHECKING
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeConnectRequest,
+    NukeDescribeProjectRequest,
     NukeDescribeWorkflowRequest,
     NukeExecuteWorkflowRequest,
+    NukeGetCurrentProjectRequest,
     NukeGetExecutionStateRequest,
     NukeGetParameterValuesRequest,
+    NukeListProjectsRequest,
     NukeListWorkflowsRequest,
     NukeLoadWorkflowRequest,
+    NukeSetCurrentProjectRequest,
 )
 from nuke_host_api.handlers.connect import handle_connect
 from nuke_host_api.handlers.execution import (
@@ -28,6 +32,12 @@ from nuke_host_api.handlers.execution import (
     handle_get_execution_state,
 )
 from nuke_host_api.handlers.load import handle_load_workflow
+from nuke_host_api.handlers.projects import (
+    handle_describe_project,
+    handle_get_current_project,
+    handle_list_projects,
+    handle_set_current_project,
+)
 from nuke_host_api.handlers.values import handle_get_parameter_values
 from nuke_host_api.handlers.workflows import handle_describe_workflow, handle_list_workflows
 
@@ -45,16 +55,24 @@ ROUTES: tuple[tuple[type[RequestPayload], Callable[[RequestPayload], ResultPaylo
     (NukeGetExecutionStateRequest, handle_get_execution_state),
     (NukeGetParameterValuesRequest, handle_get_parameter_values),
     (NukeCancelExecutionRequest, handle_cancel_execution),
+    (NukeListProjectsRequest, handle_list_projects),
+    (NukeGetCurrentProjectRequest, handle_get_current_project),
+    (NukeSetCurrentProjectRequest, handle_set_current_project),
+    (NukeDescribeProjectRequest, handle_describe_project),
 )
 
 __all__ = [
     "ROUTES",
     "handle_cancel_execution",
     "handle_connect",
+    "handle_describe_project",
     "handle_describe_workflow",
     "handle_execute_workflow",
+    "handle_get_current_project",
     "handle_get_execution_state",
     "handle_get_parameter_values",
+    "handle_list_projects",
     "handle_list_workflows",
     "handle_load_workflow",
+    "handle_set_current_project",
 ]
