@@ -3,9 +3,9 @@
 A versioned API for driving the Griptape Nodes engine from Foundry Nuke.
 
 Nuke is pinned by studios for years and its plugin is a recompiled-per-version C++
-binary, so it is the slowest-moving artifact in the system. The engine ships weekly.
-This library sits between them: it owns a small set of verbs and value types that the
-plugin binds to, and absorbs engine churn behind them.
+binary, so it is the slowest-moving artifact in the system. The engine moves on its own,
+faster release cadence. This library sits between them: it owns a small set of verbs and value
+types that the plugin binds to, and absorbs engine churn behind them.
 
 ```
 griptape-nodes-library.json       library registration
@@ -21,6 +21,7 @@ nuke_host_api/
     load.py                          load one workflow, describe and read it back
     execution.py                     execute, state, cancel
     values.py                        bulk parameter-value reads, selectable by side
+    projects.py                      list, current, switch, describe a project
   engine.py                        engine request narrowing and shared queries
   shape.py                         workflow_shape -> host-visible parameters
   parameter_values.py              reading a loaded workflow's values, shared by load and values
@@ -43,6 +44,7 @@ tests/unit/
   test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
   test_handlers_values.py          section selection, unavailable reporting, normalization
+  test_handlers_projects.py        project narrowing, running-engine refusal, workspace-change detection
   test_execution_bridge.py         subscription symmetry, event translation
 ```
 
@@ -57,8 +59,17 @@ Unit tests need nothing running:
 make test/unit
 ```
 
-There is no reference client in the repo. `INTEGRATION.md` is the contract; a host is
-verified against a running engine by hand until the plugin exists.
+There is no reference client in the repo. A live smoke suite drives a running engine through
+the stdlib harness in `tests/integration/host_api_client.py`:
+
+```bash
+make test/integration/host-api
+```
+
+That harness is a test client, not something a plugin author should port wholesale, and it
+speaks `local_socket` rather than `websocket_direct`, the transport a plugin uses. So
+`INTEGRATION.md` is the contract, and anything transport-specific in it is verified by hand
+until the plugin exists.
 
 ## The capabilities
 
@@ -86,8 +97,8 @@ Two kinds of verb, and which kind a host is holding decides what it must know.
 `NukeLoadWorkflowRequest` is the only verb that moves a workflow from the first row to the
 second, and the only one that changes what is loaded.
 
-The split is not decorative. A parameter's live value exists on a loaded node, so a verb
-reading one cannot take a `workflow_id` and mean it: for an unloaded workflow there is nothing
+A parameter's live value exists on a loaded node, so a verb reading one cannot take a
+`workflow_id` and mean it: for an unloaded workflow there is nothing
 to read, and the only way to make one readable is to load it, which clears all object state.
 A read verb that quietly did that would discard a graph an editor user had open. So loading is
 its own verb, called deliberately, and a host is expected to confirm it with the artist.
@@ -111,11 +122,13 @@ is worse than refusing. A `file_path` is imported and registered first, so a hos
 over a file an artist picked and learn the resulting id from the reply.
 
 Every check this verb makes itself happens before the engine is touched, including reading the
-registry to reject an unknown id, so a request refused on its own arguments leaves the previous
-graph intact. The engine's own load is not atomic and cannot offer that: `run_with_clean_slate`
-clears all object state before the graph is built, so a workflow that fails inside its own file
-leaves nothing loaded. That failure reports `engine_state_cleared`, and a host must drop the
-knobs it was showing when it sees it.
+registry to reject an unknown id, so a request refused on its own arguments leaves the loaded
+graph intact. A `file_path` is imported and registered before those checks run, so a refusal
+there can leave a registry entry behind, never a different graph. The engine's own load is not
+atomic and cannot offer even that much: `run_with_clean_slate` clears all object state before
+the graph is built, so a workflow that fails inside its own file leaves nothing loaded. That
+failure reports `engine_state_cleared`, and a host must drop the knobs it was showing when it
+sees it.
 
 ### 3. Execute workflows
 
@@ -205,14 +218,77 @@ neither can how an unreadable parameter is reported.
 ### 5. Node execution changes
 
 Eight engine execution events collapse into four states (`unresolved`, `running`,
-`resolved`, `failed`) delivered as `NukeNodeStateEvent`. The ratio is the point: the
-engine can add a ninth event type without the host learning anything.
+`resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a ninth event
+type without the host learning anything.
 
 ### 6. Parameter value changes
 
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.
 The same normalizer that types parameters in `describe_workflow` shapes every live update, so
 a host has one value format rather than two.
+
+### 7. Projects
+
+Workflows are registered per workspace and a project decides the workspace, so
+`NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` always answer for whichever
+project happens to be current, with no way for a host to see that project or change it
+until now. `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`,
+`NukeSetCurrentProjectRequest`, and `NukeDescribeProjectRequest` wrap the engine's project
+surface (`retained_mode/events/project_events.py`, handled in
+`retained_mode/managers/project_manager.py`).
+
+`ProjectTemplate` is a pydantic model with dozens of fields, `ProjectValidationInfo` and
+`ProjectTemplateInfo` are engine dataclasses, and `ProjectInfo` additionally carries parsed
+macro caches. None of them cross the boundary; every field a host reads is a named primitive,
+exactly the way `shape.declared_parameters` narrows a parameter dict.
+Project ids are opaque the same way workflow ids are: `NukeListProjectsRequest` and
+`NukeGetCurrentProjectRequest` hand one back, a host feeds it to
+`NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`, and it is never parsed or
+constructed. `NukeSetCurrentProjectRequest.project_id: None` asks for the system defaults,
+mirroring the engine's own `SetCurrentProjectRequest` exactly rather than inventing a
+sentinel string a host would have to know about.
+
+`NukeListProjectsRequest` folds the engine's separate `successfully_loaded` and
+`failed_to_load` lists into one, the way `NukeListWorkflowsRequest` reports every workflow
+with a single `runnable` flag rather than two lists a host must merge itself. It also folds
+two unrelated engine mechanisms, a validation failure and an engine-version incompatibility
+declared in a project's adjacent config, into one `available` flag and a human-readable
+`unavailable_reason`, because a host disabling a menu entry does not need to know which
+mechanism fired. `description` is always empty in the list, because the engine's listing
+does not carry each template's description, only `NukeDescribeProjectRequest` and
+`NukeGetCurrentProjectRequest` read the full template that has one.
+
+`NukeSetCurrentProjectRequest` refuses while the engine is executing, with the same wording
+`NukeExecuteWorkflowRequest`'s running-guard uses: reloading libraries out from under a live
+run is worse than refusing outright, because the very library driving the run could be torn
+down and rebuilt mid-flight.
+
+**A successful switch is a hazard to the host's own connection, always, not only when its
+`workspace_changed` field is true.** The engine reloads every library, this one included,
+whenever the target project's library-affecting config (which libraries to register or
+download, the required engine version, or the resolved libraries directory) differs from
+the outgoing project's, and that decision is made independently of whether the workspace
+directory changed. `workspace_changed` is computed here by reading the engine's live workspace directory
+(`GetWorkspaceRequest`) before and after the switch, not by resolving either project's id
+through the same offline previewer `NukeDescribeProjectRequest` uses: that resolver answers
+none for any id with no readable project file on disk, which includes the system-defaults
+sentinel, so comparing resolved paths around a switch onto or off of system defaults would
+report a change whenever none happened. `workspace_changed` answers only "did workflows get
+re-registered against a new workspace," never "did libraries reload." A reload tears down this library's request handlers and its outbound
+event bridge and rebuilds both (`before_library_unregistered` in
+`nuke_nodes/nuke_library_advanced.py`), so a host must send `NukeConnectRequest` again and
+re-run `NukeListWorkflowsRequest`/`NukeDescribeWorkflowRequest` after every successful
+switch, unconditionally. The reply to the switch itself is unaffected by any of this: the
+engine performs the reload synchronously while handling the request, before the reply is
+built, so the reply reaches the host regardless. If the target project's workspace does not
+configure this library at all, the reload removes this library's verbs entirely, and every
+request after that, including the reconnect, fails at the engine's own dispatch layer with
+an error this layer never shaped, because it no longer owns the verb table to shape one.
+
+All of that is read from the engine's project manager rather than pinned by a test here: this
+handler sends `SetCurrentProjectRequest` and compares the engine's live workspace directory
+around it, and nothing else. Reconnecting unconditionally is what makes a host correct whether
+or not the reload details hold.
 
 ### Push, with a recovery path
 
@@ -236,11 +312,12 @@ The transport a plugin uses is `websocket_direct`, not `local_socket`, and the s
 hazard is why. `local_socket` writes to every client serially under one lock, so a client
 that stops reading long enough to fill its socket buffer is dropped from the broadcast set
 on the first write error and receives nothing further, replies included, while its read side
-stays open. Observed while running the smoke tests: a single-threaded client that paused
-between requests hit a 60 second reply timeout on a healthy socket, and a wedged client also
-delays delivery to the editor. `websocket_direct` gives each connection its own unbounded
-queue and writer task, so a slow reader costs engine memory instead of frames and stalls
-nobody. A plugin still reads on a dedicated thread that never blocks.
+stays open. Observed by hand while running the smoke tests, and asserted by no test: a
+single-threaded client that paused between requests hit a 60 second reply timeout on a healthy
+socket, and a wedged client also delays delivery to the editor. `websocket_direct` gives each
+connection its own unbounded queue and writer task, so a slow reader costs engine memory
+instead of frames and stalls nobody. A plugin still reads on a dedicated thread that never
+blocks.
 
 `NukeGetExecutionStateRequest` and `NukeGetParameterValuesRequest` together are the recovery
 path: a reconnecting host that missed every notification reads what is running from the
@@ -272,8 +349,8 @@ Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`,
 ```
 
 The engine expresses "an image" in at least six shapes, and the artifact vocabulary
-belongs to the griptape SDK (16 classes on a third release cadence). Some types the Nuke
-library already consumes are not in the SDK at all: `ThreeDUrlArtifact`,
+belongs to the griptape SDK, which adds and reshapes classes on its own release cadence. Some
+types the Nuke library already consumes are not in the SDK at all: `ThreeDUrlArtifact`,
 `GLTFUrlArtifact`, and `ImageSequenceArtifact`, the last being really
 `ListArtifact[ImageUrlArtifact]`. `ImageUrlArtifact`, `VideoUrlArtifact`,
 `BlobArtifact`, and `GenericArtifact` are structurally identical, all carrying a single
@@ -309,8 +386,11 @@ Rules:
   or prose.
 - **A declared parameter type outranks the extension**, except for an artifact class this version
   does not map: there the extension is the only media information there is, so an unmapped
-  class describes as `GTFile` and its values may narrow to `GTImage` or `GTMovie`. Narrowing
-  never leaves the sourced types.
+  class describes as `GTFile` and its values may narrow to `GTImage` or `GTMovie`. A value
+  carrying a source narrows only within the sourced types.
+- **Sourceless is never media.** An unset value is `GTNull` and a value pointing at no bytes is
+  `GTText`, whatever the parameter declared, so `GTImage`, `GTMovie`, and `GTFile` never arrive
+  with an empty `sources`.
 - **Sequences are source count, not a host type**, so sequence support costs no version bump.
 - **`engine_type` is diagnostic only** and must never be branched on.
 
@@ -341,15 +421,17 @@ executable:
 
 | Change | Result |
 |---|---|
-| Add a verb, notification, field, value type | passes, no version bump |
+| Add a verb, notification, or field | passes, no version bump |
+| Add a value type or source kind | passes the subset check, but the policy is a bump: a host switches on a closed set, so a new member is a case an old plugin has no branch for |
 | Remove or rename any of them | **fails** |
 | Make an optional field required | **fails** |
 | Drop a version from the support window | **fails** |
 
-A working implementation is archived at
-`~/archive/griptape-nodes-library-nuke/host-api-reference-clients-20260825/`, along with
-the steps to restore it. Recording a version is a promise to plugins already compiled
-against it, so record once and never overwrite.
+A working implementation is kept outside version control, at
+`~/archive/griptape-nodes-library-nuke/host-api-reference-clients-20260825/` on the
+maintainer's machine, along with the steps to restore it. Move it into the repo when the guard
+lands. Recording a version is a promise to plugins already compiled against it, so record once
+and never overwrite.
 
 Until then, the rest of the suite does not catch a rename. Renaming a verb and deleting a
 result field, with the rename propagated into the tests the way an IDE would, leaves all
@@ -394,9 +476,9 @@ Load-bearing for the design, and documented nowhere obvious.
     request handlers on unload but not execution event listeners. Without
     `before_library_unregistered` calling `execution_bridge.uninstall()`, a reload leaves
     the old bridge subscribed and a host receives every notification twice, then three
-    times. Observed directly: notification counts were an exact 3x multiple of a
-    single-bridge run with three copies loaded. After wiring teardown, counts are stable
-    across repeated runs.
+    times. Observed by hand, and asserted by no test: notification counts were an exact 3x
+    multiple of a single-bridge run with three copies loaded. After wiring teardown, counts are
+    stable across repeated runs.
 
     The subscription is also engine-global: listeners are keyed by event type, not by
     library or node, so an installed bridge translates and re-emits for every workflow the
@@ -487,3 +569,10 @@ Load-bearing for the design, and documented nowhere obvious.
   does, the fix is the engine's own `EventRequestBatch` wire envelope (`INTEGRATION.md`, Frame
   formats), which packs many host verb frames into one WebSocket message; it is a transport
   optimization a host applies itself, not something a handler can opt into on a host's behalf.
+- **A project switch cannot say whether it reloaded libraries.** The engine's own
+  `SetCurrentProjectRequest` exposes `workspace_changed` (whether workflows were
+  re-registered against a new workspace) but no field for whether libraries were reloaded,
+  which is gated on a separate, unexposed signal: whether the target project's
+  library-affecting config differs from the outgoing project's. `NukeSetCurrentProjectRequest`
+  therefore documents that a host must reconnect after every successful switch,
+  unconditionally, rather than only when `workspace_changed` is true.
