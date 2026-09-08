@@ -153,6 +153,53 @@ class TestWorkflowEntry:
         assert engine.workflow_entry("wf1") is None
 
 
+class TestLookupWorkflow:
+    """An unreadable registry is worth retrying and an unknown id never is.
+
+    Two verbs word different failures for the two, so the split lives here rather than in
+    each of them.
+    """
+
+    def test_a_known_id_returns_its_entry_from_a_readable_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(
+            monkeypatch,
+            {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok")},
+        )
+        found = engine.lookup_workflow("wf1")
+        assert found.entry == WORKFLOW_TABLE["wf1"]
+        assert found.registry_readable is True
+
+    def test_an_unknown_id_in_a_readable_registry_is_not_an_unreadable_registry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_engine(
+            monkeypatch,
+            {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok")},
+        )
+        found = engine.lookup_workflow("ghost")
+        assert found.entry is None
+        assert found.registry_readable is True
+
+    def test_an_unreadable_registry_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, {ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="gone")})
+        found = engine.lookup_workflow("wf1")
+        assert found.entry is None
+        assert found.registry_readable is False
+
+    def test_a_malformed_entry_reads_as_an_unknown_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(
+            monkeypatch,
+            {
+                ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
+                    workflows={"wf1": "not a dict"}, result_details="ok"
+                )
+            },
+        )
+        found = engine.lookup_workflow("wf1")
+        assert found.entry is None
+        assert found.registry_readable is True
+
+
 class TestIsRunning:
     """One predicate for the execute guard and the state report, so they cannot disagree."""
 

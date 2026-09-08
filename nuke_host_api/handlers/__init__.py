@@ -19,6 +19,7 @@ from nuke_host_api.events import (
     NukeGetExecutionStateRequest,
     NukeGetParameterValuesRequest,
     NukeListWorkflowsRequest,
+    NukeLoadWorkflowRequest,
 )
 from nuke_host_api.handlers.connect import handle_connect
 from nuke_host_api.handlers.execution import (
@@ -26,6 +27,7 @@ from nuke_host_api.handlers.execution import (
     handle_execute_workflow,
     handle_get_execution_state,
 )
+from nuke_host_api.handlers.load import handle_load_workflow
 from nuke_host_api.handlers.values import handle_get_parameter_values
 from nuke_host_api.handlers.workflows import handle_describe_workflow, handle_list_workflows
 
@@ -38,6 +40,7 @@ ROUTES: tuple[tuple[type[RequestPayload], Callable[[RequestPayload], ResultPaylo
     (NukeConnectRequest, handle_connect),
     (NukeListWorkflowsRequest, handle_list_workflows),
     (NukeDescribeWorkflowRequest, handle_describe_workflow),
+    (NukeLoadWorkflowRequest, handle_load_workflow),
     (NukeExecuteWorkflowRequest, handle_execute_workflow),
     (NukeGetExecutionStateRequest, handle_get_execution_state),
     (NukeGetParameterValuesRequest, handle_get_parameter_values),
@@ -53,4 +56,5 @@ __all__ = [
     "handle_get_execution_state",
     "handle_get_parameter_values",
     "handle_list_workflows",
+    "handle_load_workflow",
 ]
