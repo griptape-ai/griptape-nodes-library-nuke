@@ -768,6 +768,35 @@ class NukeParameterValueEvent(AppPayload):
 
 @dataclass
 @PayloadRegistry.register
+class NukeInvolvedNodesEvent(AppPayload):
+    """The run's node set: the denominator a host pairs with NukeNodeStateEvent's numerator.
+
+    Translates the engine's InvolvedNodesEvent, which is not one-shot and is not monotonic.
+    For a serial control flow the engine reports every participating node when the run
+    starts, then reports an empty list again when the run finishes; a host must snapshot
+    the first non-empty list it sees as the run's total and must not read a later empty one
+    as "zero nodes ran". For parallel resolution the engine builds this set as its DAG
+    builder discovers work, so the set legitimately grows mid-run: a host drawing a
+    fixed-size progress bar must handle the total increasing, not only nodes being checked
+    off a total fixed at the first event.
+
+    Not folded into NukeExecuteWorkflowResultSuccess. That reply is written once, when the
+    flow has just started and, for parallel resolution, before the engine has necessarily
+    discovered the full node set; this notification is the engine's own live count and
+    updates for as long as the run does. A host wanting only a one-time total for a serial
+    flow still gets it, as the first event on this notification after execute returns.
+
+    Args:
+        involved_nodes: Nodes participating in the current execution, exactly as
+            NukeGetExecutionStateResultSuccess.involved_nodes reports for a polled read of
+            the same information.
+    """
+
+    involved_nodes: list[str]
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeExecutionStateEvent(AppPayload):
     """Execution reached a terminal state.
 

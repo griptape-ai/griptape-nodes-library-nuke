@@ -17,6 +17,7 @@ from griptape_nodes.retained_mode.events.base_events import AppEvent
 from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowCancelledEvent,
     ControlFlowResolvedEvent,
+    InvolvedNodesEvent,
     NodeErrorEvent,
     NodeStartProcessEvent,
     ParameterValueUpdateEvent,
@@ -25,6 +26,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from nuke_host_api import execution_bridge
 from nuke_host_api.events import (
     NukeExecutionStateEvent,
+    NukeInvolvedNodesEvent,
     NukeNodeStateEvent,
     NukeParameterValueEvent,
 )
@@ -291,6 +293,29 @@ class TestTranslation:
         payload = event_manager.payloads()[-1]
         assert payload.state == ExecutionState.CANCELLED
         assert "user stopped it" in payload.detail
+
+    def test_involved_nodes_are_forwarded_as_the_progress_denominator(self, event_manager: FakeEventManager) -> None:
+        bridge = ExecutionBridge()
+        bridge.install()
+        bridge._on_involved_nodes(InvolvedNodesEvent(involved_nodes=["Start Flow", "Blur", "End Flow"]))
+        payload = event_manager.payloads()[-1]
+        assert isinstance(payload, NukeInvolvedNodesEvent)
+        assert payload.involved_nodes == ["Start Flow", "Blur", "End Flow"]
+
+    def test_involved_nodes_forwards_an_empty_set_too(self, event_manager: FakeEventManager) -> None:
+        """The engine reports empty at completion for a serial flow. A host decides what that means.
+
+        This layer's only job is to forward it faithfully, not to interpret it, since an
+        empty list at the end of a run and an empty list because nothing has started yet
+        are the same shape and only the host, tracking the run's own lifecycle, can tell them
+        apart.
+        """
+        bridge = ExecutionBridge()
+        bridge.install()
+        bridge._on_involved_nodes(InvolvedNodesEvent(involved_nodes=[]))
+        payload = event_manager.payloads()[-1]
+        assert isinstance(payload, NukeInvolvedNodesEvent)
+        assert payload.involved_nodes == []
 
     def test_notifications_are_wrapped_in_app_events(self, event_manager: FakeEventManager) -> None:
         """AppEvent via put_event is the only path that reaches IPC.

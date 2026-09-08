@@ -259,6 +259,22 @@ Eight engine execution events collapse into four states (`unresolved`, `running`
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a ninth event
 type without the host learning anything.
 
+`NukeInvolvedNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
+`state: "resolved"` is the numerator a host already has; this is the denominator, translated
+from the engine's own `InvolvedNodesEvent`. It is not a single snapshot: for a serial control
+flow the engine reports every participating node when a run starts and reports an empty list
+again when the run finishes, so a host must keep the first non-empty list it sees as the run's
+total and must not read a later empty one as "zero nodes ran". For parallel resolution the set
+is genuinely dynamic, built as the engine's DAG builder discovers work, so the total can grow
+mid-run and a host drawing a fixed-size bar must handle that instead of discovering it as a bar
+that goes backwards.
+
+Not a field on `NukeExecuteWorkflowResultSuccess`. That reply is written the moment the flow
+starts, before parallel resolution has necessarily discovered its full node set, and adding an
+engine round trip there to catch up would be one more request paid on every execute for a
+number this notification already reports for free. A host wanting a one-time total for a serial
+flow still gets it, as the first event on this notification after execute returns.
+
 ### 6. Parameter value changes
 
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.

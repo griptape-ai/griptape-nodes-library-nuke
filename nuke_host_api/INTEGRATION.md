@@ -29,7 +29,7 @@ has been compiled against this version, so the surface can still change.
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeInvolvedNodesEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Parameter sections | `inputs`, `outputs` |
@@ -1118,8 +1118,8 @@ Preview a project's workspace and validation before activating it with
 
 ## Notifications
 
-Pushed without a request, labelled with `event_topic`. Eight engine execution event types
-collapse into these three notifications.
+Pushed without a request, labelled with `event_topic`. Nine engine execution event types
+collapse into these four notifications.
 
 ### NukeNodeStateEvent
 
@@ -1195,6 +1195,35 @@ the first terminal state received as authoritative and ignore a later one for th
 
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the parameters
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetParameterValuesRequest`.
+
+### NukeInvolvedNodesEvent
+
+The progress bar's denominator. `NukeNodeStateEvent` with `state: "resolved"` is the
+numerator a host already tracks per node; this notification, translated from the engine's own
+`InvolvedNodesEvent`, is the run's node set.
+
+| Field | Type | Notes |
+|---|---|---|
+| `involved_nodes` | `list[str]` | Nodes participating in the current execution |
+
+```json
+{
+  "involved_nodes": ["Start Flow", "Blur", "End Flow"]
+}
+```
+
+Not one-shot, and not monotonic. For a serial control flow the engine emits this with every
+participating node when the run starts, then emits it again with an empty list when the run
+finishes: keep the first non-empty list as the run's total, and do not read a later empty one
+as "zero nodes ran". For parallel resolution the set is genuinely dynamic, built as the
+engine's DAG builder discovers work, so the total can grow mid-run; a fixed-size progress bar
+must handle the denominator increasing, not only the numerator catching up to it.
+
+Not reported on `NukeExecuteWorkflowResultSuccess`. That reply is written the moment the flow
+starts, before parallel resolution has necessarily discovered its full node set, so a field
+there would either be incomplete or cost an extra engine round trip execute does not otherwise
+need. This notification is the engine's own live count, already free on the event stream a host
+is already subscribed to.
 
 ## Value descriptors
 
