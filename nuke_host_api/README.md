@@ -18,10 +18,12 @@ nuke_host_api/
     __init__.py                      ROUTES: the only verb -> handler binding
     connect.py                       version negotiation, event stream opening
     workflows.py                     list, describe
+    load.py                          load one workflow, describe and read it back
     execution.py                     execute, state, cancel
     values.py                        bulk parameter-value reads, selectable by side
   engine.py                        engine request narrowing and shared queries
   shape.py                         workflow_shape -> host-visible parameters
+  parameter_values.py              reading a loaded workflow's values, shared by load and values
   dispatch.py                      handler calling convention: request guard, failure wording
   library_version.py               the shipped version, read from the manifest
   execution_bridge.py              engine execution events -> host notifications
@@ -32,11 +34,13 @@ tests/unit/
   test_macros.py                   macro resolution, patterns, unresolved tokens
   test_shape.py                    shape parsing, parameter narrowing, runnability
   test_engine.py                   narrowing, event topic, shared queries
+  test_parameter_values.py         section reading, unavailable reporting, control exclusion
   test_dispatch.py                 request guard, failure wording
   test_library_version.py          manifest read and reload reset
   test_handlers_routes.py          every declared verb is routed exactly once
   test_handlers_connect.py         negotiation, event stream gating
   test_handlers_workflows.py       discovery and parameter publication
+  test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
   test_handlers_values.py          section selection, unavailable reporting, normalization
   test_execution_bridge.py         subscription symmetry, event translation
@@ -56,7 +60,7 @@ make test/unit
 There is no reference client in the repo. `INTEGRATION.md` is the contract; a host is
 verified against a running engine by hand until the plugin exists.
 
-## The five capabilities
+## The capabilities
 
 ### 1. Connect
 
@@ -70,10 +74,54 @@ a host holds the `websocket_direct` URL as its own setting, defaulted to
 `engines.json` is app-layer internal and deliberately not part of what a host reads. See
 `INTEGRATION.md`.
 
-### 2. Execute workflows
+### 2. Load a workflow
+
+Two kinds of verb, and which kind a host is holding decides what it must know.
+
+| Addressed by | Verbs | Answers with |
+|---|---|---|
+| `workflow_id`, from the registry | `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest` | what a workflow declares, loaded or not |
+| the engine's loaded graph | `NukeGetParameterValuesRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest`, `NukeExecuteWorkflowRequest` | what the engine currently holds |
+
+`NukeLoadWorkflowRequest` is the only verb that moves a workflow from the first row to the
+second, and the only one that changes what is loaded.
+
+The split is not decorative. A parameter's live value exists on a loaded node, so a verb
+reading one cannot take a `workflow_id` and mean it: for an unloaded workflow there is nothing
+to read, and the only way to make one readable is to load it, which clears all object state.
+A read verb that quietly did that would discard a graph an editor user had open. So loading is
+its own verb, called deliberately, and a host is expected to confirm it with the artist.
+
+Before it existed, loading was a side effect of `NukeExecuteWorkflowRequest`, which left a
+host unable to read or set a parameter's live value without starting a run.
+
+One host verb, four engine requests plus one per declared parameter, because the engine has no
+load-and-describe entry point: `ImportWorkflowRequest` registers a file the engine has not seen
+and costs one more, `RunWorkflowFromRegistryRequest` builds the graph, and values come back one
+`GetParameterValueRequest` at a time.
+
+The reply carries four fields rather than two: `inputs` and `outputs` are exactly
+`describe_workflow`'s parameter lists, and `input_values` and `output_values` are exactly
+`NukeGetParameterValuesRequest`'s maps. No new shape, and no field with two meanings. A
+parameter's declaration and its current value have different lifetimes, so folding a value
+into a descriptor would make `default` and `value` look like variants of one thing.
+
+`workflow_id` or `file_path`, never both, since they can name different workflows and guessing
+is worse than refusing. A `file_path` is imported and registered first, so a host can hand
+over a file an artist picked and learn the resulting id from the reply.
+
+Every check this verb makes itself happens before the engine is touched, including reading the
+registry to reject an unknown id, so a request refused on its own arguments leaves the previous
+graph intact. The engine's own load is not atomic and cannot offer that: `run_with_clean_slate`
+clears all object state before the graph is built, so a workflow that fails inside its own file
+leaves nothing loaded. That failure reports `engine_state_cleared`, and a host must drop the
+knobs it was showing when it sees it.
+
+### 3. Execute workflows
 
 `NukeListWorkflowsRequest` (with `runnable_only`) and `NukeDescribeWorkflowRequest` for
-discovery, then `NukeExecuteWorkflowRequest`, with `NukeGetExecutionStateRequest` and
+discovery, `NukeLoadWorkflowRequest` to put one in the engine, then
+`NukeExecuteWorkflowRequest`, with `NukeGetExecutionStateRequest` and
 `NukeCancelExecutionRequest` against the engine.
 
 No execution identifier, deliberately. The engine threads none through its execution events, so
@@ -83,13 +131,26 @@ drives the engine, including the editor. Adding an id once the engine carries on
 additive change and costs no version bump, so there is no reason to fake one now.
 
 What makes that survivable is refusing to start a second run while one is in progress.
-Without the guard, a host could load a graph over a running one and then be unable to tell
-which run any following notification described, or which one a cancel would stop.
+Without the guard, a host could not tell which run any following notification described, or
+which one a cancel would stop. `NukeLoadWorkflowRequest` refuses mid-run for the same reason
+and a stronger one: it would discard the running graph.
 
-One host verb, three engine requests. The engine has no execute-with-inputs entry point:
-`RunWorkflowFromRegistryRequest` loads the graph, `SetParameterValueRequest` applies
-each input to the loaded start node, and `StartFlowRequest` executes. A host should not
-have to know that sequence, or that it may change.
+Six engine requests plus one per input forwarded to the engine, and none of them loads.
+`SetParameterValueRequest` applies each declared input to the loaded start node and
+`StartFlowRequest` executes, so running a workflow does not rebuild the graph whose knobs a host
+has just been setting. The rest is preflight: what the engine is running, what it has loaded,
+what that workflow declares, and which flow to start.
+
+Only a forwarded input can be rejected by the engine. A malformed node and a pair outside the
+allow-list are both turned away before any request, so they cost nothing; a declared pair is
+forwarded before its outcome is known, so an input the engine refuses has already cost its
+request.
+
+`workflow_id` is optional. Empty runs whatever is loaded, which is what a host driving a graph
+an editor user opened has to do. Set, it must be the loaded workflow, and a mismatch is
+refused: honouring it would put loading back inside execute, and ignoring it would run a
+workflow the host did not ask for while reporting success. A host that tracks what it loaded
+should send it, because that turns a graph swapped out from under it into a refusal.
 
 `NukeExecuteWorkflowResultSuccess` reports `applied_inputs` and `rejected_inputs`, because a
 silently dropped input is worse than a failed execution: the workflow produces plausible
@@ -97,12 +158,26 @@ output from the wrong values. Inputs are checked against the parameters `describ
 declared before they reach the engine, which would otherwise set a parameter on any node in
 the loaded graph for a caller this transport never authenticated.
 
+By the same rule, inputs sent to a loaded graph that declares no input parameters are refused
+rather than rejected one by one. `workflow_id` empty is how a host drives a graph it did not
+load, and the engine keeps the unsaved graph an editor user is working on in its registry
+under an `unsaved:` key with no declared shape. Rejecting each input there would report the
+host's own parameter names back at it as if they were wrong, while the run went ahead on the
+author's values.
+
+An unreadable registry, and an id that has vanished from a readable one, leave the same empty
+allow-list for unrelated reasons, and each gets a refusal of its own: retry the registry, or
+load the workflow again. A workflow that declares nothing will still declare nothing on the
+next call; the other two are not the host's doing. Telling a host to save a workflow it already
+saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
+because then there is nothing to check against the allow-list.
+
 `NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
 alongside its type, because a host builds knobs from this and a knob with no default has
 nothing to initialize to. The default is a value descriptor, so a parameter's default and its
 live value are one shape.
 
-### 3. Read every declared parameter value
+### 4. Read every declared parameter value
 
 `NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and
 which nodes are involved. `NukeGetParameterValuesRequest` answers a different one: what does
@@ -121,15 +196,19 @@ Answered by one engine request per declared parameter rather than the engine's o
 `GetAllNodeInfoRequest`, which batches a node's info into one call but keys its parameter
 values by internal element id, hands artifacts back display-serialized into plain dicts
 rather than the instances the normalizer inspects, and drops any parameter whose value is
-`None`. See `handlers/values.py` for the full comparison.
+`None`. See `parameter_values.py` for the full comparison.
 
-### 4. Node execution changes
+The reading itself lives in `parameter_values.py`, shared with `NukeLoadWorkflowRequest`, so
+the values a host is handed at load and the values it reads back later cannot disagree, and
+neither can how an unreadable parameter is reported.
+
+### 5. Node execution changes
 
 Eight engine execution events collapse into four states (`unresolved`, `running`,
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`. The ratio is the point: the
 engine can add a ninth event type without the host learning anything.
 
-### 5. Parameter value changes
+### 6. Parameter value changes
 
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.
 The same normalizer that types parameters in `describe_workflow` shapes every live update, so
@@ -386,17 +465,25 @@ Load-bearing for the design, and documented nowhere obvious.
 - **A host addresses inputs by node name.** Node names are editable in the canvas, so
   renaming a start node breaks a host's saved knob mapping. Re-describing on connect is the
   only mitigation today.
-- **A stuck node locks a host out.** `_flow_is_running` is true while the engine reports any
-  resolving or control node, and execute refuses while it is. A node that never returns, a
-  Nuke subprocess that hangs, leaves that state set and every later execute refused. The
-  escape is `NukeCancelExecutionRequest`, and whether cancel actually clears a node wedged
-  inside `process()` is unverified. If it does not, only an engine restart recovers.
+- **A stuck node locks a host out.** `flow_is_running` is true while the engine reports any
+  resolving or control node, and both execute and load refuse while it is. A node that never
+  returns, a Nuke subprocess that hangs, leaves that state set and every later execute and load
+  refused. The escape is `NukeCancelExecutionRequest`, and whether cancel actually clears a node
+  wedged inside `process()` is unverified. If it does not, only an engine restart recovers.
+- **Loading is destructive and nothing but a host's own UI guards it.**
+  `NukeLoadWorkflowRequest` clears all object state, which discards whatever the engine held,
+  including a graph an editor user has open on the same engine. The engine offers no
+  load-into-a-side-context entry point, so this layer cannot make it non-destructive. A host
+  should confirm with the artist before sending it.
+- **A host cannot set a value without running.** Inputs are applied by
+  `NukeExecuteWorkflowRequest` and nothing else, so a host that wants to stay live with the
+  engine as an artist edits a knob has no verb for it. A bulk `NukeSetParameterValuesRequest`
+  is the missing half of `NukeGetParameterValuesRequest`.
 - **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
-- **`NukeGetParameterValuesRequest` costs one engine request per declared parameter, with no
-  transport-level batching in this layer.** A workflow's declared surface is knobs, not
-  hundreds of them, so the cost has not mattered in practice. If it ever does, the fix is
-  the engine's own `EventRequestBatch` wire envelope (`INTEGRATION.md`, Frame formats),
-  which packs many host verb frames into one WebSocket message; it is a transport
-  optimization a host applies itself, not something this verb's handler can opt into on a
-  host's behalf.
+- **`NukeGetParameterValuesRequest` and `NukeLoadWorkflowRequest` cost one engine request per
+  declared parameter, with no transport-level batching in this layer.** A workflow's declared
+  surface is knobs, not hundreds of them, so the cost has not mattered in practice. If it ever
+  does, the fix is the engine's own `EventRequestBatch` wire envelope (`INTEGRATION.md`, Frame
+  formats), which packs many host verb frames into one WebSocket message; it is a transport
+  optimization a host applies itself, not something a handler can opt into on a host's behalf.

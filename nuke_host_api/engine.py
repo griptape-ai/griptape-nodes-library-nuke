@@ -118,15 +118,36 @@ def workflow_table() -> dict | None:
     return attempt.value.workflows
 
 
+@dataclass(frozen=True)
+class WorkflowLookup:
+    """One registry lookup, keeping an unreadable registry apart from an unknown id.
+
+    Two verbs word different failures for the two, because one is worth retrying and the
+    other never is. Sharing the lookup rather than the wording is what keeps them from
+    drifting: a host matching on reason text would otherwise see one verb change and not
+    the other.
+    """
+
+    entry: dict | None
+    registry_readable: bool
+
+
+def lookup_workflow(workflow_id: str) -> WorkflowLookup:
+    """Look one id up in the engine's registry, distinguishing why it was not found."""
+    table = workflow_table()
+    if table is None:
+        return WorkflowLookup(entry=None, registry_readable=False)
+    entry = table.get(workflow_id)
+    return WorkflowLookup(entry=entry if isinstance(entry, dict) else None, registry_readable=True)
+
+
 def workflow_entry(workflow_id: str) -> dict | None:
     """Return one registry entry, or None when the registry is unreadable or the id is unknown.
 
     For callers that treat both the same. A verb that must tell a host which of the two
-    happened reads ``workflow_table`` and indexes it itself.
+    happened reads ``lookup_workflow``.
     """
-    table = workflow_table()
-    entry = table.get(workflow_id) if table else None
-    return entry if isinstance(entry, dict) else None
+    return lookup_workflow(workflow_id).entry
 
 
 def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:

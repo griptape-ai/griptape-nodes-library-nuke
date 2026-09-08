@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from nuke_host_api import shape
 from nuke_host_api.dispatch import failure, verb
-from nuke_host_api.engine import workflow_table
+from nuke_host_api.engine import lookup_workflow, workflow_table
 from nuke_host_api.events import (
     NukeDescribeWorkflowRequest,
     NukeDescribeWorkflowResultFailure,
@@ -57,11 +57,11 @@ def handle_describe_workflow(
 ) -> NukeDescribeWorkflowResultSuccess | NukeDescribeWorkflowResultFailure:
     """Describe one workflow, narrowing every parameter type on the way out.
 
-    Reads the table rather than a single entry, because an unreadable registry and an
-    unknown id are different answers to a host: one is worth retrying, the other never is.
+    Distinguishes an unreadable registry from an unknown id, because they are different
+    answers to a host: one is worth retrying, the other never is.
     """
-    table = workflow_table()
-    if table is None:
+    found = lookup_workflow(request.workflow_id)
+    if not found.registry_readable:
         return failure(
             NukeDescribeWorkflowResultFailure,
             attempted=f"to describe workflow '{request.workflow_id}'",
@@ -69,8 +69,8 @@ def handle_describe_workflow(
             workflow_id=request.workflow_id,
         )
 
-    entry = table.get(request.workflow_id)
-    if not isinstance(entry, dict):
+    entry = found.entry
+    if entry is None:
         return failure(
             NukeDescribeWorkflowResultFailure,
             attempted=f"to describe workflow '{request.workflow_id}'",

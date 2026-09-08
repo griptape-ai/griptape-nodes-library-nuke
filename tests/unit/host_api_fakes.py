@@ -12,6 +12,10 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
 )
+from griptape_nodes.retained_mode.events.context_events import (
+    GetWorkflowContextRequest,
+    GetWorkflowContextSuccess,
+)
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -23,10 +27,14 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.parameter_events import (
+    GetParameterValueRequest,
+    GetParameterValueResultSuccess,
     SetParameterValueRequest,
     SetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    ImportWorkflowRequest,
+    ImportWorkflowResultSuccess,
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultSuccess,
     RunWorkflowFromRegistryRequest,
@@ -110,22 +118,65 @@ def use_engine(monkeypatch: pytest.MonkeyPatch, responses: dict[type, Any] | Non
     return fake
 
 
+def respond_to_get_value(request: GetParameterValueRequest) -> Any:
+    """Answer a value read for every data parameter in ``SHAPE``.
+
+    Raises on anything else, so a verb that reads a parameter it was never told about fails
+    loudly rather than being handed a plausible value.
+    """
+    answers: dict[str, tuple[str, Any]] = {
+        "topic": ("str", "a quiet harbour at dusk"),
+        "plate": ("ImageUrlArtifact", None),
+        "was_successful": ("bool", True),
+        "mixed_audio": ("AudioUrlArtifact", "http://x/audio.mp3"),
+    }
+    if request.parameter_name not in answers:
+        msg = f"no fake response configured for parameter '{request.parameter_name}'"
+        raise AssertionError(msg)
+    declared_type, value = answers[request.parameter_name]
+    return GetParameterValueResultSuccess(
+        input_types=[declared_type],
+        type=declared_type,
+        output_type=declared_type,
+        value=value,
+        result_details="ok",
+    )
+
+
 def execute_responses(overrides: dict[type, Any] | None = None) -> dict[type, Any]:
     """Engine responses for a clean execute, so each test overrides only what it is about.
 
-    Execute preflights twice before it loads anything: once to refuse starting over a run in
-    progress, once to learn which parameters it may set.
+    Execute preflights twice before it touches an input: once to refuse starting over a run in
+    progress, once to learn which workflow is loaded and which parameters it may set.
     """
     responses: dict[type, Any] = {
         ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok"),
         GetFlowStateRequest: IDLE_FLOW,
-        RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
+        GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf1", result_details="ok"),
         SetParameterValueRequest: lambda req: SetParameterValueResultSuccess(
             finalized_value=req.value, data_type="str", result_details="set"
         ),
         GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
         StartFlowRequest: StartFlowResultSuccess(result_details="started"),
         GetEngineVersionRequest: ENGINE_VERSION,
+    }
+    responses.update(overrides or {})
+    return responses
+
+
+def load_responses(overrides: dict[type, Any] | None = None) -> dict[type, Any]:
+    """Engine responses for a clean load, including the per-parameter value reads.
+
+    Every declared parameter answers, so a test about an unreadable one overrides
+    ``GetParameterValueRequest`` with a callable that refuses the parameter it cares about.
+    """
+    responses: dict[type, Any] = {
+        GetFlowStateRequest: IDLE_FLOW,
+        GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
+        ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok"),
+        ImportWorkflowRequest: ImportWorkflowResultSuccess(workflow_name="wf1", result_details="imported"),
+        RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
+        GetParameterValueRequest: respond_to_get_value,
     }
     responses.update(overrides or {})
     return responses
