@@ -125,8 +125,12 @@ class TestProcessBridgeLifecycle:
     """The bridge's subscription is engine-global, so when it installs is a real decision."""
 
     @pytest.fixture(autouse=True)
-    def _leave_it_uninstalled(self) -> Iterator[None]:
-        """The process bridge is shared, so a test that installs it must put it back."""
+    def _leave_it_uninstalled(self, event_manager: FakeEventManager) -> Iterator[None]:  # noqa: ARG002
+        """The process bridge is shared, so a test that installs it must put it back.
+
+        Depends on ``event_manager`` so this finalizer runs before that fixture's
+        monkeypatch is undone. Without it, uninstall reaches the real engine and boots it.
+        """
         yield
         execution_bridge.uninstall()
 
