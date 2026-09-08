@@ -691,6 +691,15 @@ there would hand the host its own parameter names back as if they were wrong, wh
 went ahead on the author's values. The refusal says to save the workflow and load it by id, or
 to send no inputs and run it as it stands.
 
+A registry the engine cannot read gets a separate refusal, naming a retry. It leaves the same
+empty allow-list behind, so the two are easy to conflate, but only one of them is the host's to
+fix: a workflow that declares nothing still will next time, and a host told to save a workflow
+it already saved has been sent down the wrong recovery path. Distinguish them by the reason
+text, or retry once and see whether the refusal changes.
+
+Neither refusal fires when `inputs` is empty. With nothing to check, what the workflow declares
+does not bear on the run, so a graph with no declared shape still executes.
+
 A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.
 Honouring it would make execute destructive; ignoring it would run a workflow the host did not
 ask for while reporting success. The refusal names both ids and says to load first.

@@ -135,9 +135,12 @@ Without the guard, a host could not tell which run any following notification de
 which one a cancel would stop. `NukeLoadWorkflowRequest` refuses mid-run for the same reason
 and a stronger one: it would discard the running graph.
 
-One host verb, two engine requests, and neither of them loads. `SetParameterValueRequest`
-applies each input to the loaded start node and `StartFlowRequest` executes, so running a
-workflow does not rebuild the graph whose knobs a host has just been setting.
+Six engine requests plus one per applied input, and none of them loads.
+`SetParameterValueRequest` applies each input to the loaded start node and `StartFlowRequest`
+executes, so running a workflow does not rebuild the graph whose knobs a host has just been
+setting. The rest is preflight: what the engine is running, what it has loaded, what that
+workflow declares, and which flow to start. A rejected input costs no request, because it never
+reaches the engine.
 
 `workflow_id` is optional. Empty runs whatever is loaded, which is what a host driving a graph
 an editor user opened has to do. Set, it must be the loaded workflow, and a mismatch is
@@ -157,6 +160,12 @@ load, and the engine keeps the unsaved graph an editor user is working on in its
 under an `unsaved:` key with no declared shape. Rejecting each input there would report the
 host's own parameter names back at it as if they were wrong, while the run went ahead on the
 author's values.
+
+An unreadable registry produces the same empty allow-list for an unrelated reason, and gets its
+own refusal naming a retry. A workflow that declares nothing will still declare nothing on the
+next call; a registry that would not answer probably will. Telling a host to save a workflow it
+already saved sends it down the wrong recovery path. Neither refusal fires when no inputs were
+sent, because then there is nothing to check against the allow-list.
 
 `NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
 alongside its type, because a host builds knobs from this and a knob with no default has

@@ -45,9 +45,11 @@ def handle_execute_workflow(
     events a host could not tell which run the notifications that followed belonged to, nor
     which one a cancel would stop. Serial execution is what makes those two gaps survivable.
 
-    Also refuses inputs it could not apply at all. ``current_workflow_id`` answers for any
-    graph the engine holds, including the unsaved one an editor user is working on, and an
-    unsaved graph publishes no declared shape to address inputs to.
+    Also refuses inputs it could not apply at all, and says which of two reasons it hit.
+    ``current_workflow_id`` answers for any graph the engine holds, including the unsaved one
+    an editor user is working on, and an unsaved graph publishes no declared shape to address
+    inputs to. An unreadable registry produces the same empty allow-list for an entirely
+    different reason, and only one of the two is worth retrying.
     """
     attempted = (
         f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
@@ -86,7 +88,22 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    declared = _declared_input_parameters(loaded_id)
+    declared, registry_readable = _declared_input_parameters(loaded_id)
+
+    # Only checked when there are inputs to check. With none, what the workflow declares does
+    # not bear on the run, and a graph with no declared shape is exactly what an empty
+    # workflow_id is for.
+    if request.inputs and not registry_readable:
+        return failure(
+            NukeExecuteWorkflowResultFailure,
+            attempted=attempted,
+            because=(
+                f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
+                f"unknown and the inputs sent could not be checked against it. Retry, or send no inputs to run "
+                f"the graph as it stands."
+            ),
+            workflow_id=loaded_id,
+        )
 
     # Starting anyway would run the author's values while reporting success, and every input
     # the host sent would come back rejected for a reason that reads like it named the wrong
@@ -133,17 +150,22 @@ def handle_execute_workflow(
     )
 
 
-def _declared_input_parameters(workflow_id: str) -> set[tuple[str, str]]:
-    """Return the parameters a host may set, or nothing when the workflow declares none.
+def _declared_input_parameters(workflow_id: str) -> tuple[set[tuple[str, str]], bool]:
+    """Return the parameters a host may set, and whether the registry could be read at all.
+
+    Two reasons produce no parameters and they are not the same refusal: a graph that declares
+    no shape is permanent and a host must stop sending inputs, an unreadable registry is
+    transient and a retry fixes it. Collapsing them would tell a host to save a workflow it
+    already saved.
 
     An empty set is not the same as a workflow that refuses to run: a graph with no declared
     shape still executes, it just cannot be addressed. The caller decides what that means,
     which depends on whether the host sent any inputs at all.
     """
-    entry = engine.workflow_entry(workflow_id)
-    if entry is None:
-        return set()
-    return shape.input_parameter_ids(entry)
+    found = engine.lookup_workflow(workflow_id)
+    if found.entry is None:
+        return set(), found.registry_readable
+    return shape.input_parameter_ids(found.entry), True
 
 
 def _apply_inputs(

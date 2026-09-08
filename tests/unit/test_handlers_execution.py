@@ -29,6 +29,7 @@ from griptape_nodes.retained_mode.events.parameter_events import (
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
+    ListAllWorkflowsResultFailure,
     ListAllWorkflowsResultSuccess,
     RunWorkflowFromRegistryRequest,
 )
@@ -196,6 +197,44 @@ class TestExecuteWorkflow:
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
+    def test_an_unreadable_registry_is_a_retryable_refusal_not_a_graph_that_declares_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both produce an empty allow-list, and only one of them is the host's problem to fix.
+
+        Telling a host that a workflow it saved "declares no input parameters" sends it down the
+        unsaved-graph recovery path for something a retry fixes.
+        """
+        engine = use_engine(
+            monkeypatch,
+            execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
+        )
+
+        result = handle_execute_workflow(
+            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        details = str(result.result_details)
+        assert "could not read the workflow registry" in details
+        assert "Retry" in details
+        assert "declares no input parameters" not in details, "wf1 does declare one"
+        assert "save it and load it by id" not in details
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
+
+    def test_an_unreadable_registry_does_not_block_a_run_with_no_inputs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With nothing to check against the allow-list, the registry does not bear on the run."""
+        use_engine(
+            monkeypatch,
+            execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
+        )
+
+        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.applied_inputs == []
+
     def test_a_graph_that_declares_no_inputs_still_runs_when_none_are_sent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -208,6 +247,23 @@ class TestExecuteWorkflow:
         assert result.workflow_id == "unsaved:9f0c"
         assert result.applied_inputs == []
         assert result.rejected_inputs == []
+
+    def test_an_execution_costs_six_engine_requests_plus_one_per_applied_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """None of them loads, which is the whole point of the split. A rejected input costs none."""
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = handle_execute_workflow(
+            NukeExecuteWorkflowRequest(
+                workflow_id="wf1",
+                inputs={"Start Flow": {"topic": "hello"}, "Some Private Node": {"api_key": "stolen"}},
+            )
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert len(engine.requests) == 6 + len(result.applied_inputs)
+        assert result.rejected_inputs != [], "a rejected input must not have cost a request"
 
     def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
         self, monkeypatch: pytest.MonkeyPatch
