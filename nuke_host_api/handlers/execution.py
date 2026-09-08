@@ -44,6 +44,10 @@ def handle_execute_workflow(
     Refuses to start over a run already in progress. With no execution id in the engine's
     events a host could not tell which run the notifications that followed belonged to, nor
     which one a cancel would stop. Serial execution is what makes those two gaps survivable.
+
+    Also refuses inputs it could not apply at all. ``current_workflow_id`` answers for any
+    graph the engine holds, including the unsaved one an editor user is working on, and an
+    unsaved graph publishes no declared shape to address inputs to.
     """
     attempted = (
         f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
@@ -82,7 +86,25 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    applied, rejected = _apply_inputs(request.inputs, _declared_input_parameters(loaded_id))
+    declared = _declared_input_parameters(loaded_id)
+
+    # Starting anyway would run the author's values while reporting success, and every input
+    # the host sent would come back rejected for a reason that reads like it named the wrong
+    # parameters. An unsaved editor graph is the case that gets here: the engine keeps it in
+    # the registry under an "unsaved:" key with no declared shape.
+    if request.inputs and not declared:
+        return failure(
+            NukeExecuteWorkflowResultFailure,
+            attempted=attempted,
+            because=(
+                f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
+                f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
+                f"it and load it by id, or send no inputs to run it as it stands."
+            ),
+            workflow_id=loaded_id,
+        )
+
+    applied, rejected = _apply_inputs(request.inputs, declared)
 
     flow_name = engine.top_level_flow_name()
     if flow_name is None:
@@ -112,11 +134,11 @@ def handle_execute_workflow(
 
 
 def _declared_input_parameters(workflow_id: str) -> set[tuple[str, str]]:
-    """Return the parameters a host may set, or nothing when the workflow cannot be read.
+    """Return the parameters a host may set, or nothing when the workflow declares none.
 
-    An empty set is the safe answer, not a failure: a workflow the registry cannot describe
-    still runs, it just accepts no inputs, and every one a host sent is reported rejected
-    rather than silently dropped.
+    An empty set is not the same as a workflow that refuses to run: a graph with no declared
+    shape still executes, it just cannot be addressed. The caller decides what that means,
+    which depends on whether the host sent any inputs at all.
     """
     entry = engine.workflow_entry(workflow_id)
     if entry is None:

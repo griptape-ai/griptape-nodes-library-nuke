@@ -211,6 +211,79 @@ class TestLoadWorkflow:
             "must not read values off a graph it never loaded"
         )
 
+    def test_a_load_the_engine_refuses_reports_that_the_previous_graph_is_already_gone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The engine clears all object state before it builds the graph, so this failure costs.
+
+        A host that read the refusal as "nothing changed" would keep showing knobs for a graph
+        the engine no longer holds, and the artist whose comp was discarded gets no signal.
+        """
+        use_engine(
+            monkeypatch,
+            load_responses(
+                {RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(result_details="library missing")}
+            ),
+        )
+
+        result = handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultFailure)
+        assert result.engine_state_cleared is True
+        assert "cleared" in str(result.result_details)
+
+    @pytest.mark.parametrize(
+        ("request_payload", "overrides"),
+        [
+            (NukeLoadWorkflowRequest(workflow_id="ghost"), {}),
+            (NukeLoadWorkflowRequest(), {}),
+            (NukeLoadWorkflowRequest(workflow_id="wf1", file_path="/shots/other.py"), {}),
+            (NukeLoadWorkflowRequest(workflow_id="wf1"), {GetFlowStateRequest: BUSY_FLOW}),
+            (
+                NukeLoadWorkflowRequest(file_path="/tmp/notes.txt"),
+                {ImportWorkflowRequest: ImportWorkflowResultFailure(result_details="not a workflow file")},
+            ),
+            (
+                NukeLoadWorkflowRequest(workflow_id="wf1"),
+                {ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="down")},
+            ),
+        ],
+    )
+    def test_a_refusal_decided_before_the_engine_load_reports_nothing_cleared(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        request_payload: NukeLoadWorkflowRequest,
+        overrides: dict[type, Any],
+    ) -> None:
+        """The flag is a host's recovery signal, so it must be false for every cheap refusal."""
+        use_engine(monkeypatch, load_responses(overrides))
+
+        result = handle_load_workflow(request_payload)
+
+        assert isinstance(result, NukeLoadWorkflowResultFailure)
+        assert result.engine_state_cleared is False
+
+    def test_a_clean_load_costs_four_engine_requests_plus_one_per_declared_parameter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The cost scales with the workflow, which is why no fixed number is documented."""
+        engine = use_engine(monkeypatch, load_responses())
+
+        result = handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        declared = len(result.inputs) + len(result.outputs)
+        assert len(engine.requests) == 4 + declared
+        assert sum(isinstance(r, GetParameterValueRequest) for r in engine.requests) == declared
+
+    def test_a_file_path_load_costs_one_engine_request_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch, load_responses())
+
+        result = handle_load_workflow(NukeLoadWorkflowRequest(file_path="/shots/sq010/comp.py"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        assert len(engine.requests) == 5 + len(result.inputs) + len(result.outputs)
+
     def test_a_parameter_the_engine_will_not_answer_for_is_reported_not_omitted(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

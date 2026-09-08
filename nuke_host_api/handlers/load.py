@@ -6,12 +6,17 @@ parameter's live value without starting a run, and left the layer inconsistent a
 host knows what is loaded: discovery addressed workflows by id, everything else answered for
 whatever execute happened to have loaded last.
 
-One host verb, up to five engine requests, because the engine has no load-and-describe entry
-point: ``ImportWorkflowRequest`` registers a file the engine has not seen,
-``RunWorkflowFromRegistryRequest`` builds the graph, and the values come back one
-``GetParameterValueRequest`` at a time. Collapsing them matters more here than elsewhere: a
-host doing this itself would have to know that reading a value requires a load, and that the
-load it needs clears all object state.
+One host verb, four engine requests plus one per declared parameter, because the engine has no
+load-and-describe entry point: ``ImportWorkflowRequest`` registers a file the engine has not
+seen and costs one more, ``RunWorkflowFromRegistryRequest`` builds the graph, and the values
+come back one ``GetParameterValueRequest`` at a time. Collapsing them matters more here than
+elsewhere: a host doing this itself would have to know that reading a value requires a load,
+and that the load it needs clears all object state.
+
+What a refusal costs a host is not uniform, and the failure result says which kind it got.
+Every check this handler makes itself is pre-engine and discards nothing. The engine's own load
+is not atomic: with ``run_with_clean_slate=True`` it clears all object state before it builds
+the graph, so a load that fails inside the workflow file leaves the engine empty.
 """
 
 from __future__ import annotations
@@ -39,9 +44,10 @@ def handle_load_workflow(
 ) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
     """Load one workflow, then describe and read it in the same reply.
 
-    Every check that can be made before the engine is touched is made first, because loading
-    clears all object state: a request that fails on its own arguments, or on an id that was
-    never registered, must leave whatever was loaded before intact.
+    Every check this handler can make itself is made before the engine is touched, because
+    loading clears all object state: a request that fails on its own arguments, or on an id
+    that was never registered, must leave whatever was loaded before intact. The engine's own
+    load is the exception, and reports ``engine_state_cleared`` when it fails.
     """
     if request.workflow_id and request.file_path:
         return failure(
@@ -88,16 +94,16 @@ def handle_load_workflow(
 
     # Read before loading, not after. An unknown id and an unreadable registry are different
     # answers to a host, and neither is worth clearing the engine's state to discover.
-    table = engine.workflow_table()
-    if table is None:
+    found = engine.lookup_workflow(workflow_id)
+    if not found.registry_readable:
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,
             because="the engine could not read the workflow registry.",
             workflow_id=workflow_id,
         )
-    entry = table.get(workflow_id)
-    if not isinstance(entry, dict):
+    entry = found.entry
+    if entry is None:
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,
@@ -111,11 +117,18 @@ def handle_load_workflow(
         RunWorkflowFromRegistryResultSuccess,
     )
     if loaded.value is None:
+        # The only refusal that costs a host its previous graph. A clean slate is requested,
+        # and the engine clears all object state before it builds the graph, so by the time
+        # the workflow file itself fails there is nothing left to keep.
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,
-            because=f"the engine could not load it. {loaded.details}",
+            because=(
+                f"the engine could not load it, and the engine's object state was cleared before it tried, "
+                f"so nothing is loaded now. {loaded.details}"
+            ),
             workflow_id=workflow_id,
+            engine_state_cleared=True,
         )
 
     declared_shape = shape.workflow_shape(entry)

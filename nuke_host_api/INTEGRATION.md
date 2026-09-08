@@ -497,7 +497,8 @@ before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
 
 **Destructive.** The engine clears all object state to load a graph, so this discards whatever
 was loaded before, including a graph an editor user has open on the same engine. Confirm with
-the artist before sending it.
+the artist before sending it. It clears before it knows the load will succeed, so a failed load
+can leave nothing loaded at all.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -598,7 +599,7 @@ Loading a file the engine has never seen:
 { "file_path": "/shots/sq010/comp_v012.py" }
 ```
 
-Refused, and nothing is loaded or discarded:
+Refused, and nothing is loaded:
 
 | Condition | `because` names |
 |---|---|
@@ -608,9 +609,23 @@ Refused, and nothing is loaded or discarded:
 | The file cannot be imported | the engine's own reason |
 | The id is not registered | that no workflow with that name exists |
 | The registry cannot be read | that the engine could not read it, which is worth retrying |
+| The engine could not load the workflow | the engine's own reason, and that the previous graph is already gone |
 
-Every one of those is decided before the engine's state is touched, so a refused load leaves
-the previous graph exactly as it was.
+Every row but the last is decided before the engine's state is touched, so those refusals leave
+the previous graph exactly as it was. The last one cannot: `run_with_clean_slate` makes the
+engine clear all object state before it builds the graph, so a workflow that fails inside its
+own file, on a missing library or an exception, leaves nothing loaded. That failure alone
+carries `engine_state_cleared: true`.
+
+Branch on `engine_state_cleared`, not on the reason text. When it is `false`, the knobs a host
+is showing still match what the engine holds and a retry is free. When it is `true`, the graph
+the host was driving is gone: drop the knobs, and tell the artist before retrying, because the
+comp they had open went with it.
+
+| `NukeLoadWorkflowResultFailure` field | Type | Notes |
+|---|---|---|
+| `workflow_id` | `str` | The id asked for, or the one resolved from `file_path`. Empty when the request never got far enough to name one |
+| `engine_state_cleared` | `bool` | `true` only when the engine had already discarded the previous graph before it failed |
 
 ### NukeExecuteWorkflowRequest
 
@@ -667,6 +682,14 @@ A pair that is not a declared input parameter is rejected with
 `"Not a declared input parameter of this workflow."` and never reaches the engine. Address
 inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` or
 `NukeLoadWorkflowRequest` returned.
+
+Sending inputs to a loaded graph that declares no input parameters is refused instead, rather
+than rejecting every one of them. The case a host meets is an unsaved graph: with `workflow_id`
+empty, execute runs whatever the engine holds, and the graph an editor user is working on lives
+in the engine's registry under an `unsaved:` key with no declared shape. Rejecting each input
+there would hand the host its own parameter names back as if they were wrong, while the run
+went ahead on the author's values. The refusal says to save the workflow and load it by id, or
+to send no inputs and run it as it stands.
 
 A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.
 Honouring it would make execute destructive; ignoring it would run a workflow the host did not

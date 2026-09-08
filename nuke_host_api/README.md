@@ -95,9 +95,9 @@ its own verb, called deliberately, and a host is expected to confirm it with the
 Before it existed, loading was a side effect of `NukeExecuteWorkflowRequest`, which left a
 host unable to read or set a parameter's live value without starting a run.
 
-One host verb, up to five engine requests, because the engine has no load-and-describe entry
-point: `ImportWorkflowRequest` registers a file the engine has not seen,
-`RunWorkflowFromRegistryRequest` builds the graph, and values come back one
+One host verb, four engine requests plus one per declared parameter, because the engine has no
+load-and-describe entry point: `ImportWorkflowRequest` registers a file the engine has not seen
+and costs one more, `RunWorkflowFromRegistryRequest` builds the graph, and values come back one
 `GetParameterValueRequest` at a time.
 
 The reply carries four fields rather than two: `inputs` and `outputs` are exactly
@@ -110,9 +110,12 @@ into a descriptor would make `default` and `value` look like variants of one thi
 is worse than refusing. A `file_path` is imported and registered first, so a host can hand
 over a file an artist picked and learn the resulting id from the reply.
 
-Every check that can happen before the engine is touched happens first, including reading the
-registry to reject an unknown id. Loading is destructive, so a request that cannot succeed
-must leave the previous graph intact.
+Every check this verb makes itself happens before the engine is touched, including reading the
+registry to reject an unknown id, so a request refused on its own arguments leaves the previous
+graph intact. The engine's own load is not atomic and cannot offer that: `run_with_clean_slate`
+clears all object state before the graph is built, so a workflow that fails inside its own file
+leaves nothing loaded. That failure reports `engine_state_cleared`, and a host must drop the
+knobs it was showing when it sees it.
 
 ### 3. Execute workflows
 
@@ -147,6 +150,13 @@ silently dropped input is worse than a failed execution: the workflow produces p
 output from the wrong values. Inputs are checked against the parameters `describe_workflow`
 declared before they reach the engine, which would otherwise set a parameter on any node in
 the loaded graph for a caller this transport never authenticated.
+
+By the same rule, inputs sent to a loaded graph that declares no input parameters are refused
+rather than rejected one by one. `workflow_id` empty is how a host drives a graph it did not
+load, and the engine keeps the unsaved graph an editor user is working on in its registry
+under an `unsaved:` key with no declared shape. Rejecting each input there would report the
+host's own parameter names back at it as if they were wrong, while the run went ahead on the
+author's values.
 
 `NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
 alongside its type, because a host builds knobs from this and a knob with no default has

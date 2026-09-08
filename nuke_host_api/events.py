@@ -150,7 +150,9 @@ class NukeLoadWorkflowRequest(RequestPayload):
 
     Destructive on purpose, and worth a confirmation in a host's UI: the engine clears all
     object state to load a graph, so this discards whatever was loaded before, including a
-    graph an editor user has open on the same engine.
+    graph an editor user has open on the same engine. It discards it before it knows the load
+    will succeed, so a failure can leave nothing loaded at all; see
+    ``NukeLoadWorkflowResultFailure.engine_state_cleared``.
 
     Args:
         workflow_id: Id from NukeListWorkflowsRequest. Mutually exclusive with file_path.
@@ -206,17 +208,25 @@ class NukeLoadWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSucces
 @dataclass
 @PayloadRegistry.register
 class NukeLoadWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """Nothing was loaded, and whatever was loaded before is untouched.
+    """Nothing was loaded. Whether the previous graph survived depends on how far the load got.
 
     Covers an ambiguous or empty request, an unknown id, a file the engine could not import,
-    a workflow the engine could not load, and a run already in progress.
+    a workflow the engine could not load, and a run already in progress. Every one of those
+    except the engine's own load failure is decided before the engine is touched.
 
     Args:
         workflow_id: The id asked for, or the one resolved from ``file_path``. Empty when the
             request never got far enough to name one.
+        engine_state_cleared: True when the engine had already discarded the previous graph
+            before it failed. Loading asks for a clean slate, and the engine clears all object
+            state before it builds the graph, so a workflow that fails inside its own file
+            leaves the engine empty. A host that keeps showing knobs for what it had loaded
+            must drop them when this is set, and must ask an artist before retrying, since the
+            comp they had open is already gone.
     """
 
     workflow_id: str = ""
+    engine_state_cleared: bool = False
 
 
 # Execution
@@ -242,7 +252,10 @@ class NukeExecuteWorkflowRequest(RequestPayload):
             workflow.
         inputs: ``{node_name: {parameter_name: value}}``. Values are plain JSON. Only pairs
             NukeDescribeWorkflowRequest declared as inputs are accepted; anything else is
-            reported in ``rejected_inputs``.
+            reported in ``rejected_inputs``. Sending inputs to a workflow that declares none,
+            which includes an unsaved editor graph, is refused rather than run: none of them
+            could be applied, and the run would produce plausible output from the author's
+            values instead of the host's.
     """
 
     workflow_id: str = ""
@@ -278,8 +291,9 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
 class NukeExecuteWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
     """Execution could not be started.
 
-    Covers a run already in progress, nothing loaded to run, and a ``workflow_id`` naming a
-    workflow other than the loaded one.
+    Covers a run already in progress, nothing loaded to run, a ``workflow_id`` naming a
+    workflow other than the loaded one, and inputs sent to a loaded graph that declares no
+    input parameters to address them to.
     """
 
     workflow_id: str = ""

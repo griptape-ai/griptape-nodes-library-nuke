@@ -28,6 +28,8 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    ListAllWorkflowsRequest,
+    ListAllWorkflowsResultSuccess,
     RunWorkflowFromRegistryRequest,
 )
 
@@ -46,10 +48,21 @@ from nuke_host_api.events import (
 from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow, handle_get_execution_state
 from nuke_host_api.handlers.execution import _apply_inputs
 from nuke_host_api.protocol import ExecutionState
-from tests.unit.host_api_fakes import execute_responses, use_engine
+from tests.unit.host_api_fakes import WORKFLOW_TABLE, execute_responses, use_engine
 
 NOTHING_LOADED = {GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok")}
 NO_WORKFLOW_IN_CONTEXT = {GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="", result_details="ok")}
+
+# The engine keeps the graph an editor user is working on in its registry under an "unsaved:"
+# key with no declared shape, and GetWorkflowContextRequest answers with that key.
+UNSAVED_GRAPH_LOADED = {
+    GetWorkflowContextRequest: GetWorkflowContextSuccess(
+        workflow_name="unsaved:9f0c", is_saved=False, result_details="ok"
+    ),
+    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
+        workflows={**WORKFLOW_TABLE, "unsaved:9f0c": {"name": "Untitled"}}, result_details="ok"
+    ),
+}
 
 
 class TestExecuteWorkflow:
@@ -163,6 +176,38 @@ class TestExecuteWorkflow:
         ]
         touched = {r.node_name for r in engine.requests if isinstance(r, SetParameterValueRequest)}
         assert touched == {"Start Flow"}
+
+    def test_inputs_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unsaved editor graph is in the registry with no shape, so nothing could be applied.
+
+        Starting anyway would report success while running the author's values, and every input
+        would come back rejected for a reason that reads like the host named the wrong
+        parameters.
+        """
+        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
+
+        result = handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {"topic": "hello"}}))
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert result.workflow_id == "unsaved:9f0c"
+        assert "declares no input parameters" in str(result.result_details)
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
+
+    def test_a_graph_that_declares_no_inputs_still_runs_when_none_are_sent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Driving a graph an editor user opened is what an empty workflow_id is for."""
+        use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
+
+        result = handle_execute_workflow(NukeExecuteWorkflowRequest())
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.workflow_id == "unsaved:9f0c"
+        assert result.applied_inputs == []
+        assert result.rejected_inputs == []
 
     def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
         self, monkeypatch: pytest.MonkeyPatch
