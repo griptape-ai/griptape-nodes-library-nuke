@@ -45,11 +45,11 @@ def handle_execute_workflow(
     events a host could not tell which run the notifications that followed belonged to, nor
     which one a cancel would stop. Serial execution is what makes those two gaps survivable.
 
-    Also refuses inputs it could not apply at all, and says which of two reasons it hit.
+    Also refuses inputs it could not apply at all, and says which of three reasons it hit.
     ``current_workflow_id`` answers for any graph the engine holds, including the unsaved one
     an editor user is working on, and an unsaved graph publishes no declared shape to address
-    inputs to. An unreadable registry produces the same empty allow-list for an entirely
-    different reason, and only one of the two is worth retrying.
+    inputs to. An unreadable registry and an entry that has vanished from a readable one leave
+    the same empty allow-list behind for unrelated reasons, and each is fixed differently.
     """
     attempted = (
         f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
@@ -88,38 +88,16 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    declared, registry_readable = _declared_input_parameters(loaded_id)
+    found = engine.lookup_workflow(loaded_id)
+    declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
 
     # Only checked when there are inputs to check. With none, what the workflow declares does
     # not bear on the run, and a graph with no declared shape is exactly what an empty
     # workflow_id is for.
-    if request.inputs and not registry_readable:
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=(
-                f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
-                f"unknown and the inputs sent could not be checked against it. Retry, or send no inputs to run "
-                f"the graph as it stands."
-            ),
-            workflow_id=loaded_id,
-        )
-
-    # Starting anyway would run the author's values while reporting success, and every input
-    # the host sent would come back rejected for a reason that reads like it named the wrong
-    # parameters. An unsaved editor graph is the case that gets here: the engine keeps it in
-    # the registry under an "unsaved:" key with no declared shape.
-    if request.inputs and not declared:
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=(
-                f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
-                f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
-                f"it and load it by id, or send no inputs to run it as it stands."
-            ),
-            workflow_id=loaded_id,
-        )
+    if request.inputs:
+        refusal = _refuse_unaddressable_inputs(attempted, loaded_id, found, declared)
+        if refusal is not None:
+            return refusal
 
     applied, rejected = _apply_inputs(request.inputs, declared)
 
@@ -150,22 +128,56 @@ def handle_execute_workflow(
     )
 
 
-def _declared_input_parameters(workflow_id: str) -> tuple[set[tuple[str, str]], bool]:
-    """Return the parameters a host may set, and whether the registry could be read at all.
+def _refuse_unaddressable_inputs(
+    attempted: str, loaded_id: str, found: engine.WorkflowLookup, declared: set[tuple[str, str]]
+) -> NukeExecuteWorkflowResultFailure | None:
+    """Refuse inputs nothing could be applied to, naming which of three causes it was.
 
-    Two reasons produce no parameters and they are not the same refusal: a graph that declares
-    no shape is permanent and a host must stop sending inputs, an unreadable registry is
-    transient and a retry fixes it. Collapsing them would tell a host to save a workflow it
-    already saved.
-
-    An empty set is not the same as a workflow that refuses to run: a graph with no declared
-    shape still executes, it just cannot be addressed. The caller decides what that means,
-    which depends on whether the host sent any inputs at all.
+    All three leave an empty allow-list, and each sends a host somewhere different: retry the
+    registry, load the workflow again, or save the graph first. Collapsing any two of them names
+    a cause the host cannot act on, and starting the run instead would report success while
+    running the author's values.
     """
-    found = engine.lookup_workflow(workflow_id)
+    if not found.registry_readable:
+        return failure(
+            NukeExecuteWorkflowResultFailure,
+            attempted=attempted,
+            because=(
+                f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
+                f"unknown and the inputs sent could not be checked against it. Retry, or send no inputs to run "
+                f"the graph as it stands."
+            ),
+            workflow_id=loaded_id,
+        )
+    # A stale context key over a live registry: the engine can drop an entry without touching
+    # the context stack. Worded as NukeGetParameterValuesRequest words the same state, so two
+    # verbs do not describe one engine condition two ways.
     if found.entry is None:
-        return set(), found.registry_readable
-    return shape.input_parameter_ids(found.entry), True
+        return failure(
+            NukeExecuteWorkflowResultFailure,
+            attempted=attempted,
+            because=(
+                f"the loaded workflow '{loaded_id}' is no longer in the registry, so the inputs sent could not "
+                f"be checked against what it declares. Load it again with NukeLoadWorkflowRequest."
+            ),
+            error=KeyError,
+            workflow_id=loaded_id,
+        )
+    # An unsaved editor graph: the engine keeps it in the registry under an "unsaved:" key with
+    # no declared shape. Reachable only with an entry actually found, which is the case this
+    # message describes.
+    if not declared:
+        return failure(
+            NukeExecuteWorkflowResultFailure,
+            attempted=attempted,
+            because=(
+                f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
+                f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
+                f"it and load it by id, or send no inputs to run it as it stands."
+            ),
+            workflow_id=loaded_id,
+        )
+    return None
 
 
 def _apply_inputs(
@@ -175,7 +187,8 @@ def _apply_inputs(
 
     A silently dropped input is worse than a failed execution: the workflow produces plausible
     output from the wrong values. So rejections are reported rather than logged and
-    forgotten.
+    forgotten. Two kinds reach ``rejected``, and only one is free: a pair outside ``allowed``
+    never reaches the engine, while a declared pair is forwarded before its outcome is known.
 
     Only pairs describe_workflow declared are forwarded. The engine would happily set a
     parameter on any node in the loaded graph, and this transport carries no authentication,

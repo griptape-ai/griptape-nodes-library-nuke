@@ -135,12 +135,15 @@ Without the guard, a host could not tell which run any following notification de
 which one a cancel would stop. `NukeLoadWorkflowRequest` refuses mid-run for the same reason
 and a stronger one: it would discard the running graph.
 
-Six engine requests plus one per applied input, and none of them loads.
-`SetParameterValueRequest` applies each input to the loaded start node and `StartFlowRequest`
-executes, so running a workflow does not rebuild the graph whose knobs a host has just been
-setting. The rest is preflight: what the engine is running, what it has loaded, what that
-workflow declares, and which flow to start. A rejected input costs no request, because it never
-reaches the engine.
+Six engine requests plus one per input forwarded to the engine, and none of them loads.
+`SetParameterValueRequest` applies each declared input to the loaded start node and
+`StartFlowRequest` executes, so running a workflow does not rebuild the graph whose knobs a host
+has just been setting. The rest is preflight: what the engine is running, what it has loaded,
+what that workflow declares, and which flow to start.
+
+A pair outside the allow-list is the only rejection that costs nothing, because it never reaches
+the engine. A declared pair is forwarded before its outcome is known, so an input the engine
+refuses has already cost its request.
 
 `workflow_id` is optional. Empty runs whatever is loaded, which is what a host driving a graph
 an editor user opened has to do. Set, it must be the loaded workflow, and a mismatch is
@@ -161,11 +164,12 @@ under an `unsaved:` key with no declared shape. Rejecting each input there would
 host's own parameter names back at it as if they were wrong, while the run went ahead on the
 author's values.
 
-An unreadable registry produces the same empty allow-list for an unrelated reason, and gets its
-own refusal naming a retry. A workflow that declares nothing will still declare nothing on the
-next call; a registry that would not answer probably will. Telling a host to save a workflow it
-already saved sends it down the wrong recovery path. Neither refusal fires when no inputs were
-sent, because then there is nothing to check against the allow-list.
+An unreadable registry, and an id that has vanished from a readable one, leave the same empty
+allow-list for unrelated reasons, and each gets a refusal of its own: retry the registry, or
+load the workflow again. A workflow that declares nothing will still declare nothing on the
+next call; the other two are not the host's doing. Telling a host to save a workflow it already
+saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
+because then there is nothing to check against the allow-list.
 
 `NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
 alongside its type, because a host builds knobs from this and a knob with no default has

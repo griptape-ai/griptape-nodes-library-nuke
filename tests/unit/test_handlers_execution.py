@@ -248,10 +248,13 @@ class TestExecuteWorkflow:
         assert result.applied_inputs == []
         assert result.rejected_inputs == []
 
-    def test_an_execution_costs_six_engine_requests_plus_one_per_applied_input(
+    def test_an_execution_costs_six_engine_requests_plus_one_per_input_it_forwards(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """None of them loads, which is the whole point of the split. A rejected input costs none."""
+        """None of them loads, which is the whole point of the split.
+
+        Only declared pairs are forwarded, so an undeclared one is the rejection that is free.
+        """
         engine = use_engine(monkeypatch, execute_responses())
 
         result = handle_execute_workflow(
@@ -262,8 +265,61 @@ class TestExecuteWorkflow:
         )
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        assert len(engine.requests) == 6 + len(result.applied_inputs)
-        assert result.rejected_inputs != [], "a rejected input must not have cost a request"
+        forwarded = sum(isinstance(request, SetParameterValueRequest) for request in engine.requests)
+        assert forwarded == 1, "the undeclared pair must not have been forwarded"
+        assert len(engine.requests) == 6 + forwarded
+
+    def test_an_input_the_engine_refuses_has_already_cost_a_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A declared pair is forwarded before its outcome is known, so its rejection is not free.
+
+        The count is per input forwarded, not per input applied. Only the allow-list filters for
+        free.
+        """
+        engine = use_engine(
+            monkeypatch,
+            execute_responses(
+                {SetParameterValueRequest: SetParameterValueResultFailure(result_details="knob is read-only")}
+            ),
+        )
+
+        result = handle_execute_workflow(
+            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.applied_inputs == []
+        assert result.rejected_inputs == [{"node": "Start Flow", "parameter": "topic", "reason": "knob is read-only"}]
+        assert len(engine.requests) == 7, "six plus the one forwarded input, whatever the engine said about it"
+
+    def test_a_loaded_id_missing_from_a_readable_registry_is_not_an_unsaved_graph(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stale context key over a live registry: the engine can drop an entry without popping it.
+
+        Telling a host to save a workflow that is not unsaved names a cause it cannot act on.
+        Worded as NukeGetParameterValuesRequest words the same engine state.
+        """
+        engine = use_engine(
+            monkeypatch,
+            execute_responses(
+                {
+                    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
+                        workflows={k: v for k, v in WORKFLOW_TABLE.items() if k != "wf1"}, result_details="ok"
+                    )
+                }
+            ),
+        )
+
+        result = handle_execute_workflow(
+            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        details = str(result.result_details)
+        assert "no longer in the registry" in details
+        assert "unsaved" not in details
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
     def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
         self, monkeypatch: pytest.MonkeyPatch

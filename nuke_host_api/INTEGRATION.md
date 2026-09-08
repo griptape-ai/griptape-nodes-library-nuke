@@ -678,10 +678,11 @@ Check `rejected_inputs` on every execution. A rejection does not fail the execut
 workflow executes with whatever value was already present and returns plausible output
 computed from the wrong input. Surface rejections immediately.
 
-A pair that is not a declared input parameter is rejected with
-`"Not a declared input parameter of this workflow."` and never reaches the engine. Address
+Two kinds land in `rejected_inputs`. A pair that is not a declared input parameter is rejected
+with `"Not a declared input parameter of this workflow."` and never reaches the engine; address
 inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` or
-`NukeLoadWorkflowRequest` returned.
+`NukeLoadWorkflowRequest` returned. A declared pair the engine itself refused carries the
+engine's own reason instead, and was already forwarded when it was refused.
 
 Sending inputs to a loaded graph that declares no input parameters is refused instead, rather
 than rejecting every one of them. The case a host meets is an unsaved graph: with `workflow_id`
@@ -691,13 +692,14 @@ there would hand the host its own parameter names back as if they were wrong, wh
 went ahead on the author's values. The refusal says to save the workflow and load it by id, or
 to send no inputs and run it as it stands.
 
-A registry the engine cannot read gets a separate refusal, naming a retry. It leaves the same
-empty allow-list behind, so the two are easy to conflate, but only one of them is the host's to
-fix: a workflow that declares nothing still will next time, and a host told to save a workflow
-it already saved has been sent down the wrong recovery path. Distinguish them by the reason
-text, or retry once and see whether the refusal changes.
+A registry the engine cannot read gets a separate refusal, naming a retry, and so does a loaded
+id that is no longer in the registry at all, naming a reload. All three leave the same empty
+allow-list behind, so they are easy to conflate, but only one of them is the host's to fix by
+saving: a workflow that declares nothing still will next time, while the other two are engine
+state that moved. A host told to save a workflow it already saved has been sent down the wrong
+recovery path.
 
-Neither refusal fires when `inputs` is empty. With nothing to check, what the workflow declares
+None of the three fires when `inputs` is empty. With nothing to check, what the workflow declares
 does not bear on the run, so a graph with no declared shape still executes.
 
 A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.

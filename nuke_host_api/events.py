@@ -238,8 +238,8 @@ class NukeExecuteWorkflowRequest(RequestPayload):
     """Apply inputs to the loaded workflow and start it.
 
     Loads nothing. A host loads with ``NukeLoadWorkflowRequest`` and starts with this, so
-    starting a run costs six engine requests plus one per applied input, and never a
-    clear-and-reload of the graph the host just set up.
+    starting a run costs six engine requests plus one per input forwarded to the engine, and
+    never a clear-and-reload of the graph the host just set up.
 
     Returns once execution has started. Progress and the terminal result arrive as
     notifications on ``event_topic``.
@@ -277,7 +277,9 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
         state: One of ``protocol.ExecutionState``.
         applied_inputs: Inputs the engine accepted, so a host can detect a silently
             dropped input rather than wondering why the output looks wrong.
-        rejected_inputs: Entries of ``{node, parameter, reason}``.
+        rejected_inputs: Entries of ``{node, parameter, reason}``. Two kinds land here: a pair
+            that is not a declared input, filtered before the engine sees it, and a declared
+            pair the engine itself refused.
     """
 
     workflow_id: str
@@ -292,10 +294,11 @@ class NukeExecuteWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFai
     """Execution could not be started.
 
     Covers a run already in progress, nothing loaded to run, a ``workflow_id`` naming a
-    workflow other than the loaded one, inputs sent to a loaded graph that declares no input
-    parameters to address them to, and a registry the engine could not read to find out what it
-    declares. The last two leave the same empty allow-list behind and are worded apart on
-    purpose: only one of them is fixed by retrying.
+    workflow other than the loaded one, and three ways inputs can arrive with nothing to apply
+    them to: a loaded graph that declares no input parameters, a registry the engine could not
+    read to find out what it declares, and a loaded id that is no longer in the registry at all.
+    Those three leave the same empty allow-list behind and are worded apart on purpose, because
+    each is fixed differently.
     """
 
     workflow_id: str = ""
