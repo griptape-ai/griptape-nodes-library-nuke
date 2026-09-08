@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from griptape_nodes.retained_mode.events.execution_events import (
     CancelFlowRequest,
     CancelFlowResultSuccess,
     StartFlowRequest,
     StartFlowResultSuccess,
 )
-from griptape_nodes.retained_mode.events.parameter_events import (
-    SetParameterValueRequest,
-    SetParameterValueResultSuccess,
-)
 
-from nuke_host_api import engine, shape
+from nuke_host_api import engine, parameter_values, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
@@ -95,11 +89,20 @@ def handle_execute_workflow(
     # not bear on the run, and a graph with no declared shape is exactly what an empty
     # workflow_id is for.
     if request.inputs:
-        refusal = _refuse_unaddressable_inputs(attempted, loaded_id, found, declared)
+        refusal = parameter_values.unaddressable_inputs_reason(
+            loaded_id, found, declared, no_inputs_remedy="send no inputs to run the graph as it stands"
+        )
         if refusal is not None:
-            return refusal
+            because, error = refusal
+            return failure(
+                NukeExecuteWorkflowResultFailure,
+                attempted=attempted,
+                because=because,
+                error=error,
+                workflow_id=loaded_id,
+            )
 
-    applied, rejected = _apply_inputs(request.inputs, declared)
+    applied, rejected = parameter_values.apply_inputs(request.inputs, declared)
 
     flow_name = engine.top_level_flow_name()
     if flow_name is None:
@@ -126,103 +129,6 @@ def handle_execute_workflow(
         rejected_inputs=rejected,
         result_details=f"Started workflow '{loaded_id}'.",
     )
-
-
-def _refuse_unaddressable_inputs(
-    attempted: str, loaded_id: str, found: engine.WorkflowLookup, declared: set[tuple[str, str]]
-) -> NukeExecuteWorkflowResultFailure | None:
-    """Refuse inputs nothing could be applied to, naming which of three causes it was.
-
-    All three leave an empty allow-list, and each sends a host somewhere different: retry the
-    registry, load the workflow again, or save the graph first. Collapsing any two of them names
-    a cause the host cannot act on, and starting the run instead would report success while
-    running the author's values.
-    """
-    if not found.registry_readable:
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=(
-                f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
-                f"unknown and the inputs sent could not be checked against it. Retry, or send no inputs to run "
-                f"the graph as it stands."
-            ),
-            workflow_id=loaded_id,
-        )
-    # A stale context key over a live registry: the engine can drop an entry without touching
-    # the context stack. Worded as NukeGetParameterValuesRequest words the same state, so two
-    # verbs do not describe one engine condition two ways.
-    if found.entry is None:
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=(
-                f"the loaded workflow '{loaded_id}' is no longer in the registry, so the inputs sent could not "
-                f"be checked against what it declares. Load it again with NukeLoadWorkflowRequest."
-            ),
-            error=KeyError,
-            workflow_id=loaded_id,
-        )
-    # An unsaved editor graph: the engine keeps it in the registry under an "unsaved:" key with
-    # no declared shape. Reachable only with an entry actually found, which is the case this
-    # message describes.
-    if not declared:
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=(
-                f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
-                f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
-                f"it and load it by id, or send no inputs to run it as it stands."
-            ),
-            workflow_id=loaded_id,
-        )
-    return None
-
-
-def _apply_inputs(
-    inputs: dict[str, dict[str, Any]], allowed: set[tuple[str, str]]
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """Set each input on the loaded graph, reporting what stuck and what did not.
-
-    A silently dropped input is worse than a failed execution: the workflow produces plausible
-    output from the wrong values. So rejections are reported rather than logged and
-    forgotten. Only a forwarded input can be rejected by the engine; everything this function
-    turns away itself, a node whose value is not an object of parameters and a pair outside
-    ``allowed``, is rejected without a request. So a reason a host did not write is the
-    engine's, and the two it did are its own to fix.
-
-    Only pairs describe_workflow declared are forwarded. The engine would happily set a
-    parameter on any node in the loaded graph, and this transport carries no authentication,
-    so a host must not be able to reach past a workflow's published inputs.
-    """
-    applied: list[dict[str, str]] = []
-    rejected: list[dict[str, str]] = []
-
-    for node_name, parameters in inputs.items():
-        if not isinstance(parameters, dict):
-            rejected.append({"node": str(node_name), "parameter": "*", "reason": "Expected an object of parameters."})
-            continue
-        for parameter_name, value in parameters.items():
-            if (node_name, parameter_name) not in allowed:
-                rejected.append(
-                    {
-                        "node": node_name,
-                        "parameter": parameter_name,
-                        "reason": "Not a declared input parameter of this workflow.",
-                    }
-                )
-                continue
-            attempt = engine.request(
-                SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=value),
-                SetParameterValueResultSuccess,
-            )
-            if attempt.value is None:
-                rejected.append({"node": node_name, "parameter": parameter_name, "reason": attempt.details})
-            else:
-                applied.append({"node": node_name, "parameter": parameter_name})
-
-    return applied, rejected
 
 
 @verb(NukeGetExecutionStateRequest)

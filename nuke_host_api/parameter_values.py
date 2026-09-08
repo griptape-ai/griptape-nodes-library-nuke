@@ -32,6 +32,13 @@ back the live value alongside ``type``, the exact declared-type hint ``normalize
 to disambiguate a bare string, for the one parameter asked about. The cost is one engine
 request per declared parameter, and a workflow's declared surface is knobs, not hundreds of
 them.
+
+``unaddressable_inputs_reason`` and ``apply_inputs`` are the write side of this module,
+shared by ``NukeExecuteWorkflowRequest`` and ``NukeSetParameterValuesRequest``. Both forward a
+host's ``{node: {parameter: value}}`` through the same allow-list, built from
+``shape.input_parameter_ids``, and the same rejection wording, so a pair either verb turns
+away reads identically regardless of which one produced it and a host cannot learn two
+different things about what "a declared input" means.
 """
 
 from __future__ import annotations
@@ -41,6 +48,8 @@ from typing import Any
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultSuccess,
+    SetParameterValueRequest,
+    SetParameterValueResultSuccess,
 )
 
 from nuke_host_api import engine, shape
@@ -94,3 +103,96 @@ def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list[dict[
         )
 
     return values, missing
+
+
+def unaddressable_inputs_reason(
+    loaded_id: str, found: engine.WorkflowLookup, declared: set[tuple[str, str]], *, no_inputs_remedy: str
+) -> tuple[str, type[Exception]] | None:
+    """Diagnose why declared inputs could not be checked against the loaded workflow.
+
+    Shared by ``NukeExecuteWorkflowRequest`` and ``NukeSetParameterValuesRequest``, the two
+    verbs that forward a host's ``{node: {parameter: value}}`` through this allow-list. All
+    three causes leave the same empty allow-list behind for unrelated reasons, and each sends
+    a host somewhere different: retry the registry, load the workflow again, or fall back to
+    ``no_inputs_remedy``. That remedy is the one piece of wording each caller supplies for
+    itself, because it is the only place the two verbs actually differ: execute still has a
+    graph to run as it stands, and set-values has nothing left to do at all.
+
+    Returns the reason text and the exception type a caller's own ``failure`` call should
+    raise with it, or None when nothing is wrong and the caller may forward inputs.
+    """
+    if not found.registry_readable:
+        return (
+            f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
+            f"unknown and the inputs sent could not be checked against it. Retry, or {no_inputs_remedy}.",
+            RuntimeError,
+        )
+    # A stale context key over a live registry: the engine can drop an entry without touching
+    # the context stack. Worded as NukeGetParameterValuesRequest words the same engine state,
+    # so two verbs do not describe one engine condition two ways.
+    if found.entry is None:
+        return (
+            f"the loaded workflow '{loaded_id}' is no longer in the registry, so the inputs sent could not "
+            f"be checked against what it declares. Load it again with NukeLoadWorkflowRequest.",
+            KeyError,
+        )
+    # An unsaved editor graph: the engine keeps it in the registry under an "unsaved:" key with
+    # no declared shape. Reachable only with an entry actually found, which is the case this
+    # message describes.
+    if not declared:
+        return (
+            f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
+            f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
+            f"it and load it by id, or {no_inputs_remedy}.",
+            RuntimeError,
+        )
+    return None
+
+
+def apply_inputs(
+    inputs: dict[str, dict[str, Any]], allowed: set[tuple[str, str]]
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Set each input on the loaded graph, reporting what stuck and what did not.
+
+    Shared by ``NukeExecuteWorkflowRequest`` and ``NukeSetParameterValuesRequest`` so a
+    rejection reads the same way regardless of which verb produced it. A silently dropped
+    input is worse than a refusal: the workflow, or the knob a host thinks it just set, carries
+    on with the wrong value and produces a plausible-looking result from it. So rejections are
+    reported rather than logged and forgotten.
+
+    Only a forwarded pair can be rejected by the engine; everything this function turns away
+    itself, a node whose value is not an object of parameters and a pair outside ``allowed``,
+    is rejected without a request. So a reason a host did not write is the engine's, and the
+    two it did are its own to fix.
+
+    Only pairs the loaded workflow declares as inputs are forwarded. The engine would happily
+    set a parameter on any node in the loaded graph, and this transport carries no
+    authentication, so a host must not be able to reach past a workflow's published inputs.
+    """
+    applied: list[dict[str, str]] = []
+    rejected: list[dict[str, str]] = []
+
+    for node_name, parameters in inputs.items():
+        if not isinstance(parameters, dict):
+            rejected.append({"node": str(node_name), "parameter": "*", "reason": "Expected an object of parameters."})
+            continue
+        for parameter_name, value in parameters.items():
+            if (node_name, parameter_name) not in allowed:
+                rejected.append(
+                    {
+                        "node": node_name,
+                        "parameter": parameter_name,
+                        "reason": "Not a declared input parameter of this workflow.",
+                    }
+                )
+                continue
+            attempt = engine.request(
+                SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=value),
+                SetParameterValueResultSuccess,
+            )
+            if attempt.value is None:
+                rejected.append({"node": node_name, "parameter": parameter_name, "reason": attempt.details})
+            else:
+                applied.append({"node": node_name, "parameter": parameter_name})
+
+    return applied, rejected

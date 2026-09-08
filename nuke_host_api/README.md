@@ -20,7 +20,7 @@ nuke_host_api/
     workflows.py                     list, describe
     load.py                          load one workflow, describe and read it back
     execution.py                     execute, state, cancel
-    values.py                        bulk parameter-value reads, selectable by side
+    values.py                        bulk parameter-value reads and writes, addressed to the loaded workflow
     projects.py                      list, current, switch, describe a project
   engine.py                        engine request narrowing and shared queries
   shape.py                         workflow_shape -> host-visible parameters
@@ -43,7 +43,7 @@ tests/unit/
   test_handlers_workflows.py       discovery and parameter publication
   test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
-  test_handlers_values.py          section selection, unavailable reporting, normalization
+  test_handlers_values.py          section selection, unavailable reporting, normalization, set-value allow-list
   test_handlers_projects.py        project narrowing, running-engine refusal, workspace-change detection
   test_execution_bridge.py         subscription symmetry, event translation
 ```
@@ -92,7 +92,7 @@ Two kinds of verb, and which kind a host is holding decides what it must know.
 | Addressed by | Verbs | Answers with |
 |---|---|---|
 | `workflow_id`, from the registry | `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest` | what a workflow declares, loaded or not |
-| the engine's loaded graph | `NukeGetParameterValuesRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest`, `NukeExecuteWorkflowRequest` | what the engine currently holds |
+| the engine's loaded graph | `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeGetExecutionStateRequest`, `NukeCancelExecutionRequest`, `NukeExecuteWorkflowRequest` | what the engine currently holds |
 
 `NukeLoadWorkflowRequest` is the only verb that moves a workflow from the first row to the
 second, and the only one that changes what is loaded.
@@ -190,7 +190,7 @@ alongside its type, because a host builds knobs from this and a knob with no def
 nothing to initialize to. The default is a value descriptor, so a parameter's default and its
 live value are one shape.
 
-### 4. Read every declared parameter value
+### 4. Read and set declared parameter values
 
 `NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and
 which nodes are involved. `NukeGetParameterValuesRequest` answers a different one: what does
@@ -214,6 +214,30 @@ rather than the instances the normalizer inspects, and drops any parameter whose
 The reading itself lives in `parameter_values.py`, shared with `NukeLoadWorkflowRequest`, so
 the values a host is handed at load and the values it reads back later cannot disagree, and
 neither can how an unreadable parameter is reported.
+
+`NukeSetParameterValuesRequest` is the write half, for a host that wants to stay live with the
+engine as an artist edits a knob rather than only diverging locally until the next
+`NukeExecuteWorkflowRequest`. Loaded-state-addressed like the read verb, so it takes no
+`workflow_id` either. It takes the same `{node: {parameter: value}}` shape
+`NukeExecuteWorkflowRequest.inputs` does, checks it against the same allow-list, built from
+`shape.input_parameter_ids`, and reports `applied_inputs`/`rejected_inputs` with the same
+wording, so a rejection reads the same way whether a host got it from setting a value live or
+from starting a run. `parameter_values.unaddressable_inputs_reason` and
+`parameter_values.apply_inputs` are the two functions that make that sharing real rather than
+two copies of the same allow-list drifting apart; `handlers/execution.py` and
+`handlers/values.py` each supply only their own `attempted` text, failure type, and the one
+sentence of remedy that differs between running the graph as it stands and having nothing left
+to do.
+
+An empty request is refused outright, since setting values is all this verb does: unlike
+execute, where no inputs still means "run the graph as it stands," nothing to set is nothing to
+do. It is also refused while the engine is executing, the same guard `NukeLoadWorkflowRequest`
+and `NukeExecuteWorkflowRequest` apply for a related reason: the engine's own scheduler decides
+when a node's parameter is actually read, so a value set mid-run cannot be told apart from one
+that lands before the node that consumes it or one that lands after, and answering as if it
+landed in time would be a claim this layer cannot verify. A host that wants to stay live with
+the engine sets values between runs; `NukeCancelExecutionRequest` is the way out of a run in
+progress.
 
 ### 5. Node execution changes
 
@@ -557,10 +581,6 @@ Load-bearing for the design, and documented nowhere obvious.
   including a graph an editor user has open on the same engine. The engine offers no
   load-into-a-side-context entry point, so this layer cannot make it non-destructive. A host
   should confirm with the artist before sending it.
-- **A host cannot set a value without running.** Inputs are applied by
-  `NukeExecuteWorkflowRequest` and nothing else, so a host that wants to stay live with the
-  engine as an artist edits a knob has no verb for it. A bulk `NukeSetParameterValuesRequest`
-  is the missing half of `NukeGetParameterValuesRequest`.
 - **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
 - **`NukeGetParameterValuesRequest` and `NukeLoadWorkflowRequest` cost one engine request per
