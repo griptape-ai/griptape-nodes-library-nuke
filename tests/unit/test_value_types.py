@@ -18,11 +18,37 @@ from griptape.artifacts import (
     ListArtifact,
     VideoUrlArtifact,
 )
+from griptape_nodes.retained_mode.events.project_events import (
+    GetPathForMacroResultFailure,
+    PathResolutionFailureReason,
+)
 
 from nuke_host_api import value_types
 from nuke_host_api.protocol import VALUE_TYPES, SourceKind, ValueType
 
 STATIC_URL = "http://localhost:8124/workspace/static_files/render.png"
+
+
+@pytest.fixture(autouse=True)
+def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer macro resolution with a refusal instead of reaching the real engine.
+
+    One parametrized value below carries a ``{frame}`` template, and resolving one is an
+    engine request. Test subject here is what the normalizer does with a template it cannot
+    resolve, so the engine that refuses may as well be a fake; see tests/unit/conftest.py
+    for what booting the real one costs.
+    """
+
+    class RefusingEngine:
+        @staticmethod
+        def handle_request(request: Any) -> Any:  # noqa: ARG004
+            return GetPathForMacroResultFailure(
+                failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
+                missing_variables={"frame"},
+                result_details="missing required variables",
+            )
+
+    monkeypatch.setattr(value_types, "GriptapeNodes", RefusingEngine)
 
 
 @pytest.mark.parametrize(
