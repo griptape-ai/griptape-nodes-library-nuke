@@ -678,11 +678,17 @@ Check `rejected_inputs` on every execution. A rejection does not fail the execut
 workflow executes with whatever value was already present and returns plausible output
 computed from the wrong input. Surface rejections immediately.
 
-Two kinds land in `rejected_inputs`. A pair that is not a declared input parameter is rejected
-with `"Not a declared input parameter of this workflow."` and never reaches the engine; address
-inputs only by the `node` and `parameter` `NukeDescribeWorkflowRequest` or
-`NukeLoadWorkflowRequest` returned. A declared pair the engine itself refused carries the
-engine's own reason instead, and was already forwarded when it was refused.
+Two kinds are turned away before the engine sees them, and both are the host's own to fix. A
+`node` whose value is not an object of parameters is rejected with
+`"Expected an object of parameters."` and `parameter` set to `"*"`, since no single parameter
+was named; do not look `"*"` up in what describe returned. A pair that is not a declared input
+parameter is rejected with `"Not a declared input parameter of this workflow."`; address inputs
+only by the `node` and `parameter` `NukeDescribeWorkflowRequest` or `NukeLoadWorkflowRequest`
+returned.
+
+Any other reason is the engine's own, on a declared pair that was already forwarded when it was
+refused. Split on that rather than on counting kinds: a reason the host did not write above is
+the engine's.
 
 Sending inputs to a loaded graph that declares no input parameters is refused instead, rather
 than rejecting every one of them. The case a host meets is an unsaved graph: with `workflow_id`

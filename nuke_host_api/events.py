@@ -277,9 +277,12 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
         state: One of ``protocol.ExecutionState``.
         applied_inputs: Inputs the engine accepted, so a host can detect a silently
             dropped input rather than wondering why the output looks wrong.
-        rejected_inputs: Entries of ``{node, parameter, reason}``. Two kinds land here: a pair
-            that is not a declared input, filtered before the engine sees it, and a declared
-            pair the engine itself refused.
+        rejected_inputs: Entries of ``{node, parameter, reason}``. A rejection is either the
+            host's own to fix or the engine's, and the split is whether the input was forwarded
+            at all. Two are turned away first: a ``node`` whose value is not an object of
+            parameters, reported with ``parameter`` as ``"*"`` since no single parameter was
+            named, and a pair that is not a declared input. Anything else is a declared pair the
+            engine itself refused, carrying the engine's own reason.
     """
 
     workflow_id: str

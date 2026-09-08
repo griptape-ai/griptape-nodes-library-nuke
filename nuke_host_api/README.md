@@ -141,9 +141,10 @@ Six engine requests plus one per input forwarded to the engine, and none of them
 has just been setting. The rest is preflight: what the engine is running, what it has loaded,
 what that workflow declares, and which flow to start.
 
-A pair outside the allow-list is the only rejection that costs nothing, because it never reaches
-the engine. A declared pair is forwarded before its outcome is known, so an input the engine
-refuses has already cost its request.
+Only a forwarded input can be rejected by the engine. A malformed node and a pair outside the
+allow-list are both turned away before any request, so they cost nothing; a declared pair is
+forwarded before its outcome is known, so an input the engine refuses has already cost its
+request.
 
 `workflow_id` is optional. Empty runs whatever is loaded, which is what a host driving a graph
 an editor user opened has to do. Set, it must be the loaded workflow, and a mismatch is

@@ -187,8 +187,10 @@ def _apply_inputs(
 
     A silently dropped input is worse than a failed execution: the workflow produces plausible
     output from the wrong values. So rejections are reported rather than logged and
-    forgotten. Two kinds reach ``rejected``, and only one is free: a pair outside ``allowed``
-    never reaches the engine, while a declared pair is forwarded before its outcome is known.
+    forgotten. Only a forwarded input can be rejected by the engine; everything this function
+    turns away itself, a node whose value is not an object of parameters and a pair outside
+    ``allowed``, is rejected without a request. So a reason a host did not write is the
+    engine's, and the two it did are its own to fix.
 
     Only pairs describe_workflow declared are forwarded. The engine would happily set a
     parameter on any node in the loaded graph, and this transport carries no authentication,
