@@ -133,12 +133,11 @@ def handle_set_parameter_values(
         loaded_id, found, declared, no_inputs_remedy="send no values, since there is nothing else to do"
     )
     if refusal is not None:
-        because, error = refusal
         return failure(
             NukeSetParameterValuesResultFailure,
             attempted=attempted,
-            because=because,
-            error=error,
+            because=refusal.because,
+            error=refusal.error,
             workflow_id=loaded_id,
         )
 

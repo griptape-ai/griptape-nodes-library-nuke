@@ -43,7 +43,7 @@ different things about what "a declared input" means.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
@@ -105,9 +105,22 @@ def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list[dict[
     return values, missing
 
 
+class InputRefusal(NamedTuple):
+    """Why a verb's declared-input allow-list could not be built, and how to word the refusal.
+
+    Named rather than a bare ``tuple[str, type[Exception]]`` so ``unaddressable_inputs_reason``'s
+    two callers can read ``refusal.because`` and ``refusal.error`` instead of trusting return
+    order; unpacking as ``because, error = refusal`` still works, since a ``NamedTuple`` is
+    still a tuple.
+    """
+
+    because: str
+    error: type[Exception]
+
+
 def unaddressable_inputs_reason(
     loaded_id: str, found: engine.WorkflowLookup, declared: set[tuple[str, str]], *, no_inputs_remedy: str
-) -> tuple[str, type[Exception]] | None:
+) -> InputRefusal | None:
     """Diagnose why declared inputs could not be checked against the loaded workflow.
 
     Shared by ``NukeExecuteWorkflowRequest`` and ``NukeSetParameterValuesRequest``, the two
@@ -118,33 +131,42 @@ def unaddressable_inputs_reason(
     itself, because it is the only place the two verbs actually differ: execute still has a
     graph to run as it stands, and set-values has nothing left to do at all.
 
-    Returns the reason text and the exception type a caller's own ``failure`` call should
-    raise with it, or None when nothing is wrong and the caller may forward inputs.
+    Returns an ``InputRefusal`` naming the reason text and the exception type a caller's own
+    ``failure`` call should raise with it, or None when nothing is wrong and the caller may
+    forward inputs. A named tuple rather than a bare one, so a caller reading
+    ``refusal.because`` or ``refusal.error`` does not have to hold this function's field order
+    in its head; unpacking as ``because, error = refusal`` still works.
     """
     if not found.registry_readable:
-        return (
-            f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
-            f"unknown and the inputs sent could not be checked against it. Retry, or {no_inputs_remedy}.",
-            RuntimeError,
+        return InputRefusal(
+            because=(
+                f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
+                f"unknown and the inputs sent could not be checked against it. Retry, or {no_inputs_remedy}."
+            ),
+            error=RuntimeError,
         )
     # A stale context key over a live registry: the engine can drop an entry without touching
     # the context stack. Worded as NukeGetParameterValuesRequest words the same engine state,
     # so two verbs do not describe one engine condition two ways.
     if found.entry is None:
-        return (
-            f"the loaded workflow '{loaded_id}' is no longer in the registry, so the inputs sent could not "
-            f"be checked against what it declares. Load it again with NukeLoadWorkflowRequest.",
-            KeyError,
+        return InputRefusal(
+            because=(
+                f"the loaded workflow '{loaded_id}' is no longer in the registry, so the inputs sent could not "
+                f"be checked against what it declares. Load it again with NukeLoadWorkflowRequest."
+            ),
+            error=KeyError,
         )
     # An unsaved editor graph: the engine keeps it in the registry under an "unsaved:" key with
     # no declared shape. Reachable only with an entry actually found, which is the case this
     # message describes.
     if not declared:
-        return (
-            f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
-            f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
-            f"it and load it by id, or {no_inputs_remedy}.",
-            RuntimeError,
+        return InputRefusal(
+            because=(
+                f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
+                f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
+                f"it and load it by id, or {no_inputs_remedy}."
+            ),
+            error=RuntimeError,
         )
     return None
 

@@ -93,12 +93,11 @@ def handle_execute_workflow(
             loaded_id, found, declared, no_inputs_remedy="send no inputs to run the graph as it stands"
         )
         if refusal is not None:
-            because, error = refusal
             return failure(
                 NukeExecuteWorkflowResultFailure,
                 attempted=attempted,
-                because=because,
-                error=error,
+                because=refusal.because,
+                error=refusal.error,
                 workflow_id=loaded_id,
             )
 

@@ -195,3 +195,14 @@ class TestUnaddressableInputsReason:
         assert "declares no input parameters" in because
         assert "do nothing" in because
         assert error is RuntimeError
+
+    def test_the_refusal_is_a_named_tuple_readable_by_field_and_by_position(self) -> None:
+        """Both callers read ``.because``/``.error``; unpacking is kept only for free."""
+        found = engine.WorkflowLookup(entry=None, registry_readable=False)
+
+        reason = parameter_values.unaddressable_inputs_reason("wf1", found, set(), no_inputs_remedy="do nothing")
+
+        assert isinstance(reason, parameter_values.InputRefusal)
+        assert reason.error is RuntimeError
+        assert reason.because == reason[0]
+        assert reason.error == reason[1]
