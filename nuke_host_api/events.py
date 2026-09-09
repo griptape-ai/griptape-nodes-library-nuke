@@ -769,64 +769,19 @@ class NukeParameterValueEvent(AppPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeExecutionNodesEvent(AppPayload):
-    """The run's node set: the denominator a host pairs with NukeNodeStateEvent's numerator.
+    """Nodes declared by an executing flow.
 
-    Translates the engine's InvolvedNodesEvent, which is not one-shot and not a participant
-    count. The engine emits one non-empty list per flow it starts, and a single empty one when
-    the top-level run finishes. The top-level flow's list arrives first and carries every node
-    that flow declares.
+    The first non-empty event describes the top-level flow. Later non-empty events describe
+    subflows, but the payload does not identify them. An empty list marks top-level completion.
+    Lists include nodes on untaken branches. A flow whose start is also its end emits no
+    non-empty list.
 
-    Subflows emit too. A graph holding a WorkflowNode, a SubflowNodeGroup, or a loop node starts
-    an isolated flow per execution (FlowManager.on_start_local_subflow_request), and
-    ControlFlowMachine.start_flow's emission is guarded only by `start_node != end_node`, with
-    no isolation check, so each one puts another non-empty list on the feed carrying the
-    subflow's own nodes. This layer cannot label them: the engine's payload is a bare list of
-    node names with no flow on it, and a translation callback must not issue engine requests to
-    find out which flow it came from.
-
-    So the reading rule is arrival order. The first non-empty list is the run's total. Every
-    later non-empty list is a nested scope, never a correction to that total, and the empty list
-    means the top-level run finished, not that zero nodes ran. A host that does not want to
-    depend on arrival order reads NukeGetExecutionStateResultSuccess.involved_nodes instead: the
-    engine derives that from the named flow's declared nodes (FlowManager.flow_state), not from
-    event history, so subflow emissions cannot move it.
-
-    The total counts what a flow declares, not what its control path reaches, so a graph with an
-    untaken branch never resolves every node on the list and the ratio of NukeNodeStateEvent
-    `resolved` counts to the list's length can top out below 1.0 on a clean run.
-
-    Execution mode changes none of this. ControlFlowMachine emits with no mode check, and
-    SEQUENTIAL differs from PARALLEL only by clamping max_nodes_in_parallel to 1. The engine's
-    one emitter that grows a set as its DAG builder discovers work is gated on
-    `flow_manager.global_single_node_resolution`, set only by resolve_singular_node, and this
-    protocol exposes no single-node-resolution verb: NukeExecuteWorkflowRequest sends
-    StartFlowRequest and nothing else. A flow whose start node is also its end node emits no
-    non-empty list at all, so a host must tolerate a run it never gets a total for.
-
-    Both the non-empty event and the terminating empty one are dispatched by the engine before
-    NukeExecuteWorkflowRequest's own reply is written: FlowManager.start_flow queues the
-    terminating empty InvolvedNodesEvent immediately after the control-flow machine's own
-    start_flow call returns, and the request handler awaits that same call before building the
-    reply. A host must already be subscribed to this notification, from NukeConnectRequest
-    onward, and read every event it emits during the run; it cannot treat the execute reply as
-    the cue to start reading for a one-time total, since both events for that run may already
-    have passed by the time the reply arrives. A host that reconnects mid-run, or otherwise
-    missed the live stream, reads NukeGetExecutionStateResultSuccess.involved_nodes for the
-    engine's current answer instead.
-
-    Named for the execution it reports on, alongside NukeExecutionStateEvent, rather than the
-    engine's own InvolvedNodesEvent class name. The field keeps the engine's word because it
-    matches NukeGetExecutionStateResultSuccess.involved_nodes, the same question answered
-    polled instead of pushed.
-
-    Not folded into NukeExecuteWorkflowResultSuccess. That reply is written before parallel
-    resolution has necessarily discovered its full node set, and folding this in would cost an
-    extra engine round trip execute does not otherwise need.
+    Events may arrive before NukeExecuteWorkflowRequest returns, so hosts must subscribe before
+    executing. While a run is live, NukeGetExecutionStateResultSuccess.involved_nodes provides
+    the top-level list if an event was missed.
 
     Args:
-        involved_nodes: Nodes participating in the current execution, exactly as
-            NukeGetExecutionStateResultSuccess.involved_nodes reports for a polled read of
-            the same information.
+        involved_nodes: Node names from the engine's InvolvedNodesEvent.
     """
 
     involved_nodes: list[str]

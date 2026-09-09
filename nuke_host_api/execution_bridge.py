@@ -12,13 +12,8 @@ listeners and would never reach the host.
 Eight engine event types collapse into four node states. That ratio is the point: the
 engine is free to add a ninth without the host learning anything new.
 
-A ninth subscription, ``InvolvedNodesEvent``, is not part of that collapse: it carries a
-run's node set, forwarded as ``NukeExecutionNodesEvent`` rather than folded into a node
-state, because it answers a different question (how many nodes, not which state one is in)
-for a different consumer (a progress bar's denominator, not per-node tracking). See
-``NukeExecutionNodesEvent``'s own docstring in ``events.py`` for the naming choice and for
-the timing guarantee a host actually needs: both the informative and the terminating empty
-event for a run are dispatched before ``NukeExecuteWorkflowRequest``'s reply is written.
+``InvolvedNodesEvent`` is forwarded separately as ``NukeExecutionNodesEvent`` because it
+reports a flow's node set, not a node state.
 
 Installed on the first ``NukeConnectRequest`` and torn down when the library unloads. The
 subscription is engine-global, so an engine no host has spoken to should not pay for it;
@@ -192,13 +187,7 @@ class ExecutionBridge:
         )
 
     def _on_involved_nodes(self, event: InvolvedNodesEvent) -> None:
-        """Forward the run's node set as-is.
-
-        No normalization needed: node names, not values, so there is no artifact to
-        normalize and no macro to resolve, unlike ``_on_parameter_value``. ``list()`` copies
-        the engine's list rather than holding a reference to it, matching how the state
-        handler in ``handlers/execution.py`` reads the same field.
-        """
+        """Forward the engine's node list."""
         self._emit(NukeExecutionNodesEvent(involved_nodes=list(event.involved_nodes)))
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:

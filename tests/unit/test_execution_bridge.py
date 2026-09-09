@@ -303,7 +303,6 @@ class TestTranslation:
         assert payload.involved_nodes == ["Start Flow", "Blur", "End Flow"]
 
     def test_involved_nodes_forwards_an_empty_set_too(self, event_manager: FakeEventManager) -> None:
-        """Forwarded faithfully, not interpreted: only the host can tell "done" from "not started"."""
         bridge = ExecutionBridge()
         bridge.install()
         bridge._on_involved_nodes(InvolvedNodesEvent(involved_nodes=[]))

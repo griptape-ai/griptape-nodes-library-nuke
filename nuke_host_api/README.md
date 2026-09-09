@@ -259,41 +259,14 @@ Eight engine execution events collapse into four states (`unresolved`, `running`
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a ninth event
 type without the host learning anything.
 
-`NukeExecutionNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
-`state: "resolved"` is the numerator a host already has; this is the denominator, translated
-from the engine's own `InvolvedNodesEvent`. The engine emits one non-empty list per flow it
-starts, and one empty list when the top-level run finishes. The top-level flow's list arrives
-first, carrying every node that flow declares.
+`NukeExecutionNodesEvent` forwards the engine's node lists for progress tracking. The first
+non-empty list describes the top-level flow. Later lists describe subflows, but contain no
+flow identifier. An empty list marks top-level completion.
 
-Subflows emit too, and this layer cannot label them. A graph holding a `WorkflowNode`, a
-`SubflowNodeGroup`, or a loop node starts an isolated flow per execution, and the engine's
-emission is guarded only by start node against end node, with no isolation check, so each
-subflow adds a non-empty list of its own nodes. The payload is a bare list of node names with no
-flow on it, and a translation callback must not issue engine requests to find out which flow
-sent it.
-
-So the rule is arrival order: the first non-empty list is the run's total, every later non-empty
-list is a nested scope rather than a correction, and the empty one means the top-level run
-finished. A host that does not want to depend on arrival order reads
-`NukeGetExecutionStateResultSuccess.involved_nodes`, which the engine derives from the named
-flow's declared nodes rather than from event history.
-
-The total counts what a flow declares, not what its control path reaches, so a graph with an
-untaken branch never resolves every node on the list and the ratio of resolved counts to its
-length can stay below 1.0 on a clean run. Execution mode changes nothing, and a flow whose start
-node is also its end node emits no non-empty list at all.
-
-Both events for a run are dispatched by the engine before `NukeExecuteWorkflowRequest`'s own
-reply is written, so a host cannot wait for that reply before reading this notification for a
-one-time total: it must already be subscribed from `NukeConnectRequest` onward and read every
-event this notification emits during the run. A host that reconnects mid-run, or otherwise
-missed the live stream, reads `NukeGetExecutionStateResultSuccess.involved_nodes` for the
-engine's current answer instead.
-
-Not a field on `NukeExecuteWorkflowResultSuccess`. That reply is written before parallel
-resolution has necessarily discovered its full node set, and adding an engine round trip there
-to catch up would be one more request paid on every execute for a number this notification
-already reports for free.
+Lists contain declared nodes, including nodes on untaken branches. A flow whose start is also
+its end emits no non-empty list. Events may arrive before `NukeExecuteWorkflowRequest` returns,
+so subscribe before executing. If an event is missed while a run is live,
+`NukeGetExecutionStateResultSuccess.involved_nodes` provides the top-level list.
 
 ### 6. Parameter value changes
 
