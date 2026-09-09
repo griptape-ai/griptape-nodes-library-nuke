@@ -225,19 +225,26 @@ wording, so a rejection reads the same way whether a host got it from setting a 
 from starting a run. `parameter_values.unaddressable_inputs_reason` and
 `parameter_values.apply_inputs` are the two functions that make that sharing real rather than
 two copies of the same allow-list drifting apart; `handlers/execution.py` and
-`handlers/values.py` each supply only their own `attempted` text, failure type, and the one
-sentence of remedy that differs between running the graph as it stands and having nothing left
-to do.
+`handlers/values.py` each supply only their own `attempted` text, failure type, and, if they
+have one, the one sentence naming an alternative when their own inputs turn out to be
+unaddressable. Execute has one: running the graph as it stands needs no inputs at all.
+`NukeSetParameterValuesRequest` does not, and leaves `no_inputs_remedy` unset rather than
+naming a remedy this same verb refuses.
 
-An empty request is refused outright, since setting values is all this verb does: unlike
-execute, where no inputs still means "run the graph as it stands," nothing to set is nothing to
-do. It is also refused while the engine is executing, the same guard `NukeLoadWorkflowRequest`
-and `NukeExecuteWorkflowRequest` apply for a related reason: the engine's own scheduler decides
-when a node's parameter is actually read, so a value set mid-run cannot be told apart from one
-that lands before the node that consumes it or one that lands after, and answering as if it
-landed in time would be a claim this layer cannot verify. A host that wants to stay live with
-the engine sets values between runs; `NukeCancelExecutionRequest` is the way out of a run in
-progress.
+A request with no pair to act on and nothing to reject is refused outright, since setting
+values is all this verb does: unlike execute, where no inputs still means "run the graph as it
+stands," nothing to set is nothing to do. That covers an empty `inputs` and one where every
+named node maps to an empty parameter dict, such as `{"Start Flow": {}}`; either would
+otherwise reach `apply_inputs` and come back a trivial success indistinguishable from a real
+one, with nothing applied and nothing rejected. It is also refused while the engine is
+executing, the same guard `NukeLoadWorkflowRequest` and `NukeExecuteWorkflowRequest` apply for
+a related reason: the engine's own scheduler decides when a node's parameter is actually read,
+so a value set mid-run cannot be told apart from one that lands before the node that consumes
+it or one that lands after, and answering as if it landed in time would be a claim this layer
+cannot verify. A host that wants to stay live with the engine sets values between runs;
+`NukeCancelExecutionRequest` is the way out of a run in progress. Both refusals read the loaded
+workflow's id before returning, so `NukeSetParameterValuesResultFailure.workflow_id` is never
+empty merely because a refusal happened before this handler would otherwise have looked.
 
 ### 5. Node execution changes
 

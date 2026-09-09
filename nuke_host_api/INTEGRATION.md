@@ -895,7 +895,7 @@ an artist edits a knob rather than only diverging locally until the next
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
-| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values. Empty is refused, not answered as a trivial success |
+| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values. A request with no pair to act on is refused, not answered as a trivial success: that covers an empty `inputs` and one where every node maps to an empty parameter dict |
 
 | `NukeSetParameterValuesResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -930,11 +930,15 @@ Same allow-list, same two host-side rejection reasons, and the same rule that a 
 not a failure of the request, as `NukeExecuteWorkflowRequest`: see that verb's section above
 for `"Expected an object of parameters."`, `"Not a declared input parameter of this
 workflow."`, and how the engine's own reason for refusing a declared pair reaches the host.
-Sending no inputs at all is refused here, unlike execute, because there is nothing else for
-this verb to do; `NukeExecuteWorkflowRequest` treats empty inputs as "run the graph as it
-stands." A loaded graph that declares no input parameters, a registry the engine cannot read,
-and a loaded id no longer in the registry are refused the same three ways execute refuses
-them.
+Sending a request with no pair to act on is refused here, unlike execute, because there is
+nothing else for this verb to do; `NukeExecuteWorkflowRequest` treats empty inputs as "run the
+graph as it stands." A loaded graph that declares no input parameters, and a registry the
+engine cannot read, are refused the same two causes execute refuses them for, worded without
+the fallback execute offers: `NukeExecuteWorkflowRequest`'s versions of these two refusals end
+with "or send no inputs to run the graph as it stands," and this verb's do not, since sending
+no inputs is exactly what this verb's own empty-request refusal turns away. A loaded id no
+longer in the registry is refused the same third way execute refuses it, unchanged, since that
+refusal never named a fallback either way.
 
 Refused while the engine is executing. The engine's own scheduler decides when a node's
 parameter is actually read, so a value set mid-run cannot be told apart from one that lands

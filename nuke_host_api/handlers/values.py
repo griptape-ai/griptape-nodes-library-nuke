@@ -89,22 +89,36 @@ def handle_set_parameter_values(
     so a rejection reads the same way whether a host got it from setting a value live or from
     starting a run.
 
-    Refuses an empty request outright: unlike execute, where no inputs still means "run the
-    graph as it stands," this verb sets values and nothing else, so nothing to set is nothing
-    to do. Also refuses while the engine is executing. The engine's own scheduler decides when
+    Refuses a request with no pair to act on and nothing to reject: unlike execute, where no
+    inputs still means "run the graph as it stands," this verb sets values and nothing else, so
+    nothing to set is nothing to do. That covers an empty ``inputs`` and one where every named
+    node maps to an empty parameter dict, such as ``{"Start Flow": {}}``; either would otherwise
+    reach ``apply_inputs`` and come back a trivial, indistinguishable-from-real success with
+    nothing applied and nothing rejected. A node mapped to something that is not a dict is not
+    covered by this refusal, since ``apply_inputs`` has a rejection to report for it.
+
+    Also refuses while the engine is executing. The engine's own scheduler decides when
     a node's parameter is actually read, so a value set mid-run cannot be told apart from one
     that lands before the node that consumes it or one that lands after, and this layer must
     not answer as if it knows which. A host that wants to stay live with the engine sets
     values between runs; ``NukeCancelExecutionRequest`` is the way out of a run in progress.
+
+    ``current_workflow_id`` is read before either refusal, not after, so a host reading
+    ``NukeSetParameterValuesResultFailure.workflow_id`` can always tell a busy or empty-request
+    refusal against a loaded graph apart from one where nothing is loaded at all, the same
+    distinction ``NukeGetExecutionStateResultSuccess.workflow_id`` makes.
     """
     attempted = "to set parameter values on the loaded workflow"
+    loaded_id = engine.current_workflow_id()
 
-    if not request.inputs:
+    nothing_to_act_on = all(isinstance(parameters, dict) and not parameters for parameters in request.inputs.values())
+    if nothing_to_act_on:
         return failure(
             NukeSetParameterValuesResultFailure,
             attempted=attempted,
             because="no values were given, so there is nothing to set.",
             error=ValueError,
+            workflow_id=loaded_id,
         )
 
     if engine.is_running():
@@ -116,9 +130,9 @@ def handle_set_parameter_values(
                 "arrives in time for the node that reads it or one that arrives too late. Wait for the current "
                 "run to finish, or cancel it with NukeCancelExecutionRequest, then retry."
             ),
+            workflow_id=loaded_id,
         )
 
-    loaded_id = engine.current_workflow_id()
     if not loaded_id:
         return failure(
             NukeSetParameterValuesResultFailure,
@@ -129,9 +143,7 @@ def handle_set_parameter_values(
     found = engine.lookup_workflow(loaded_id)
     declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
 
-    refusal = parameter_values.unaddressable_inputs_reason(
-        loaded_id, found, declared, no_inputs_remedy="send no values, since there is nothing else to do"
-    )
+    refusal = parameter_values.unaddressable_inputs_reason(loaded_id, found, declared)
     if refusal is not None:
         return failure(
             NukeSetParameterValuesResultFailure,

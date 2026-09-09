@@ -108,10 +108,8 @@ def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list[dict[
 class InputRefusal(NamedTuple):
     """Why a verb's declared-input allow-list could not be built, and how to word the refusal.
 
-    Named rather than a bare ``tuple[str, type[Exception]]`` so ``unaddressable_inputs_reason``'s
-    two callers can read ``refusal.because`` and ``refusal.error`` instead of trusting return
-    order; unpacking as ``because, error = refusal`` still works, since a ``NamedTuple`` is
-    still a tuple.
+    ``because`` is the reason text, ``error`` the exception type a caller's own ``failure``
+    call should raise it with.
     """
 
     because: str
@@ -119,7 +117,11 @@ class InputRefusal(NamedTuple):
 
 
 def unaddressable_inputs_reason(
-    loaded_id: str, found: engine.WorkflowLookup, declared: set[tuple[str, str]], *, no_inputs_remedy: str
+    loaded_id: str,
+    found: engine.WorkflowLookup,
+    declared: set[tuple[str, str]],
+    *,
+    no_inputs_remedy: str | None = None,
 ) -> InputRefusal | None:
     """Diagnose why declared inputs could not be checked against the loaded workflow.
 
@@ -127,21 +129,27 @@ def unaddressable_inputs_reason(
     verbs that forward a host's ``{node: {parameter: value}}`` through this allow-list. All
     three causes leave the same empty allow-list behind for unrelated reasons, and each sends
     a host somewhere different: retry the registry, load the workflow again, or fall back to
-    ``no_inputs_remedy``. That remedy is the one piece of wording each caller supplies for
-    itself, because it is the only place the two verbs actually differ: execute still has a
-    graph to run as it stands, and set-values has nothing left to do at all.
+    ``no_inputs_remedy``.
+
+    ``no_inputs_remedy`` is the one alternative a caller can still offer once its own inputs
+    turn out to be unaddressable, appended to the registry-unreadable and no-declared-inputs
+    sentences as "...it. Retry, or {remedy}." and "...by id, or {remedy}.". Execute has one:
+    running the graph as it stands needs no inputs at all. ``NukeSetParameterValuesRequest``
+    does not: setting values is all it does, and it already refuses an empty request, so
+    naming that as its own remedy would send a host straight into the other refusal. Leave
+    ``no_inputs_remedy`` unset for a caller with nothing to offer; both sentences end after
+    "Retry." and "...by id." instead.
 
     Returns an ``InputRefusal`` naming the reason text and the exception type a caller's own
     ``failure`` call should raise with it, or None when nothing is wrong and the caller may
-    forward inputs. A named tuple rather than a bare one, so a caller reading
-    ``refusal.because`` or ``refusal.error`` does not have to hold this function's field order
-    in its head; unpacking as ``because, error = refusal`` still works.
+    forward inputs.
     """
     if not found.registry_readable:
+        retry_clause = "Retry." if no_inputs_remedy is None else f"Retry, or {no_inputs_remedy}."
         return InputRefusal(
             because=(
                 f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
-                f"unknown and the inputs sent could not be checked against it. Retry, or {no_inputs_remedy}."
+                f"unknown and the inputs sent could not be checked against it. {retry_clause}"
             ),
             error=RuntimeError,
         )
@@ -160,11 +168,12 @@ def unaddressable_inputs_reason(
     # no declared shape. Reachable only with an entry actually found, which is the case this
     # message describes.
     if not declared:
+        alternative_clause = "." if no_inputs_remedy is None else f", or {no_inputs_remedy}."
         return InputRefusal(
             because=(
                 f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
                 f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
-                f"it and load it by id, or {no_inputs_remedy}."
+                f"it and load it by id{alternative_clause}"
             ),
             error=RuntimeError,
         )

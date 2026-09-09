@@ -170,6 +170,19 @@ class TestSetParameterValues:
 
         assert isinstance(result, NukeSetParameterValuesResultFailure)
         assert "nothing to set" in str(result.result_details)
+        assert result.workflow_id == "wf1", "a workflow is loaded, so the refusal must say which one"
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
+
+    def test_a_node_mapped_to_an_empty_parameter_dict_is_refused_the_same_way_as_no_inputs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """{"Start Flow": {}} has no pair to act on and none to reject: a trivial success too."""
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert "nothing to set" in str(result.result_details)
         assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
 
     def test_refuses_while_the_engine_is_executing(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,6 +201,7 @@ class TestSetParameterValues:
         result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}}))
 
         assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert result.workflow_id == "wf1", "busy must not read the same as nothing loaded"
         assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
 
     def test_fails_when_nothing_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,7 +243,11 @@ class TestSetParameterValues:
 
         assert isinstance(result, NukeSetParameterValuesResultFailure)
         assert result.workflow_id == "unsaved:9f0c"
-        assert "declares no input parameters" in str(result.result_details)
+        details = str(result.result_details)
+        assert "declares no input parameters" in details
+        assert details.endswith("save it and load it by id."), (
+            "no dead-end remedy: this verb refuses an empty request too"
+        )
         assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
 
     def test_an_unreadable_registry_is_a_retryable_refusal(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,4 +261,7 @@ class TestSetParameterValues:
         assert isinstance(result, NukeSetParameterValuesResultFailure)
         details = str(result.result_details)
         assert "could not read the workflow registry" in details
+        assert details.endswith("could not be checked against it. Retry."), (
+            "no dead-end remedy: this verb refuses an empty request too"
+        )
         assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)

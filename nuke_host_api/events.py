@@ -429,9 +429,10 @@ class NukeSetParameterValuesRequest(RequestPayload):
         inputs: ``{node_name: {parameter_name: value}}``. Values are plain JSON. The same
             shape and the same allow-list ``NukeExecuteWorkflowRequest.inputs`` uses: only
             pairs ``NukeDescribeWorkflowRequest`` declared as inputs are accepted, anything
-            else is reported in ``rejected_inputs`` rather than silently dropped. Empty is
-            refused rather than answered as a trivial success, since there is nothing else
-            this request does.
+            else is reported in ``rejected_inputs`` rather than silently dropped. A request
+            with no pair to act on is refused rather than answered as a trivial success, since
+            there is nothing else this request does: that covers an empty ``inputs`` and one
+            where every node maps to an empty parameter dict, such as ``{"Start Flow": {}}``.
     """
 
     inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
