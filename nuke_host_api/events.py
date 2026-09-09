@@ -421,6 +421,74 @@ class NukeGetParameterValuesResultFailure(WorkflowNotAlteredMixin, ResultPayload
 
 @dataclass
 @PayloadRegistry.register
+class NukeSetParameterValuesRequest(RequestPayload):
+    """Set the loaded workflow's declared input values, without starting a run.
+
+    The write half of ``NukeGetParameterValuesRequest``, for a host that wants to stay live
+    with the engine as an artist edits a knob, rather than only diverging locally until the
+    next ``NukeExecuteWorkflowRequest``. Loaded-state-addressed like the read verb, so it
+    takes no ``workflow_id``: a value can only be set on a node that exists, and the only
+    node that exists is whatever ``NukeLoadWorkflowRequest`` most recently loaded.
+
+    Refused while the engine is executing, for the same reason ``NukeLoadWorkflowRequest`` and
+    ``NukeExecuteWorkflowRequest`` refuse mid-run: the engine's own scheduler decides when a
+    node's parameter is actually read, so a value set while it is running cannot be told apart
+    from one that lands before the node that consumes it or one that lands after. Answering as
+    if it landed in time would be a claim this layer cannot verify. Cancel with
+    ``NukeCancelExecutionRequest`` first, or wait for the run to finish, then retry.
+
+    Args:
+        inputs: ``{node_name: {parameter_name: value}}``. Values are plain JSON. The same
+            shape and the same allow-list ``NukeExecuteWorkflowRequest.inputs`` uses: only
+            pairs ``NukeDescribeWorkflowRequest`` declared as inputs are accepted, anything
+            else is reported in ``rejected_inputs`` rather than silently dropped. A request
+            with no pair to act on is refused rather than answered as a trivial success, since
+            there is nothing else this request does: that covers an empty ``inputs`` and one
+            where every node maps to an empty parameter dict, such as ``{"Start Flow": {}}``.
+    """
+
+    inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeSetParameterValuesResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """Values applied to the loaded graph.
+
+    Args:
+        workflow_id: The workflow the values were applied to, so a host that reads this after
+            a reconnect can confirm it matches what it expected.
+        applied_inputs: Entries of ``{node, parameter}`` accepted and set on the graph.
+        rejected_inputs: Entries of ``{node, parameter, reason}``, worded exactly as
+            ``NukeExecuteWorkflowResultSuccess.rejected_inputs`` words the same two causes: a
+            pair this layer turned away itself, before any request, and a declared pair the
+            engine itself refused after it was forwarded.
+    """
+
+    workflow_id: str
+    applied_inputs: list[dict[str, str]]
+    rejected_inputs: list[dict[str, str]]
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeSetParameterValuesResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """Nothing was set.
+
+    Covers an empty request, a run in progress, nothing loaded, a registry the engine could
+    not read, a loaded id no longer in the registry, and a loaded graph that declares no input
+    parameters. The same causes ``NukeExecuteWorkflowResultFailure`` reports, minus the ones
+    that only make sense once a run has actually started.
+
+    Args:
+        workflow_id: The loaded workflow's id, or empty when none is loaded.
+    """
+
+    workflow_id: str = ""
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeCancelExecutionRequest(RequestPayload):
     """Ask the engine to stop what it is executing."""
 
