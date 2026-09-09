@@ -768,7 +768,7 @@ class NukeParameterValueEvent(AppPayload):
 
 @dataclass
 @PayloadRegistry.register
-class NukeInvolvedNodesEvent(AppPayload):
+class NukeExecutionNodesEvent(AppPayload):
     """The run's node set: the denominator a host pairs with NukeNodeStateEvent's numerator.
 
     Translates the engine's InvolvedNodesEvent, which is not one-shot and is not monotonic.
@@ -779,6 +779,16 @@ class NukeInvolvedNodesEvent(AppPayload):
     builder discovers work, so the set legitimately grows mid-run: a host drawing a
     fixed-size progress bar must handle the total increasing, not only nodes being checked
     off a total fixed at the first event.
+
+    Named for the execution it reports on, alongside NukeExecutionStateEvent, rather than
+    reusing the engine's own InvolvedNodesEvent class name verbatim: every other event this
+    layer translates already renames or collapses the engine's vocabulary (NodeStartProcessEvent
+    and four siblings become NukeNodeStateEvent's state enum; ParameterValueUpdateEvent drops
+    "Update"), and carrying the engine's class name unchanged here would be the one exception.
+    The field underneath keeps the engine's word regardless: it is named to match
+    NukeGetExecutionStateResultSuccess.involved_nodes exactly, a tie this docstring's Args
+    entry calls out on purpose, and renaming one without the other would break that parity
+    instead of clarifying anything.
 
     Not folded into NukeExecuteWorkflowResultSuccess. That reply is written once, when the
     flow has just started and, for parallel resolution, before the engine has necessarily

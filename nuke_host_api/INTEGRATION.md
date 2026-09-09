@@ -29,7 +29,7 @@ has been compiled against this version, so the surface can still change.
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeInvolvedNodesEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Parameter sections | `inputs`, `outputs` |
@@ -1196,11 +1196,15 @@ the first terminal state received as authoritative and ignore a later one for th
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the parameters
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetParameterValuesRequest`.
 
-### NukeInvolvedNodesEvent
+### NukeExecutionNodesEvent
 
 The progress bar's denominator. `NukeNodeStateEvent` with `state: "resolved"` is the
 numerator a host already tracks per node; this notification, translated from the engine's own
-`InvolvedNodesEvent`, is the run's node set.
+`InvolvedNodesEvent`, is the run's node set. Named for the execution it reports on rather than
+for the engine's own event class, matching `NukeExecutionStateEvent`; the field underneath
+keeps the engine's word because it is deliberately the same field name
+`NukeGetExecutionStateResultSuccess.involved_nodes` already uses for a polled read of the same
+information.
 
 | Field | Type | Notes |
 |---|---|---|

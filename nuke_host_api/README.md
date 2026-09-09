@@ -259,7 +259,7 @@ Eight engine execution events collapse into four states (`unresolved`, `running`
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a ninth event
 type without the host learning anything.
 
-`NukeInvolvedNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
+`NukeExecutionNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
 `state: "resolved"` is the numerator a host already has; this is the denominator, translated
 from the engine's own `InvolvedNodesEvent`. It is not a single snapshot: for a serial control
 flow the engine reports every participating node when a run starts and reports an empty list

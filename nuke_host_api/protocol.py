@@ -111,7 +111,7 @@ class Notification:
     NODE_STATE = "NukeNodeStateEvent"
     PARAMETER_VALUE = "NukeParameterValueEvent"
     EXECUTION_STATE = "NukeExecutionStateEvent"
-    INVOLVED_NODES = "NukeInvolvedNodesEvent"
+    EXECUTION_NODES = "NukeExecutionNodesEvent"
 
 
 # Node lifecycle, collapsed from the engine's finer-grained execution events.

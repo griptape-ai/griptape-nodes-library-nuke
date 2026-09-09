@@ -13,9 +13,13 @@ Eight engine event types collapse into four node states. That ratio is the point
 engine is free to add a ninth without the host learning anything new.
 
 A ninth subscription, ``InvolvedNodesEvent``, is not part of that collapse: it carries a
-run's node set, forwarded as ``NukeInvolvedNodesEvent`` rather than folded into a node
+run's node set, forwarded as ``NukeExecutionNodesEvent`` rather than folded into a node
 state, because it answers a different question (how many nodes, not which state one is in)
-for a different consumer (a progress bar's denominator, not per-node tracking).
+for a different consumer (a progress bar's denominator, not per-node tracking). Named to sit
+beside ``NukeExecutionStateEvent`` rather than reusing the engine's own class name verbatim,
+since every other translated event in this module already renames or collapses the engine's
+vocabulary instead of forwarding it; see ``NukeExecutionNodesEvent``'s own docstring in
+``events.py`` for why the field underneath keeps the engine's word.
 
 Installed on the first ``NukeConnectRequest`` and torn down when the library unloads. The
 subscription is engine-global, so an engine no host has spoken to should not pay for it;
@@ -55,8 +59,8 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from nuke_host_api.events import (
+    NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
-    NukeInvolvedNodesEvent,
     NukeNodeStateEvent,
     NukeParameterValueEvent,
 )
@@ -138,7 +142,7 @@ class ExecutionBridge:
 
     def _emit(
         self,
-        payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent | NukeInvolvedNodesEvent,
+        payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent | NukeExecutionNodesEvent,
     ) -> None:
         """Queue a host notification for broadcast over every IPC transport."""
         GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
@@ -196,7 +200,7 @@ class ExecutionBridge:
         the engine's list rather than holding a reference to it, matching how the state
         handler in ``handlers/execution.py`` reads the same field.
         """
-        self._emit(NukeInvolvedNodesEvent(involved_nodes=list(event.involved_nodes)))
+        self._emit(NukeExecutionNodesEvent(involved_nodes=list(event.involved_nodes)))
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:
         """Report that the engine finished the flow, without reading any values or claiming an outcome.
