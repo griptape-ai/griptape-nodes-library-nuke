@@ -24,8 +24,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("griptape_nodes")
 
-# Same icon reference the library JSON gives every Nuke node, so the publish target
-# reads as belonging to this library rather than picking a generic Lucide glyph.
 PUBLISH_TARGET_ICON = "logos/nuke.png"
 
 
@@ -42,8 +40,6 @@ def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
 
 
 class NukeLibraryAdvanced(AdvancedNodeLibrary):
-    """Advanced library implementation for the Nuke Nodes Library."""
-
     def before_library_nodes_loaded(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
         msg = f"Starting to load nodes for '{library_data.name}' library..."
         logger.info(msg)
@@ -65,21 +61,13 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
             ),
         )
 
-        # Host API request types are wired by get_request_handlers() below. The outbound
-        # event bridge is not installed here: its subscription is engine-global, so it waits
-        # for a host to actually connect. See execution_bridge.ensure_installed.
+        # The engine-global event bridge waits for a host connection.
         logger.info("Nuke host API ready on protocol version %d", PROTOCOL_VERSION)
 
     def before_library_unregistered(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
-        # The engine deregisters request handlers automatically, but execution event
-        # listeners are ours to remove. Skipping this leaves the previous bridge subscribed
-        # after a reload, and a host then receives every notification twice. A no-op when no
-        # host ever connected.
+        # The engine does not deregister execution listeners on reload.
         uninstall_host_api_bridge()
-        # The version read is cached for the process lifetime, but a library reload without a
-        # process restart is a real, handled scenario in this same lifecycle (that is why the
-        # bridge above needs an explicit uninstall). An in-place library upgrade must not keep
-        # serving the pre-upgrade version to a host that connects after the reload.
+        # A reload may replace the manifest without restarting the process.
         library_version.reset()
 
     def get_request_handlers(
@@ -90,13 +78,5 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
             Callable[[RequestPayload], ResultPayload] | Callable[[RequestPayload], Awaitable[ResultPayload]],
         ]
     ]:
-        """Return the host API verbs the engine should route to this library.
-
-        Singleton per request type engine-wide, and registered in the orchestrator process
-        only. A worker-mode library's handlers are not forwarded, and requests would fail
-        with "No manager found".
-
-        The table itself lives beside the handlers, so adding a verb does not touch this
-        module.
-        """
+        """Register each host verb once in the orchestrator; worker handlers are not forwarded."""
         return list(ROUTES)

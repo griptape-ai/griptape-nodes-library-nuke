@@ -261,11 +261,7 @@ been sent separately. There is no batched reply to wait for.
 `EventRequestBatch` belongs to the engine's own wire envelope
 (`retained_mode/events/base_events.py`), not to this protocol: it appears in neither the `Verb`
 list nor the Bound surface table, so its shape can change without a `PROTOCOL_VERSION` bump.
-The shape above is read from the envelope's `dict()`/`from_dict()` contract and has not been
-exercised through `websocket_direct`. A host that uses it must tolerate engine-level changes
-to the envelope. It is worth that for a plugin wanting several verbs answered in one network
-round trip, for example reading parameter values and execution state on a single poll tick,
-instead of one WebSocket message per verb.
+The shape above comes from the envelope's `dict()`/`from_dict()` contract and has not been exercised through `websocket_direct`. A host must tolerate engine-level envelope changes. Batching can answer several verbs in one network round trip, such as reading parameter values and execution state on one poll tick.
 
 ### Results
 
@@ -573,10 +569,7 @@ workflows; neither is refused too.
 | `output_values` | `dict` | Same shape, end-flow side. Carries real values for a workflow that has run before, empty descriptors for one that has not |
 | `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not read. Reported, not omitted |
 
-Four fields rather than two because a parameter's declaration and its current value are
-different questions: the declaration is fixed for the workflow, the value changes on every
-run. Both shapes are ones a host already parses from describe and from the bulk read verb, so
-there is nothing new to write.
+Four fields separate declarations, which are fixed for the workflow, from values, which change on every run. Their shapes match the describe and bulk-read verbs.
 
 **Initialize knobs from `input_values`, not from a descriptor's `default`.** `default` is the
 workflow author's value; `input_values` is what the graph currently holds. They differ for any

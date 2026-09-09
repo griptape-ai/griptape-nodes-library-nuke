@@ -1,27 +1,4 @@
-"""Live smoke tests for the Nuke host API, run against a real engine over local_socket.
-
-Covers the capabilities a host needs, in the order a plugin performs them: discovery,
-connect, interrogate the start and end flow, load, execute. Everything the unit suite proves
-with mocks is proved here against the real engine instead, because the unit suite cannot catch
-a wrong frame envelope, a workflow_shape that arrives as a JSON string, or a notification that
-never gets pushed.
-
-Every execution test loads first. Execute starts the loaded graph and loads nothing, so a test
-that skipped the load would run whatever the last test or an editor user left behind.
-
-Prerequisites, and the tests say so when they are missing rather than passing quietly:
-
-1. `local_socket` enabled in the engine config, and the engine restarted. See
-   `nuke_host_api/INTEGRATION.md`.
-2. This library registered in that engine.
-3. At least one runnable workflow with a Start Flow and End Flow pair. Name a specific one
-   with GRIPTAPE_NODES_SMOKE_WORKFLOW, otherwise the first runnable one is used.
-
-    make test/integration/host-api
-
-A skipped execution test means this run proved nothing about execution. Read the skip
-reasons, do not read a green summary.
-"""
+"""Live host API smoke tests over a real engine's local socket."""
 
 from __future__ import annotations
 
@@ -76,17 +53,7 @@ def engine() -> Engine:
 
 @pytest.fixture
 def client(engine: Engine) -> Iterator[HostClient]:
-    """A connected client that leaves the engine idle behind it.
-
-    Performs the connect handshake, because notifications begin at connect: the event bridge
-    installs there rather than at library load, so a client that skipped it would receive
-    replies and no events. Doing it here also means no test depends on an earlier test
-    having connected first.
-
-    Teardown cancels anything still running. Execute refuses to start over a run in
-    progress, so one test leaving a flow live would fail every later one for a reason that
-    has nothing to do with what they assert.
-    """
+    """Connect before each test and cancel any execution during teardown."""
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
             Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
@@ -128,11 +95,7 @@ def _smoke_workflow_id(client: HostClient) -> str:
 
 
 def _load_smoke_workflow(client: HostClient) -> dict[str, Any]:
-    """Load the smoke workflow and hand back the reply body.
-
-    Every execution test starts here, because execute no longer loads: it starts whatever the
-    engine holds, so a test that did not load would assert against a graph it did not choose.
-    """
+    """Load explicitly because execute runs the current graph without loading."""
     workflow_id = _smoke_workflow_id(client)
     reply = client.request(Verb.LOAD_WORKFLOW, {"workflow_id": workflow_id})
     assert succeeded(reply), f"load failed: {detail_of(reply)}"
@@ -141,12 +104,8 @@ def _load_smoke_workflow(client: HostClient) -> dict[str, Any]:
     return body
 
 
-# 1. Engine discovery
-
-
 class TestDiscovery:
     def test_the_registry_lists_engines_and_resolves_a_socket_path_per_engine(self) -> None:
-        """Discovery must work with no connection, since it is what finds one."""
         engines = discover()
         assert engines, f"no engines in {engines_registry_path()}"
         for entry in engines:
@@ -157,9 +116,6 @@ class TestDiscovery:
     def test_a_running_engine_is_identified_by_its_socket_existing(self, engine: Engine) -> None:
         assert engine.running
         assert engine.name, "an engine needs a label a host can show an artist"
-
-
-# 2. Connect
 
 
 class TestConnect:
@@ -199,9 +155,6 @@ class TestConnect:
             {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
         )
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
-
-
-# 3. Interrogate the start and end flow
 
 
 class TestDescribe:
@@ -252,9 +205,6 @@ class TestDescribe:
         reply = client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": "does-not-exist"})
         assert not succeeded(reply)
         assert detail_of(reply), "a failure must carry a message an artist can read"
-
-
-# 4. Load
 
 
 class TestLoad:
@@ -308,9 +258,6 @@ class TestLoad:
         reply = client.request(Verb.LOAD_WORKFLOW, {})
         assert not succeeded(reply)
         assert detail_of(reply)
-
-
-# 5. Execute
 
 
 class TestExecute:

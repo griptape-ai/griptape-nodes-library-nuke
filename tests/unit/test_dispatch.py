@@ -1,5 +1,3 @@
-"""Tests for the handler calling convention."""
-
 from __future__ import annotations
 
 import pytest
@@ -25,8 +23,6 @@ class TestVerb:
         assert str(result.result_details) == "Nuke 16.0v7"
 
     def test_a_wrong_request_type_raises(self) -> None:
-        """Guards against a registry mix-up routing the wrong payload to a handler."""
-
         @verb(NukeConnectRequest)
         def handler(request: NukeConnectRequest) -> ResultPayload:  # noqa: ARG001
             msg = "must not be reached"
@@ -36,8 +32,6 @@ class TestVerb:
             handler(NukeListWorkflowsRequest())
 
     def test_the_class_itself_is_not_an_instance(self) -> None:
-        """The engine hands over instances; a class arriving here means a caller passed the type."""
-
         @verb(NukeConnectRequest)
         def handler(request: NukeConnectRequest) -> ResultPayload:  # noqa: ARG001
             msg = "must not be reached"
@@ -47,8 +41,6 @@ class TestVerb:
             handler(NukeConnectRequest)  # type: ignore[arg-type]
 
     def test_the_handler_keeps_its_identity(self) -> None:
-        """The engine logs these by name, so the wrapper must not rename them."""
-
         @verb(NukeConnectRequest)
         def handle_something(request: RequestPayload) -> ResultPayload:  # noqa: ARG001
             return NukeListWorkflowsResultFailure(result_details="")

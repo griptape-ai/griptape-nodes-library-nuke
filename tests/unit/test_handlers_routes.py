@@ -1,9 +1,4 @@
-"""Tests for the routing table.
-
-A verb declared in protocol.py and never routed answers nothing at all, with no import
-error to show for it. The engine's handler table is keyed by request type, so a missing or
-duplicated entry here is silent at load and only visible when a host asks.
-"""
+"""Guards the routing table against omissions and duplicates."""
 
 from __future__ import annotations
 
@@ -18,7 +13,6 @@ def test_every_verb_is_routed_to_a_handler() -> None:
 
 
 def test_no_request_type_is_routed_twice() -> None:
-    """PayloadRegistry is keyed by name and the engine keeps one handler per type."""
     routed = [request_type for request_type, _ in handlers.ROUTES]
 
     assert len(routed) == len(set(routed))

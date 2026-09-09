@@ -1,26 +1,4 @@
-"""Stdlib host client for the Nuke host API, used by the integration smoke tests.
-
-This is a test harness, not a shipped reference client, but it is the smallest complete
-implementation of what a Nuke plugin must do and the transport half is worth porting
-verbatim:
-
-  discover()          read engines.json, resolve a socket path, treat its existence as liveness
-  HostClient.request  send one request, pump frames until the matching request_id returns
-  HostClient.drain    collect pushed notifications while sending nothing
-
-Stdlib only (socket, json, uuid), so the smoke tests add no dependency and nothing here can
-rely on something a C++ plugin could not do.
-
-The pump is the part a request-response helper gets wrong. Results and notifications share
-one socket, so a client that reads until it finds its reply and discards the rest silently
-loses every event.
-
-A real plugin needs a dedicated reader thread. This harness is single-threaded and gets away
-with it only because tests are short: the engine's fan-out holds a lock across every client
-and writes serially, so a client that stops reading long enough to fill its socket buffer
-either stalls delivery for everyone or is dropped from the broadcast set, after which it
-receives nothing further, replies included, while its read side stays open.
-"""
+"""Local-socket client for host API smoke tests."""
 
 from __future__ import annotations
 
@@ -54,7 +32,6 @@ def engines_registry_path() -> Path:
 
 
 def socket_path_for(engine_id: str) -> str:
-    """Return the platform socket path for an engine id."""
     if sys.platform == "win32":
         return f"\\\\.\\pipe\\griptape_nodes_{engine_id}"
     return str(_xdg_data_home() / "griptape_nodes" / "ipc" / f"{engine_id}.sock")
@@ -62,8 +39,6 @@ def socket_path_for(engine_id: str) -> str:
 
 @dataclass
 class Engine:
-    """One registry entry, plus where to reach it."""
-
     id: str
     name: str
     socket_path: str
@@ -76,11 +51,6 @@ class Engine:
 
 
 def discover() -> list[Engine]:
-    """Return every registered engine, running or not.
-
-    Off the wire entirely. A host has no connection yet, so nothing here may issue a request
-    to find out where to connect.
-    """
     registry = engines_registry_path()
     if not registry.exists():
         return []

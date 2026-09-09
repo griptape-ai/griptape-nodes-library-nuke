@@ -177,7 +177,6 @@ def workflow_entry(workflow_id: str) -> dict | None:
 
 
 def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:
-    """Read one flow's execution state."""
     return request(GetFlowStateRequest(flow_name=flow_name), GetFlowStateResultSuccess)
 
 
@@ -191,7 +190,6 @@ def flow_is_running(state: GetFlowStateResultSuccess) -> bool:
 
 
 def is_running() -> bool:
-    """Report whether the engine is mid-execution."""
     flow_name = top_level_flow_name()
     if flow_name is None:
         return False
