@@ -38,7 +38,9 @@ const Store = (function () {
       currentProject: null,
       describedProject: null,
       projectChoice: "",
-      includeSystemBuiltins: Boolean(saved.includeSystemBuiltins),
+      // On by default: the current project is usually the system defaults, and a switch list that
+      // omits it cannot show what the engine is on.
+      includeSystemBuiltins: saved.includeSystemBuiltins !== false,
       projectNote: "",
       // workflows
       workflows: [],
