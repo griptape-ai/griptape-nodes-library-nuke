@@ -24,15 +24,19 @@ from nuke_host_api.protocol import ExecutionState
 
 
 @verb(NukeExecuteWorkflowRequest)
-def handle_execute_workflow(
+async def handle_execute_workflow(
     request: NukeExecuteWorkflowRequest,
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
-    """Refuse concurrent runs because engine events carry no execution ID."""
+    """Refuse concurrent runs because engine events carry no execution ID.
+
+    The engine's StartFlowRequest resolves when the flow does, so this result reports a run
+    that already ended. Progress is the notification stream, not this reply.
+    """
     attempted = (
         f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
     )
 
-    if engine.is_running():
+    if await engine.is_running():
         return failure(
             NukeExecuteWorkflowResultFailure,
             attempted=attempted,
@@ -43,7 +47,7 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    loaded_id = engine.current_workflow_id()
+    loaded_id = await engine.current_workflow_id()
     if not loaded_id:
         return failure(
             NukeExecuteWorkflowResultFailure,
@@ -64,7 +68,7 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    found = engine.lookup_workflow(loaded_id)
+    found = await engine.lookup_workflow(loaded_id)
     declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
 
     # Shapeless graphs remain executable when no inputs need validation.
@@ -81,9 +85,9 @@ def handle_execute_workflow(
                 workflow_id=loaded_id,
             )
 
-    applied, rejected = parameter_values.apply_inputs(request.inputs, declared)
+    applied, rejected = await parameter_values.apply_inputs(request.inputs, declared)
 
-    flow_name = engine.top_level_flow_name()
+    flow_name = await engine.top_level_flow_name()
     if flow_name is None:
         return failure(
             NukeExecuteWorkflowResultFailure,
@@ -92,32 +96,32 @@ def handle_execute_workflow(
             workflow_id=loaded_id,
         )
 
-    started = engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
+    started = await engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
     if started.value is None:
         return failure(
             NukeExecuteWorkflowResultFailure,
             attempted=attempted,
-            because=f"the engine would not start the flow. {started.details}",
+            because=f"the engine would not run the flow. {started.details}",
             workflow_id=loaded_id,
         )
 
     return NukeExecuteWorkflowResultSuccess(
         workflow_id=loaded_id,
-        state=ExecutionState.RUNNING,
+        state=ExecutionState.COMPLETED,
         applied_inputs=applied,
         rejected_inputs=rejected,
-        result_details=f"Started workflow '{loaded_id}'.",
+        result_details=f"Ran workflow '{loaded_id}'.",
     )
 
 
 @verb(NukeGetExecutionStateRequest)
-def handle_get_execution_state(
+async def handle_get_execution_state(
     request: NukeGetExecutionStateRequest,  # noqa: ARG001
 ) -> NukeGetExecutionStateResultSuccess | NukeGetExecutionStateResultFailure:
     """Read live flow state so reconnects do not depend on missed notifications."""
     attempted = "to read the engine's execution state"
 
-    flow_name = engine.top_level_flow_name()
+    flow_name = await engine.top_level_flow_name()
     if flow_name is None:
         return failure(
             NukeGetExecutionStateResultFailure,
@@ -125,7 +129,7 @@ def handle_get_execution_state(
             because="no workflow is loaded, so there is no flow to report on. Load one with NukeLoadWorkflowRequest.",
         )
 
-    state = engine.flow_state(flow_name)
+    state = await engine.flow_state(flow_name)
     if state.value is None:
         return failure(
             NukeGetExecutionStateResultFailure,
@@ -137,7 +141,7 @@ def handle_get_execution_state(
     involved = list(state.value.involved_nodes)
     running = engine.flow_is_running(state.value)
 
-    workflow_id = engine.current_workflow_id()
+    workflow_id = await engine.current_workflow_id()
 
     return NukeGetExecutionStateResultSuccess(
         running=running,
@@ -149,13 +153,13 @@ def handle_get_execution_state(
 
 
 @verb(NukeCancelExecutionRequest)
-def handle_cancel_execution(
+async def handle_cancel_execution(
     request: NukeCancelExecutionRequest,  # noqa: ARG001
 ) -> NukeCancelExecutionResultSuccess | NukeCancelExecutionResultFailure:
     """Cancel the only running execution because the engine exposes no execution ID."""
     attempted = "to cancel the running workflow"
 
-    flow_name = engine.top_level_flow_name()
+    flow_name = await engine.top_level_flow_name()
     if flow_name is None:
         return failure(
             NukeCancelExecutionResultFailure,
@@ -163,7 +167,7 @@ def handle_cancel_execution(
             because="no workflow is loaded, so there is nothing to cancel.",
         )
 
-    cancelled = engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess)
+    cancelled = await engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess)
     if cancelled.value is None:
         return failure(
             NukeCancelExecutionResultFailure,

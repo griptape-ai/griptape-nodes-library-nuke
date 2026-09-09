@@ -213,7 +213,10 @@ const Session = (function () {
 
     if (running) {
       noteRunActivity(false);
-      setState({ runTotal: (settled.result || {}).involved_nodes || null });
+      // An empty list is not a total: it would be truthy and block the event and poll paths that
+      // fill one in.
+      const involved = (settled.result || {}).involved_nodes || [];
+      setState({ runTotal: involved.length ? involved : null });
       startPolling();
       noteStep("a run is already in flight", "warn", "joined it, events resume live");
     }

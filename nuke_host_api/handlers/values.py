@@ -16,7 +16,7 @@ from nuke_host_api.protocol import PARAMETER_SECTIONS
 
 
 @verb(NukeGetParameterValuesRequest)
-def handle_get_parameter_values(
+async def handle_get_parameter_values(
     request: NukeGetParameterValuesRequest,
 ) -> NukeGetParameterValuesResultSuccess | NukeGetParameterValuesResultFailure:
     attempted = "to read declared parameter values"
@@ -32,7 +32,7 @@ def handle_get_parameter_values(
             error=ValueError,
         )
 
-    workflow_id = engine.current_workflow_id()
+    workflow_id = await engine.current_workflow_id()
     if not workflow_id:
         return failure(
             NukeGetParameterValuesResultFailure,
@@ -40,7 +40,7 @@ def handle_get_parameter_values(
             because="no workflow is loaded, so there are no parameters to read. Load one with NukeLoadWorkflowRequest.",
         )
 
-    entry = engine.workflow_entry(workflow_id)
+    entry = await engine.workflow_entry(workflow_id)
     if entry is None:
         return failure(
             NukeGetParameterValuesResultFailure,
@@ -48,7 +48,7 @@ def handle_get_parameter_values(
             because=f"the loaded workflow '{workflow_id}' is no longer in the registry.",
         )
 
-    inputs, outputs, unavailable = parameter_values.read_sections(shape.workflow_shape(entry), sections)
+    inputs, outputs, unavailable = await parameter_values.read_sections(shape.workflow_shape(entry), sections)
 
     return NukeGetParameterValuesResultSuccess(
         workflow_id=workflow_id,
@@ -61,12 +61,12 @@ def handle_get_parameter_values(
 
 
 @verb(NukeSetParameterValuesRequest)
-def handle_set_parameter_values(
+async def handle_set_parameter_values(
     request: NukeSetParameterValuesRequest,
 ) -> NukeSetParameterValuesResultSuccess | NukeSetParameterValuesResultFailure:
     """Refuse writes during execution because parameter-read timing is unavailable."""
     attempted = "to set parameter values on the loaded workflow"
-    loaded_id = engine.current_workflow_id()
+    loaded_id = await engine.current_workflow_id()
 
     nothing_to_act_on = all(isinstance(parameters, dict) and not parameters for parameters in request.inputs.values())
     if nothing_to_act_on:
@@ -78,7 +78,7 @@ def handle_set_parameter_values(
             workflow_id=loaded_id,
         )
 
-    if engine.is_running():
+    if await engine.is_running():
         return failure(
             NukeSetParameterValuesResultFailure,
             attempted=attempted,
@@ -97,7 +97,7 @@ def handle_set_parameter_values(
             because="no workflow is loaded, so there is nothing to set values on. Load one with NukeLoadWorkflowRequest.",
         )
 
-    found = engine.lookup_workflow(loaded_id)
+    found = await engine.lookup_workflow(loaded_id)
     declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
 
     refusal = parameter_values.unaddressable_inputs_reason(loaded_id, found, declared)
@@ -110,7 +110,7 @@ def handle_set_parameter_values(
             workflow_id=loaded_id,
         )
 
-    applied, rejected = parameter_values.apply_inputs(request.inputs, declared)
+    applied, rejected = await parameter_values.apply_inputs(request.inputs, declared)
 
     return NukeSetParameterValuesResultSuccess(
         workflow_id=loaded_id,

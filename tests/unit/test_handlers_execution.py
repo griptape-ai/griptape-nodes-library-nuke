@@ -65,22 +65,25 @@ UNSAVED_GRAPH_LOADED = {
 
 
 class TestExecuteWorkflow:
-    def test_a_successful_run_applies_inputs_then_starts_the_loaded_flow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_successful_run_applies_inputs_then_runs_the_loaded_flow(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         engine = use_engine(monkeypatch, execute_responses())
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        assert result.state == ExecutionState.RUNNING
+        # StartFlowRequest resolves when the flow does, so a reply means the run already ended.
+        assert result.state == ExecutionState.COMPLETED
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
         assert result.rejected_inputs == []
 
         request_types = [type(request) for request in engine.requests]
         assert request_types.index(SetParameterValueRequest) < request_types.index(StartFlowRequest)
 
-    def test_loads_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_loads_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Loading is NukeLoadWorkflowRequest's job, and it clears all object state.
 
         Doing it here would discard the graph whose inputs a host has been setting, and would
@@ -88,41 +91,41 @@ class TestExecuteWorkflow:
         """
         engine = use_engine(monkeypatch, execute_responses())
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert not any(isinstance(request, RunWorkflowFromRegistryRequest) for request in engine.requests)
 
-    def test_no_workflow_id_runs_whatever_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_no_workflow_id_runs_whatever_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A host driving a graph an editor user loaded has no id to send."""
         use_engine(monkeypatch, execute_responses())
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest())
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.workflow_id == "wf1", "the reply must name what actually ran"
 
-    def test_a_workflow_id_that_is_not_the_loaded_one_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_workflow_id_that_is_not_the_loaded_one_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Honouring it would put loading back inside execute; ignoring it would run the wrong graph."""
         engine = use_engine(monkeypatch, execute_responses())
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf2"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf2"))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "wf1" in str(result.result_details) and "wf2" in str(result.result_details)
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
-    def test_fails_when_nothing_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fails_when_nothing_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, execute_responses(NO_WORKFLOW_IN_CONTEXT))
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "NukeLoadWorkflowRequest" in str(result.result_details), "tell a host what to do next"
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
-    def test_refuses_to_start_over_a_run_already_in_progress(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_refuses_to_start_over_a_run_already_in_progress(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """With no execution id in the engine's events, a host could not tell two runs apart.
 
         It could not say which run the notifications that followed belonged to, nor which one a
@@ -139,7 +142,7 @@ class TestExecuteWorkflow:
             ),
         )
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests), (
@@ -147,7 +150,7 @@ class TestExecuteWorkflow:
         )
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
-    def test_an_input_that_is_not_a_declared_parameter_is_rejected_without_reaching_the_engine(
+    async def test_an_input_that_is_not_a_declared_parameter_is_rejected_without_reaching_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The engine would set a parameter on any node in the loaded graph.
@@ -157,7 +160,7 @@ class TestExecuteWorkflow:
         """
         engine = use_engine(monkeypatch, execute_responses())
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(
                 workflow_id="wf1",
                 inputs={"Start Flow": {"topic": "ok"}, "Some Private Node": {"api_key": "stolen"}},
@@ -176,7 +179,7 @@ class TestExecuteWorkflow:
         touched = {r.node_name for r in engine.requests if isinstance(r, SetParameterValueRequest)}
         assert touched == {"Start Flow"}
 
-    def test_inputs_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
+    async def test_inputs_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An unsaved editor graph is in the registry with no shape, so nothing could be applied.
@@ -187,7 +190,7 @@ class TestExecuteWorkflow:
         """
         engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {"topic": "hello"}}))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {"topic": "hello"}}))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert result.workflow_id == "unsaved:9f0c"
@@ -195,7 +198,7 @@ class TestExecuteWorkflow:
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
-    def test_an_unreadable_registry_is_a_retryable_refusal_not_a_graph_that_declares_nothing(
+    async def test_an_unreadable_registry_is_a_retryable_refusal_not_a_graph_that_declares_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Both produce an empty allow-list, and only one of them is the host's problem to fix.
@@ -208,7 +211,7 @@ class TestExecuteWorkflow:
             execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
         )
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
 
@@ -221,32 +224,34 @@ class TestExecuteWorkflow:
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
-    def test_an_unreadable_registry_does_not_block_a_run_with_no_inputs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_an_unreadable_registry_does_not_block_a_run_with_no_inputs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """With nothing to check against the allow-list, the registry does not bear on the run."""
         use_engine(
             monkeypatch,
             execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
         )
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.applied_inputs == []
 
-    def test_a_graph_that_declares_no_inputs_still_runs_when_none_are_sent(
+    async def test_a_graph_that_declares_no_inputs_still_runs_when_none_are_sent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Driving a graph an editor user opened is what an empty workflow_id is for."""
         use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest())
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.workflow_id == "unsaved:9f0c"
         assert result.applied_inputs == []
         assert result.rejected_inputs == []
 
-    def test_an_execution_costs_six_engine_requests_plus_one_per_input_it_forwards(
+    async def test_an_execution_costs_six_engine_requests_plus_one_per_input_it_forwards(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """None of them loads, which is the whole point of the split.
@@ -255,7 +260,7 @@ class TestExecuteWorkflow:
         """
         engine = use_engine(monkeypatch, execute_responses())
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(
                 workflow_id="wf1",
                 inputs={"Start Flow": {"topic": "hello"}, "Some Private Node": {"api_key": "stolen"}},
@@ -267,7 +272,9 @@ class TestExecuteWorkflow:
         assert forwarded == 1, "the undeclared pair must not have been forwarded"
         assert len(engine.requests) == 6 + forwarded
 
-    def test_an_input_the_engine_refuses_has_already_cost_a_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_an_input_the_engine_refuses_has_already_cost_a_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A declared pair is forwarded before its outcome is known, so its rejection is not free.
 
         The count is per input forwarded, not per input applied. Only the allow-list filters for
@@ -280,7 +287,7 @@ class TestExecuteWorkflow:
             ),
         )
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
 
@@ -289,7 +296,7 @@ class TestExecuteWorkflow:
         assert result.rejected_inputs == [{"node": "Start Flow", "parameter": "topic", "reason": "knob is read-only"}]
         assert len(engine.requests) == 7, "six plus the one forwarded input, whatever the engine said about it"
 
-    def test_a_loaded_id_missing_from_a_readable_registry_is_not_an_unsaved_graph(
+    async def test_a_loaded_id_missing_from_a_readable_registry_is_not_an_unsaved_graph(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A stale context key over a live registry: the engine can drop an entry without popping it.
@@ -308,7 +315,7 @@ class TestExecuteWorkflow:
             ),
         )
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
 
@@ -319,7 +326,7 @@ class TestExecuteWorkflow:
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
-    def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
+    async def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Normalizing a macro-templated default issues an engine request.
@@ -335,24 +342,24 @@ class TestExecuteWorkflow:
         use_engine(monkeypatch, execute_responses())
         monkeypatch.setattr(shape, "normalize_value", explode)
 
-        result = handle_execute_workflow(
+        result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
 
-    def test_short_circuits_when_the_loaded_workflow_has_no_top_level_flow(
+    async def test_short_circuits_when_the_loaded_workflow_has_no_top_level_flow(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         engine = use_engine(monkeypatch, execute_responses(NOTHING_LOADED))
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
-    def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host(
+    async def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A host cannot see the engine's result, so a refusal it never quotes is lost."""
@@ -363,14 +370,14 @@ class TestExecuteWorkflow:
             ),
         )
 
-        result = handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "validation failed" in str(result.result_details)
 
 
 class TestGetExecutionState:
-    def test_a_running_flow_reports_active_and_involved_nodes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_running_flow_reports_active_and_involved_nodes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(
             monkeypatch,
             {
@@ -382,7 +389,7 @@ class TestGetExecutionState:
             },
         )
 
-        result = handle_get_execution_state(NukeGetExecutionStateRequest())
+        result = await handle_get_execution_state(NukeGetExecutionStateRequest())
 
         assert isinstance(result, NukeGetExecutionStateResultSuccess)
         assert result.running is True
@@ -390,17 +397,17 @@ class TestGetExecutionState:
         assert result.involved_nodes == ["N1", "N2"]
         assert result.workflow_id == "wf1"
 
-    def test_fails_when_no_workflow_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fails_when_no_workflow_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, NOTHING_LOADED)
 
-        result = handle_get_execution_state(NukeGetExecutionStateRequest())
+        result = await handle_get_execution_state(NukeGetExecutionStateRequest())
 
         assert isinstance(result, NukeGetExecutionStateResultFailure)
         assert len(engine.requests) == 1, "must not ask the engine for flow state with nothing loaded"
 
 
 class TestCancelExecution:
-    def test_cancellation_is_requested(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_cancellation_is_requested(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(
             monkeypatch,
             {
@@ -409,19 +416,19 @@ class TestCancelExecution:
             },
         )
 
-        result = handle_cancel_execution(NukeCancelExecutionRequest())
+        result = await handle_cancel_execution(NukeCancelExecutionRequest())
 
         assert isinstance(result, NukeCancelExecutionResultSuccess)
 
-    def test_fails_when_no_workflow_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fails_when_no_workflow_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, NOTHING_LOADED)
 
-        result = handle_cancel_execution(NukeCancelExecutionRequest())
+        result = await handle_cancel_execution(NukeCancelExecutionRequest())
 
         assert isinstance(result, NukeCancelExecutionResultFailure)
         assert not any(isinstance(request, CancelFlowRequest) for request in engine.requests)
 
-    def test_fails_when_the_engine_refuses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_fails_when_the_engine_refuses(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(
             monkeypatch,
             {
@@ -430,7 +437,7 @@ class TestCancelExecution:
             },
         )
 
-        result = handle_cancel_execution(NukeCancelExecutionRequest())
+        result = await handle_cancel_execution(NukeCancelExecutionRequest())
 
         assert isinstance(result, NukeCancelExecutionResultFailure)
         assert "nothing running" in str(result.result_details)

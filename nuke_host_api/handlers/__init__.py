@@ -36,11 +36,11 @@ from nuke_host_api.handlers.values import handle_get_parameter_values, handle_se
 from nuke_host_api.handlers.workflows import handle_describe_workflow, handle_list_workflows
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
 
-ROUTES: tuple[tuple[type[RequestPayload], Callable[[RequestPayload], ResultPayload]], ...] = (
+ROUTES: tuple[tuple[type[RequestPayload], Callable[[RequestPayload], Awaitable[ResultPayload]]], ...] = (
     (NukeConnectRequest, handle_connect),
     (NukeListWorkflowsRequest, handle_list_workflows),
     (NukeDescribeWorkflowRequest, handle_describe_workflow),

@@ -24,27 +24,27 @@ from tests.unit.host_api_fakes import SHAPE, respond_to_get_value, use_engine
 
 
 class TestReadSections:
-    def test_both_sections_are_read_when_both_are_requested(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_both_sections_are_read_when_both_are_requested(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(monkeypatch, {GetParameterValueRequest: respond_to_get_value})
 
-        inputs, outputs, unavailable = parameter_values.read_sections(SHAPE, list(PARAMETER_SECTIONS))
+        inputs, outputs, unavailable = await parameter_values.read_sections(SHAPE, list(PARAMETER_SECTIONS))
 
         assert inputs["Start Flow"]["topic"]["value_type"] == ValueType.TEXT
         assert outputs["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert unavailable == []
 
-    def test_a_section_not_requested_comes_back_empty_and_unread(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_section_not_requested_comes_back_empty_and_unread(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An empty map rather than a missing key, so no caller has to tell the two apart."""
         engine = use_engine(monkeypatch, {GetParameterValueRequest: respond_to_get_value})
 
-        inputs, outputs, _ = parameter_values.read_sections(SHAPE, [ParameterSection.INPUTS])
+        inputs, outputs, _ = await parameter_values.read_sections(SHAPE, [ParameterSection.INPUTS])
 
         assert inputs
         assert outputs == {}
         read = {r.parameter_name for r in engine.requests if isinstance(r, GetParameterValueRequest)}
         assert read == {"topic", "plate"}
 
-    def test_an_unreadable_parameter_is_tagged_with_the_section_it_came_from(
+    async def test_an_unreadable_parameter_is_tagged_with_the_section_it_came_from(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def respond(request: GetParameterValueRequest) -> Any:
@@ -54,7 +54,7 @@ class TestReadSections:
 
         use_engine(monkeypatch, {GetParameterValueRequest: respond})
 
-        _, outputs, unavailable = parameter_values.read_sections(SHAPE, list(PARAMETER_SECTIONS))
+        _, outputs, unavailable = await parameter_values.read_sections(SHAPE, list(PARAMETER_SECTIONS))
 
         assert "was_successful" not in outputs.get("End Flow", {})
         assert unavailable == [
@@ -66,28 +66,30 @@ class TestReadSections:
             }
         ]
 
-    def test_a_value_the_engine_holds_as_none_is_a_value_not_a_miss(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_value_the_engine_holds_as_none_is_a_value_not_a_miss(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """An unset knob and one that could not be read mean different things to a host."""
         use_engine(monkeypatch, {GetParameterValueRequest: respond_to_get_value})
 
-        inputs, _, unavailable = parameter_values.read_sections(SHAPE, [ParameterSection.INPUTS])
+        inputs, _, unavailable = await parameter_values.read_sections(SHAPE, [ParameterSection.INPUTS])
 
         assert inputs["Start Flow"]["plate"]["value_type"] == ValueType.NULL
         assert unavailable == []
 
-    def test_an_empty_shape_reads_nothing_and_reports_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_an_empty_shape_reads_nothing_and_reports_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, {})
 
-        inputs, outputs, unavailable = parameter_values.read_sections({}, list(PARAMETER_SECTIONS))
+        inputs, outputs, unavailable = await parameter_values.read_sections({}, list(PARAMETER_SECTIONS))
 
         assert (inputs, outputs, unavailable) == ({}, {}, [])
         assert engine.requests == []
 
-    def test_control_parameters_are_never_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_control_parameters_are_never_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Execution wiring is not data, and the normalizer has no case for its type."""
         engine_fake = use_engine(monkeypatch, {GetParameterValueRequest: respond_to_get_value})
 
-        parameter_values.read_sections(SHAPE, list(PARAMETER_SECTIONS))
+        await parameter_values.read_sections(SHAPE, list(PARAMETER_SECTIONS))
 
         read = {r.parameter_name for r in engine_fake.requests if isinstance(r, GetParameterValueRequest)}
         assert not read & {"exec_in", "exec_out"}
@@ -100,7 +102,7 @@ class TestApplyInputs:
     handler, so the two cannot silently diverge on what "applied" and "rejected" mean.
     """
 
-    def test_applied_and_rejected_inputs_are_tracked_separately(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_applied_and_rejected_inputs_are_tracked_separately(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def respond(request: SetParameterValueRequest) -> Any:
             if request.parameter_name == "good":
                 return SetParameterValueResultSuccess(finalized_value=1, data_type="int", result_details="ok")
@@ -108,30 +110,30 @@ class TestApplyInputs:
 
         use_engine(monkeypatch, {SetParameterValueRequest: respond})
 
-        applied, rejected = parameter_values.apply_inputs(
+        applied, rejected = await parameter_values.apply_inputs(
             {"Node A": {"good": 1, "bad": "nope"}}, {("Node A", "good"), ("Node A", "bad")}
         )
 
         assert applied == [{"node": "Node A", "parameter": "good"}]
         assert rejected == [{"node": "Node A", "parameter": "bad", "reason": "rejected: wrong type"}]
 
-    def test_a_non_dict_parameters_value_is_rejected_without_calling_the_engine(
+    async def test_a_non_dict_parameters_value_is_rejected_without_calling_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         engine_fake = use_engine(monkeypatch, {})
 
-        applied, rejected = parameter_values.apply_inputs({"Node A": "not a dict"}, {("Node A", "good")})  # type: ignore[arg-type]
+        applied, rejected = await parameter_values.apply_inputs({"Node A": "not a dict"}, {("Node A", "good")})  # type: ignore[arg-type]
 
         assert applied == []
         assert rejected == [{"node": "Node A", "parameter": "*", "reason": "Expected an object of parameters."}]
         assert engine_fake.requests == []
 
-    def test_a_pair_outside_the_allow_list_is_rejected_without_calling_the_engine(
+    async def test_a_pair_outside_the_allow_list_is_rejected_without_calling_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         engine_fake = use_engine(monkeypatch, {})
 
-        applied, rejected = parameter_values.apply_inputs({"Node A": {"secret": 1}}, set())
+        applied, rejected = await parameter_values.apply_inputs({"Node A": {"secret": 1}}, set())
 
         assert applied == []
         assert rejected == [

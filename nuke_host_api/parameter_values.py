@@ -16,7 +16,7 @@ from nuke_host_api.protocol import ParameterSection
 from nuke_host_api.value_types import normalize_value
 
 
-def read_sections(
+async def read_sections(
     declared_shape: dict, sections: list[str]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], list[dict[str, str]]]:
     """Unrequested sections remain present but empty."""
@@ -25,22 +25,22 @@ def read_sections(
     unavailable: list[dict[str, str]] = []
 
     if ParameterSection.INPUTS in sections:
-        inputs, missing = read_section(declared_shape.get("inputs"))
+        inputs, missing = await read_section(declared_shape.get("inputs"))
         unavailable.extend({"section": ParameterSection.INPUTS, **entry} for entry in missing)
     if ParameterSection.OUTPUTS in sections:
-        outputs, missing = read_section(declared_shape.get("outputs"))
+        outputs, missing = await read_section(declared_shape.get("outputs"))
         unavailable.extend({"section": ParameterSection.OUTPUTS, **entry} for entry in missing)
 
     return inputs, outputs, unavailable
 
 
-def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+async def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
     """Report unreadable parameters separately from empty values."""
     values: dict[str, dict[str, Any]] = {}
     missing: list[dict[str, str]] = []
 
     for declared in shape.declared_parameters(section):
-        attempt = engine.request(
+        attempt = await engine.request(
             GetParameterValueRequest(node_name=declared["node"], parameter_name=declared["parameter"]),
             GetParameterValueResultSuccess,
         )
@@ -99,7 +99,7 @@ def unaddressable_inputs_reason(
     return None
 
 
-def apply_inputs(
+async def apply_inputs(
     inputs: dict[str, dict[str, Any]], allowed: set[tuple[str, str]]
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Forward only declared inputs because the engine accepts parameters on any loaded node."""
@@ -120,7 +120,7 @@ def apply_inputs(
                     }
                 )
                 continue
-            attempt = engine.request(
+            attempt = await engine.request(
                 SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=value),
                 SetParameterValueResultSuccess,
             )

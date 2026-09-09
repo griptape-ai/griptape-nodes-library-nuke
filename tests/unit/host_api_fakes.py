@@ -79,7 +79,7 @@ ENGINE_NAME = GetEngineNameResultSuccess(engine_name="Engine One", result_detail
 
 
 class FakeEngine:
-    """Dispatches handle_request by request type, recording call order.
+    """Dispatches ahandle_request by request type, recording call order.
 
     A response may be a real result instance, reused for every call of that type, or a
     callable that receives the request and computes one, needed when the same request
@@ -99,7 +99,7 @@ class FakeEngine:
         self._engine_id = engine_id
         self.requests: list[Any] = []
 
-    def handle_request(self, request: Any) -> Any:
+    async def ahandle_request(self, request: Any) -> Any:
         self.requests.append(request)
         response = self._responses.get(type(request))
         if response is None:
