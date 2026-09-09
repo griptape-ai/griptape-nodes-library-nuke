@@ -1212,17 +1212,26 @@ numerator a host already tracks per node; this notification, translated from the
 }
 ```
 
-Not one-shot and not a participant count. A run started through this protocol emits exactly
-two of these: every node the flow declares when the run starts, then an empty list when the
-run finishes. Keep the first non-empty list as the run's total, which does not change
-mid-run, and do not read that later empty one as "zero nodes ran".
+Not one-shot and not a participant count. The engine emits one non-empty list per flow it
+starts, and one empty list when the top-level run finishes. The top-level flow's list arrives
+first, carrying every node that flow declares.
 
-The total counts what the flow declares, not what the run's control path reaches, so a graph
-with an untaken branch never resolves every node on the list and the ratio of `resolved`
-counts to its length can stay below 1.0 on a clean run. A progress bar has to absorb that, and
-nothing else: the denominator does not increase. Execution mode does not change it either,
-since the engine emits the declared list with no mode check and SEQUENTIAL differs from
-PARALLEL only by how many nodes run at once.
+Subflows emit too. A graph holding a `WorkflowNode`, a `SubflowNodeGroup`, or a loop node starts
+an isolated flow per execution, and the engine guards that emission only on start node against
+end node, so each subflow adds a non-empty list of its own nodes. The payload carries no flow
+name, and this layer cannot add one.
+
+Read them by arrival order: the first non-empty list is the run's total, every later non-empty
+list is a nested scope and not a correction to the total, and the empty one means the top-level
+run finished rather than "zero nodes ran". For a total that does not depend on arrival order,
+read `NukeGetExecutionStateRequest`'s `involved_nodes`, which the engine derives from the named
+flow's declared nodes rather than from event history.
+
+The total counts what a flow declares, not what its control path reaches, so a graph with an
+untaken branch never resolves every node on the list and the ratio of `resolved` counts to its
+length can stay below 1.0 on a clean run. Execution mode does not change any of this, and a flow
+whose start node is also its end node emits no non-empty list at all, so tolerate a run with no
+total.
 
 Both events for a run are dispatched by the engine before `NukeExecuteWorkflowRequest`'s own
 reply is written, so a plugin cannot wait for that reply before reading this notification for

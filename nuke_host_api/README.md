@@ -261,18 +261,27 @@ type without the host learning anything.
 
 `NukeExecutionNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
 `state: "resolved"` is the numerator a host already has; this is the denominator, translated
-from the engine's own `InvolvedNodesEvent`. A run this protocol can start emits exactly two:
-every node the flow declares when the run starts, then an empty list when it finishes. So the
-total is fixed for the run, and a host keeps the first non-empty list as that total and must
-not read the later empty one as "zero nodes ran".
+from the engine's own `InvolvedNodesEvent`. The engine emits one non-empty list per flow it
+starts, and one empty list when the top-level run finishes. The top-level flow's list arrives
+first, carrying every node that flow declares.
 
-The total counts what the flow declares, not what the run's control path reaches, so a graph
-with an untaken branch never resolves every node on the list and the ratio of resolved counts
-to its length can stay below 1.0 on a clean run. That is the only surprise a host absorbs.
-Execution mode changes nothing: the engine emits the declared list with no mode check, and
-SEQUENTIAL differs from PARALLEL only by clamping how many nodes run at once. The engine's one
-emitter that grows a set as its DAG builder discovers work is gated on single-node resolution,
-which this protocol has no verb for, so a host must not carry code for a growing denominator.
+Subflows emit too, and this layer cannot label them. A graph holding a `WorkflowNode`, a
+`SubflowNodeGroup`, or a loop node starts an isolated flow per execution, and the engine's
+emission is guarded only by start node against end node, with no isolation check, so each
+subflow adds a non-empty list of its own nodes. The payload is a bare list of node names with no
+flow on it, and a translation callback must not issue engine requests to find out which flow
+sent it.
+
+So the rule is arrival order: the first non-empty list is the run's total, every later non-empty
+list is a nested scope rather than a correction, and the empty one means the top-level run
+finished. A host that does not want to depend on arrival order reads
+`NukeGetExecutionStateResultSuccess.involved_nodes`, which the engine derives from the named
+flow's declared nodes rather than from event history.
+
+The total counts what a flow declares, not what its control path reaches, so a graph with an
+untaken branch never resolves every node on the list and the ratio of resolved counts to its
+length can stay below 1.0 on a clean run. Execution mode changes nothing, and a flow whose start
+node is also its end node emits no non-empty list at all.
 
 Both events for a run are dispatched by the engine before `NukeExecuteWorkflowRequest`'s own
 reply is written, so a host cannot wait for that reply before reading this notification for a
