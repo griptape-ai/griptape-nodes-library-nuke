@@ -261,19 +261,26 @@ type without the host learning anything.
 
 `NukeExecutionNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
 `state: "resolved"` is the numerator a host already has; this is the denominator, translated
-from the engine's own `InvolvedNodesEvent`. It is not a single snapshot: for a serial control
-flow the engine reports every participating node when a run starts and reports an empty list
-again when the run finishes, so a host must keep the first non-empty list it sees as the run's
-total and must not read a later empty one as "zero nodes ran". For parallel resolution the set
-is genuinely dynamic, built as the engine's DAG builder discovers work, so the total can grow
-mid-run and a host drawing a fixed-size bar must handle that instead of discovering it as a bar
-that goes backwards.
+from the engine's own `InvolvedNodesEvent`. For a serial control flow the engine reports every
+node the flow declares when a run starts, not only the nodes the run's control path will
+reach, so a graph with an untaken branch never resolves every node on that list and the ratio
+of resolved counts to this list's length can stay below 1.0 on a clean run. The engine then
+reports an empty list again when the run finishes, so a host must keep the first non-empty
+list it sees as the run's total and must not read a later empty one as "zero nodes ran". For
+parallel resolution the set is genuinely dynamic, built as the engine's DAG builder discovers
+work, so the total can also grow mid-run.
 
-Not a field on `NukeExecuteWorkflowResultSuccess`. That reply is written the moment the flow
-starts, before parallel resolution has necessarily discovered its full node set, and adding an
-engine round trip there to catch up would be one more request paid on every execute for a
-number this notification already reports for free. A host wanting a one-time total for a serial
-flow still gets it, as the first event on this notification after execute returns.
+Both events for a run are dispatched by the engine before `NukeExecuteWorkflowRequest`'s own
+reply is written, so a host cannot wait for that reply before reading this notification for a
+one-time total: it must already be subscribed from `NukeConnectRequest` onward and read every
+event this notification emits during the run. A host that reconnects mid-run, or otherwise
+missed the live stream, reads `NukeGetExecutionStateResultSuccess.involved_nodes` for the
+engine's current answer instead.
+
+Not a field on `NukeExecuteWorkflowResultSuccess`. That reply is written before parallel
+resolution has necessarily discovered its full node set, and adding an engine round trip there
+to catch up would be one more request paid on every execute for a number this notification
+already reports for free.
 
 ### 6. Parameter value changes
 

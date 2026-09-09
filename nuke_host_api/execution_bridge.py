@@ -15,11 +15,10 @@ engine is free to add a ninth without the host learning anything new.
 A ninth subscription, ``InvolvedNodesEvent``, is not part of that collapse: it carries a
 run's node set, forwarded as ``NukeExecutionNodesEvent`` rather than folded into a node
 state, because it answers a different question (how many nodes, not which state one is in)
-for a different consumer (a progress bar's denominator, not per-node tracking). Named to sit
-beside ``NukeExecutionStateEvent`` rather than reusing the engine's own class name verbatim,
-since every other translated event in this module already renames or collapses the engine's
-vocabulary instead of forwarding it; see ``NukeExecutionNodesEvent``'s own docstring in
-``events.py`` for why the field underneath keeps the engine's word.
+for a different consumer (a progress bar's denominator, not per-node tracking). See
+``NukeExecutionNodesEvent``'s own docstring in ``events.py`` for the naming choice and for
+the timing guarantee a host actually needs: both the informative and the terminating empty
+event for a run are dispatched before ``NukeExecuteWorkflowRequest``'s reply is written.
 
 Installed on the first ``NukeConnectRequest`` and torn down when the library unloads. The
 subscription is engine-global, so an engine no host has spoken to should not pay for it;

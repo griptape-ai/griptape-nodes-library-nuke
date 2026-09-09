@@ -771,30 +771,36 @@ class NukeParameterValueEvent(AppPayload):
 class NukeExecutionNodesEvent(AppPayload):
     """The run's node set: the denominator a host pairs with NukeNodeStateEvent's numerator.
 
-    Translates the engine's InvolvedNodesEvent, which is not one-shot and is not monotonic.
-    For a serial control flow the engine reports every participating node when the run
-    starts, then reports an empty list again when the run finishes; a host must snapshot
-    the first non-empty list it sees as the run's total and must not read a later empty one
-    as "zero nodes ran". For parallel resolution the engine builds this set as its DAG
-    builder discovers work, so the set legitimately grows mid-run: a host drawing a
-    fixed-size progress bar must handle the total increasing, not only nodes being checked
-    off a total fixed at the first event.
+    Translates the engine's InvolvedNodesEvent, which is not one-shot, not monotonic, and not
+    a participant count. For sequential execution the engine reports every node the flow
+    declares (`list(flow.nodes.keys())`) when a run starts, not only the nodes the run's
+    control path will reach, so a graph with an untaken branch never resolves every node on
+    this list and the ratio of NukeNodeStateEvent `resolved` counts to this list's length can
+    top out below 1.0 on a clean run. The engine then reports an empty list again when the run
+    finishes: a host must snapshot the first non-empty list as the run's total and must not
+    read that later empty one as "zero nodes ran". For parallel resolution the set is
+    genuinely dynamic, built as the engine's DAG builder discovers work, so the total can also
+    grow mid-run.
 
-    Named for the execution it reports on, alongside NukeExecutionStateEvent, rather than
-    reusing the engine's own InvolvedNodesEvent class name verbatim: every other event this
-    layer translates already renames or collapses the engine's vocabulary (NodeStartProcessEvent
-    and four siblings become NukeNodeStateEvent's state enum; ParameterValueUpdateEvent drops
-    "Update"), and carrying the engine's class name unchanged here would be the one exception.
-    The field underneath keeps the engine's word regardless: it is named to match
-    NukeGetExecutionStateResultSuccess.involved_nodes exactly, a tie this docstring's Args
-    entry calls out on purpose, and renaming one without the other would break that parity
-    instead of clarifying anything.
+    Both the non-empty event and the terminating empty one are dispatched by the engine before
+    NukeExecuteWorkflowRequest's own reply is written: FlowManager.start_flow queues the
+    terminating empty InvolvedNodesEvent immediately after the control-flow machine's own
+    start_flow call returns, and the request handler awaits that same call before building the
+    reply. A host must already be subscribed to this notification, from NukeConnectRequest
+    onward, and read every event it emits during the run; it cannot treat the execute reply as
+    the cue to start reading for a one-time total, since both events for that run may already
+    have passed by the time the reply arrives. A host that reconnects mid-run, or otherwise
+    missed the live stream, reads NukeGetExecutionStateResultSuccess.involved_nodes for the
+    engine's current answer instead.
 
-    Not folded into NukeExecuteWorkflowResultSuccess. That reply is written once, when the
-    flow has just started and, for parallel resolution, before the engine has necessarily
-    discovered the full node set; this notification is the engine's own live count and
-    updates for as long as the run does. A host wanting only a one-time total for a serial
-    flow still gets it, as the first event on this notification after execute returns.
+    Named for the execution it reports on, alongside NukeExecutionStateEvent, rather than the
+    engine's own InvolvedNodesEvent class name. The field keeps the engine's word because it
+    matches NukeGetExecutionStateResultSuccess.involved_nodes, the same question answered
+    polled instead of pushed.
+
+    Not folded into NukeExecuteWorkflowResultSuccess. That reply is written before parallel
+    resolution has necessarily discovered its full node set, and folding this in would cost an
+    extra engine round trip execute does not otherwise need.
 
     Args:
         involved_nodes: Nodes participating in the current execution, exactly as

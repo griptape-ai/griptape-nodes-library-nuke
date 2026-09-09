@@ -303,13 +303,7 @@ class TestTranslation:
         assert payload.involved_nodes == ["Start Flow", "Blur", "End Flow"]
 
     def test_involved_nodes_forwards_an_empty_set_too(self, event_manager: FakeEventManager) -> None:
-        """The engine reports empty at completion for a serial flow. A host decides what that means.
-
-        This layer's only job is to forward it faithfully, not to interpret it, since an
-        empty list at the end of a run and an empty list because nothing has started yet
-        are the same shape and only the host, tracking the run's own lifecycle, can tell them
-        apart.
-        """
+        """Forwarded faithfully, not interpreted: only the host can tell "done" from "not started"."""
         bridge = ExecutionBridge()
         bridge.install()
         bridge._on_involved_nodes(InvolvedNodesEvent(involved_nodes=[]))
