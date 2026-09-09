@@ -768,6 +768,27 @@ class NukeParameterValueEvent(AppPayload):
 
 @dataclass
 @PayloadRegistry.register
+class NukeExecutionNodesEvent(AppPayload):
+    """Nodes declared by an executing flow.
+
+    The first non-empty event describes the top-level flow. Later non-empty events describe
+    subflows, but the payload does not identify them. An empty list marks top-level completion.
+    Lists include nodes on untaken branches. A flow whose start is also its end emits no
+    non-empty list.
+
+    Events may arrive before NukeExecuteWorkflowRequest returns, so hosts must subscribe before
+    executing. While a run is live, NukeGetExecutionStateResultSuccess.involved_nodes provides
+    the top-level list if an event was missed.
+
+    Args:
+        involved_nodes: Node names from the engine's InvolvedNodesEvent.
+    """
+
+    involved_nodes: list[str]
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeExecutionStateEvent(AppPayload):
     """Execution reached a terminal state.
 
