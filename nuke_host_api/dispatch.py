@@ -12,21 +12,28 @@ from griptape_nodes.retained_mode.events.base_events import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
 
 def verb[R: RequestPayload](
     expected: type[R],
-) -> Callable[[Callable[[R], ResultPayload]], Callable[[RequestPayload], ResultPayload]]:
-    """Reject routing-table type mismatches before entering a handler."""
+) -> Callable[[Callable[[R], Awaitable[ResultPayload]]], Callable[[RequestPayload], Awaitable[ResultPayload]]]:
+    """Reject routing-table type mismatches before entering a handler.
 
-    def decorate(handler: Callable[[R], ResultPayload]) -> Callable[[RequestPayload], ResultPayload]:
+    Handlers are async so the engine awaits them on its own loop. A sync handler would be
+    driven on a side loop with the engine's loop blocked, starving event publication for as
+    long as the handler runs.
+    """
+
+    def decorate(
+        handler: Callable[[R], Awaitable[ResultPayload]],
+    ) -> Callable[[RequestPayload], Awaitable[ResultPayload]]:
         @functools.wraps(handler)
-        def guarded(request: RequestPayload) -> ResultPayload:
+        async def guarded(request: RequestPayload) -> ResultPayload:
             if not isinstance(request, expected):
                 msg = f"Expected {expected.__name__}, got {type(request).__name__}"
                 raise TypeError(msg)
-            return handler(request)
+            return await handler(request)
 
         return guarded
 

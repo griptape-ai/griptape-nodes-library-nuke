@@ -20,7 +20,7 @@ from nuke_host_api.protocol import PARAMETER_SECTIONS
 
 
 @verb(NukeLoadWorkflowRequest)
-def handle_load_workflow(
+async def handle_load_workflow(
     request: NukeLoadWorkflowRequest,
 ) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
     """Validate before loading because the engine clears object state before building the graph."""
@@ -42,7 +42,7 @@ def handle_load_workflow(
             error=ValueError,
         )
 
-    if engine.is_running():
+    if await engine.is_running():
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=f"to load '{request.workflow_id or request.file_path}'",
@@ -54,7 +54,7 @@ def handle_load_workflow(
         )
 
     if request.file_path:
-        imported = engine.request(ImportWorkflowRequest(file_path=request.file_path), ImportWorkflowResultSuccess)
+        imported = await engine.request(ImportWorkflowRequest(file_path=request.file_path), ImportWorkflowResultSuccess)
         if imported.value is None:
             return failure(
                 NukeLoadWorkflowResultFailure,
@@ -68,7 +68,7 @@ def handle_load_workflow(
     attempted = f"to load workflow '{workflow_id}'"
 
     # Validate registry state before the destructive load.
-    found = engine.lookup_workflow(workflow_id)
+    found = await engine.lookup_workflow(workflow_id)
     if not found.registry_readable:
         return failure(
             NukeLoadWorkflowResultFailure,
@@ -86,7 +86,7 @@ def handle_load_workflow(
             workflow_id=workflow_id,
         )
 
-    loaded = engine.request(
+    loaded = await engine.request(
         RunWorkflowFromRegistryRequest(workflow_name=workflow_id, run_with_clean_slate=True),
         RunWorkflowFromRegistryResultSuccess,
     )
@@ -104,7 +104,9 @@ def handle_load_workflow(
         )
 
     declared_shape = shape.workflow_shape(entry)
-    input_values, output_values, unavailable = parameter_values.read_sections(declared_shape, list(PARAMETER_SECTIONS))
+    input_values, output_values, unavailable = await parameter_values.read_sections(
+        declared_shape, list(PARAMETER_SECTIONS)
+    )
 
     return NukeLoadWorkflowResultSuccess(
         workflow_id=workflow_id,

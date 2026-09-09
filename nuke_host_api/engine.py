@@ -38,8 +38,9 @@ class Attempt[S: ResultPayload]:
     details: str
 
 
-def request[S: ResultPayload](payload: RequestPayload, success: type[S]) -> Attempt[S]:
-    result = GriptapeNodes.handle_request(payload)
+async def request[S: ResultPayload](payload: RequestPayload, success: type[S]) -> Attempt[S]:
+    """Await the engine so a long request never occupies the loop the engine publishes events on."""
+    result = await GriptapeNodes.ahandle_request(payload)
     details = str(result.result_details)
     if isinstance(result, success):
         return Attempt(result, details)
@@ -57,9 +58,9 @@ def event_topic() -> str:
     return "response"
 
 
-def engine_version() -> str:
+async def engine_version() -> str:
     """Return the engine's version, or "unknown" when it will not say."""
-    attempt = request(GetEngineVersionRequest(), GetEngineVersionResultSuccess)
+    attempt = await request(GetEngineVersionRequest(), GetEngineVersionResultSuccess)
     if attempt.value is None:
         return "unknown"
     return f"{attempt.value.major}.{attempt.value.minor}.{attempt.value.patch}"
@@ -75,33 +76,33 @@ def session_id() -> str:
     return GriptapeNodes.get_session_id() or ""
 
 
-def engine_name() -> str:
+async def engine_name() -> str:
     """Empty is reserved for an engine name lookup failure."""
-    attempt = request(GetEngineNameRequest(), GetEngineNameResultSuccess)
+    attempt = await request(GetEngineNameRequest(), GetEngineNameResultSuccess)
     if attempt.value is None:
         return ""
     return attempt.value.engine_name
 
 
-def top_level_flow_name() -> str | None:
+async def top_level_flow_name() -> str | None:
     """Resolve the flow name because flow-state and cancellation requests reject null names."""
-    attempt = request(GetTopLevelFlowRequest(), GetTopLevelFlowResultSuccess)
+    attempt = await request(GetTopLevelFlowRequest(), GetTopLevelFlowResultSuccess)
     if attempt.value is None:
         return None
     return attempt.value.flow_name
 
 
-def current_workflow_id() -> str:
+async def current_workflow_id() -> str:
     """Return the loaded workflow's id, or empty when none is loaded."""
-    attempt = request(GetWorkflowContextRequest(), GetWorkflowContextSuccess)
+    attempt = await request(GetWorkflowContextRequest(), GetWorkflowContextSuccess)
     if attempt.value is None or not attempt.value.workflow_name:
         return ""
     return attempt.value.workflow_name
 
 
-def workflow_table() -> dict | None:
+async def workflow_table() -> dict | None:
     """Return the engine's raw workflow dict, or None if the engine refused."""
-    attempt = request(ListAllWorkflowsRequest(), ListAllWorkflowsResultSuccess)
+    attempt = await request(ListAllWorkflowsRequest(), ListAllWorkflowsResultSuccess)
     if attempt.value is None:
         return None
     return attempt.value.workflows
@@ -115,32 +116,32 @@ class WorkflowLookup:
     registry_readable: bool
 
 
-def lookup_workflow(workflow_id: str) -> WorkflowLookup:
+async def lookup_workflow(workflow_id: str) -> WorkflowLookup:
     """Look one id up in the engine's registry, distinguishing why it was not found."""
-    table = workflow_table()
+    table = await workflow_table()
     if table is None:
         return WorkflowLookup(entry=None, registry_readable=False)
     entry = table.get(workflow_id)
     return WorkflowLookup(entry=entry if isinstance(entry, dict) else None, registry_readable=True)
 
 
-def workflow_entry(workflow_id: str) -> dict | None:
-    return lookup_workflow(workflow_id).entry
+async def workflow_entry(workflow_id: str) -> dict | None:
+    return (await lookup_workflow(workflow_id)).entry
 
 
-def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:
-    return request(GetFlowStateRequest(flow_name=flow_name), GetFlowStateResultSuccess)
+async def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:
+    return await request(GetFlowStateRequest(flow_name=flow_name), GetFlowStateResultSuccess)
 
 
 def flow_is_running(state: GetFlowStateResultSuccess) -> bool:
     return bool(state.resolving_nodes or state.control_nodes)
 
 
-def is_running() -> bool:
-    flow_name = top_level_flow_name()
+async def is_running() -> bool:
+    flow_name = await top_level_flow_name()
     if flow_name is None:
         return False
-    attempt = flow_state(flow_name)
+    attempt = await flow_state(flow_name)
     if attempt.value is None:
         return False
     return flow_is_running(attempt.value)

@@ -115,6 +115,14 @@ class HostClient:
 
     def request(self, request_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send one request and return the reply payload whose request_id matches."""
+        return self.reply_for(self.send(request_type, payload))
+
+    def send(self, request_type: str, payload: dict[str, Any] | None = None) -> str:
+        """Send without waiting, and return the id to claim the reply with.
+
+        Execute replies when the run ends, so racing a second request against a run in
+        progress means not waiting for the first reply.
+        """
         request_id = uuid.uuid4().hex
         self._send(
             {
@@ -127,6 +135,10 @@ class HostClient:
                 }
             }
         )
+        return request_id
+
+    def reply_for(self, request_id: str) -> dict[str, Any]:
+        """Pump until this request's reply arrives, recording notifications on the way."""
         return self._pump(until_request_id=request_id)
 
     def drain(self, seconds: float) -> list[Notification]:

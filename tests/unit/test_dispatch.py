@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
 
@@ -13,39 +15,48 @@ from nuke_host_api.events import (
 
 
 class TestVerb:
-    def test_the_declared_request_type_reaches_the_body(self) -> None:
+    async def test_the_declared_request_type_reaches_the_body(self) -> None:
         @verb(NukeConnectRequest)
-        def handler(request: NukeConnectRequest) -> ResultPayload:
+        async def handler(request: NukeConnectRequest) -> ResultPayload:
             return NukeListWorkflowsResultFailure(result_details=request.client_name)
 
-        result = handler(NukeConnectRequest(client_name="Nuke 16.0v7"))
+        result = await handler(NukeConnectRequest(client_name="Nuke 16.0v7"))
 
         assert str(result.result_details) == "Nuke 16.0v7"
 
-    def test_a_wrong_request_type_raises(self) -> None:
+    async def test_a_wrong_request_type_raises(self) -> None:
         @verb(NukeConnectRequest)
-        def handler(request: NukeConnectRequest) -> ResultPayload:  # noqa: ARG001
+        async def handler(request: NukeConnectRequest) -> ResultPayload:  # noqa: ARG001
             msg = "must not be reached"
             raise AssertionError(msg)
 
         with pytest.raises(TypeError, match="Expected NukeConnectRequest, got NukeListWorkflowsRequest"):
-            handler(NukeListWorkflowsRequest())
+            await handler(NukeListWorkflowsRequest())
 
-    def test_the_class_itself_is_not_an_instance(self) -> None:
+    async def test_the_class_itself_is_not_an_instance(self) -> None:
         @verb(NukeConnectRequest)
-        def handler(request: NukeConnectRequest) -> ResultPayload:  # noqa: ARG001
+        async def handler(request: NukeConnectRequest) -> ResultPayload:  # noqa: ARG001
             msg = "must not be reached"
             raise AssertionError(msg)
 
         with pytest.raises(TypeError):
-            handler(NukeConnectRequest)  # type: ignore[arg-type]
+            await handler(NukeConnectRequest)  # type: ignore[arg-type]
 
     def test_the_handler_keeps_its_identity(self) -> None:
         @verb(NukeConnectRequest)
-        def handle_something(request: RequestPayload) -> ResultPayload:  # noqa: ARG001
+        async def handle_something(request: RequestPayload) -> ResultPayload:  # noqa: ARG001
             return NukeListWorkflowsResultFailure(result_details="")
 
         assert handle_something.__name__ == "handle_something"
+
+    def test_a_guarded_handler_stays_a_coroutine_function(self) -> None:
+        """A sync verb would run on a side loop with the engine's loop blocked for its duration."""
+
+        @verb(NukeConnectRequest)
+        async def handle_something(request: RequestPayload) -> ResultPayload:  # noqa: ARG001
+            return NukeListWorkflowsResultFailure(result_details="")
+
+        assert inspect.iscoroutinefunction(handle_something)
 
 
 class TestFailure:
