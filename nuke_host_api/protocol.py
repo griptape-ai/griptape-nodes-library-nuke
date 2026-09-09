@@ -39,10 +39,11 @@ declares, so they answer for any registered workflow whether or not it is loaded
 change no engine state.
 
 *Loaded-state-addressed* verbs answer for whatever graph the engine currently holds:
-``NukeGetParameterValuesRequest``, ``NukeGetExecutionStateRequest``,
-``NukeCancelExecutionRequest``, and ``NukeExecuteWorkflowRequest``. None of them takes a
-``workflow_id`` to select with, because there is nothing to select from: a parameter's live
-value exists on a loaded node, and a flow can only be started or cancelled where it is.
+``NukeGetParameterValuesRequest``, ``NukeSetParameterValuesRequest``,
+``NukeGetExecutionStateRequest``, ``NukeCancelExecutionRequest``, and
+``NukeExecuteWorkflowRequest``. None of them takes a ``workflow_id`` to select with, because
+there is nothing to select from: a parameter's live value exists on a loaded node, and a flow
+can only be started or cancelled where it is.
 
 ``NukeLoadWorkflowRequest`` is the one verb that moves a workflow from the first group into
 the second, and the only verb that changes which workflow is loaded. That transition is
@@ -95,6 +96,7 @@ class Verb:
     EXECUTE_WORKFLOW = "NukeExecuteWorkflowRequest"
     GET_EXECUTION_STATE = "NukeGetExecutionStateRequest"
     GET_PARAMETER_VALUES = "NukeGetParameterValuesRequest"
+    SET_PARAMETER_VALUES = "NukeSetParameterValuesRequest"
     CANCEL_EXECUTION = "NukeCancelExecutionRequest"
     LIST_PROJECTS = "NukeListProjectsRequest"
     GET_CURRENT_PROJECT = "NukeGetCurrentProjectRequest"

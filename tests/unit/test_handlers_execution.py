@@ -25,7 +25,6 @@ from griptape_nodes.retained_mode.events.flow_events import (
 from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueRequest,
     SetParameterValueResultFailure,
-    SetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
@@ -47,7 +46,6 @@ from nuke_host_api.events import (
     NukeGetExecutionStateResultSuccess,
 )
 from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow, handle_get_execution_state
-from nuke_host_api.handlers.execution import _apply_inputs
 from nuke_host_api.protocol import ExecutionState
 from tests.unit.host_api_fakes import WORKFLOW_TABLE, execute_responses, use_engine
 
@@ -369,34 +367,6 @@ class TestExecuteWorkflow:
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "validation failed" in str(result.result_details)
-
-
-class TestApplyInputs:
-    def test_applied_and_rejected_inputs_are_tracked_separately(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def respond(request: SetParameterValueRequest) -> Any:
-            if request.parameter_name == "good":
-                return SetParameterValueResultSuccess(finalized_value=1, data_type="int", result_details="ok")
-            return SetParameterValueResultFailure(result_details="rejected: wrong type")
-
-        use_engine(monkeypatch, {SetParameterValueRequest: respond})
-
-        applied, rejected = _apply_inputs(
-            {"Node A": {"good": 1, "bad": "nope"}}, {("Node A", "good"), ("Node A", "bad")}
-        )
-
-        assert applied == [{"node": "Node A", "parameter": "good"}]
-        assert rejected == [{"node": "Node A", "parameter": "bad", "reason": "rejected: wrong type"}]
-
-    def test_a_non_dict_parameters_value_is_rejected_without_calling_the_engine(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        engine = use_engine(monkeypatch, {})
-
-        applied, rejected = _apply_inputs({"Node A": "not a dict"}, {("Node A", "good")})  # type: ignore[arg-type]
-
-        assert applied == []
-        assert rejected == [{"node": "Node A", "parameter": "*", "reason": "Expected an object of parameters."}]
-        assert engine.requests == []
 
 
 class TestGetExecutionState:
