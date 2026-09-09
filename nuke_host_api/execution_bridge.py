@@ -12,6 +12,9 @@ listeners and would never reach the host.
 Eight engine event types collapse into four node states. That ratio is the point: the
 engine is free to add a ninth without the host learning anything new.
 
+``InvolvedNodesEvent`` is forwarded separately as ``NukeExecutionNodesEvent`` because it
+reports a flow's node set, not a node state.
+
 Installed on the first ``NukeConnectRequest`` and torn down when the library unloads. The
 subscription is engine-global, so an engine no host has spoken to should not pay for it;
 see ``ensure_installed``.
@@ -39,6 +42,7 @@ from griptape_nodes.retained_mode.events.base_events import AppEvent
 from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowCancelledEvent,
     ControlFlowResolvedEvent,
+    InvolvedNodesEvent,
     NodeErrorEvent,
     NodeFinishProcessEvent,
     NodeResolvedEvent,
@@ -49,6 +53,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from nuke_host_api.events import (
+    NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
     NukeNodeStateEvent,
     NukeParameterValueEvent,
@@ -86,6 +91,7 @@ class ExecutionBridge:
             (NodeUnresolvedEvent, self._on_node_unresolved),
             (NodeErrorEvent, self._on_node_error),
             (ParameterValueUpdateEvent, self._on_parameter_value),
+            (InvolvedNodesEvent, self._on_involved_nodes),
             (ControlFlowResolvedEvent, self._on_flow_resolved),
             (ControlFlowCancelledEvent, self._on_flow_cancelled),
         )
@@ -128,7 +134,10 @@ class ExecutionBridge:
         self._installed = False
         logger.info("Nuke host API: unsubscribed from the execution event feed")
 
-    def _emit(self, payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent) -> None:
+    def _emit(
+        self,
+        payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent | NukeExecutionNodesEvent,
+    ) -> None:
         """Queue a host notification for broadcast over every IPC transport."""
         GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
 
@@ -176,6 +185,10 @@ class ExecutionBridge:
                 value=descriptor,
             )
         )
+
+    def _on_involved_nodes(self, event: InvolvedNodesEvent) -> None:
+        """Forward the engine's node list."""
+        self._emit(NukeExecutionNodesEvent(involved_nodes=list(event.involved_nodes)))
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:
         """Report that the engine finished the flow, without reading any values or claiming an outcome.

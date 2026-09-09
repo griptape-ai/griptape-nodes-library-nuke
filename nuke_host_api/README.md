@@ -259,6 +259,15 @@ Eight engine execution events collapse into four states (`unresolved`, `running`
 `resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a ninth event
 type without the host learning anything.
 
+`NukeExecutionNodesEvent` forwards the engine's node lists for progress tracking. The first
+non-empty list describes the top-level flow. Later lists describe subflows, but contain no
+flow identifier. An empty list marks top-level completion.
+
+Lists contain declared nodes, including nodes on untaken branches. A flow whose start is also
+its end emits no non-empty list. Events may arrive before `NukeExecuteWorkflowRequest` returns,
+so subscribe before executing. If an event is missed while a run is live,
+`NukeGetExecutionStateResultSuccess.involved_nodes` provides the top-level list.
+
 ### 6. Parameter value changes
 
 `NukeParameterValueEvent` carries a **normalized descriptor**, not a raw engine value.

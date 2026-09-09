@@ -29,7 +29,7 @@ has been compiled against this version, so the surface can still change.
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Parameter sections | `inputs`, `outputs` |
@@ -1118,8 +1118,8 @@ Preview a project's workspace and validation before activating it with
 
 ## Notifications
 
-Pushed without a request, labelled with `event_topic`. Eight engine execution event types
-collapse into these three notifications.
+Pushed without a request, labelled with `event_topic`. Nine engine execution event types
+collapse into these four notifications.
 
 ### NukeNodeStateEvent
 
@@ -1195,6 +1195,30 @@ the first terminal state received as authoritative and ignore a later one for th
 
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the parameters
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetParameterValuesRequest`.
+
+### NukeExecutionNodesEvent
+
+Node lists for progress tracking.
+
+| Field | Type | Notes |
+|---|---|---|
+| `involved_nodes` | `list[str]` | Nodes declared by an executing flow |
+
+```json
+{
+  "involved_nodes": ["Start Flow", "Blur", "End Flow"]
+}
+```
+
+The first non-empty list describes the top-level flow. Later lists describe subflows, but the
+payload contains no flow identifier. An empty list marks top-level completion.
+
+Lists include nodes on untaken branches, so resolved-node progress may finish below the list's
+length. A flow whose start is also its end emits no non-empty list.
+
+Events may arrive before `NukeExecuteWorkflowRequest` returns. Subscribe to `event_topic` before
+executing. If an event is missed while a run is live,
+`NukeGetExecutionStateRequest` returns the top-level `involved_nodes` list.
 
 ## Value descriptors
 
