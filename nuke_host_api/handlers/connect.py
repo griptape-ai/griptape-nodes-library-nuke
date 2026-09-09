@@ -1,5 +1,3 @@
-"""Negotiate a protocol version, open the event stream, and hand over engine identity."""
-
 from __future__ import annotations
 
 from nuke_host_api import execution_bridge, library_version
@@ -15,13 +13,7 @@ from nuke_host_api.protocol import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
 @verb(NukeConnectRequest)
 def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | NukeConnectResultFailure:
-    """Agree a protocol version and hand over the event topic.
-
-    Also installs the outbound event bridge, so a host must connect before it can receive
-    notifications. Connecting is the handshake, so gating the stream on it costs a host
-    nothing it was not already doing, and it keeps an engine that no host talks to free of
-    the bridge's engine-global subscription.
-    """
+    """Install the engine-global event bridge only after a host connects."""
     offered = request.client_protocol_versions or [PROTOCOL_VERSION]
     mutual = sorted(set(offered) & set(SUPPORTED_PROTOCOL_VERSIONS), reverse=True)
 
@@ -39,9 +31,7 @@ def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | Nu
 
     client = request.client_name or "unnamed host"
 
-    # Notifications start here, not at library load. The bridge's subscription is
-    # engine-global, so an engine no host has connected to should not pay to translate and
-    # re-emit every execution event it runs.
+    # The bridge is engine-global, so defer its cost until a host needs notifications.
     execution_bridge.ensure_installed()
 
     return NukeConnectResultSuccess(

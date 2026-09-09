@@ -61,7 +61,6 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
             ),
         )
 
-        # The engine-global event bridge waits for a host connection.
         logger.info("Nuke host API ready on protocol version %d", PROTOCOL_VERSION)
 
     def before_library_unregistered(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
@@ -78,5 +77,4 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
             Callable[[RequestPayload], ResultPayload] | Callable[[RequestPayload], Awaitable[ResultPayload]],
         ]
     ]:
-        """Register each host verb once in the orchestrator; worker handlers are not forwarded."""
         return list(ROUTES)

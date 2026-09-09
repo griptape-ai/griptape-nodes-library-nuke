@@ -1,13 +1,4 @@
-"""Bulk parameter-value reads and writes, addressed to whatever the engine has loaded.
-
-Thin, because the reading itself is shared with ``NukeLoadWorkflowRequest``: see
-``nuke_host_api.parameter_values`` for how a section is read and why it is read one engine
-request at a time. The write half shares its allow-list and its engine calls with
-``NukeExecuteWorkflowRequest``, in the same module, so a rejection reads the same way whether
-it came from setting a value or from starting a run. What lives here is each verb's own part:
-section selection and refusing an unknown section name for the read, and the empty-request and
-running-engine refusals for the write.
-"""
+"""Read and write values on the loaded workflow."""
 
 from __future__ import annotations
 
@@ -28,18 +19,9 @@ from nuke_host_api.protocol import PARAMETER_SECTIONS
 def handle_get_parameter_values(
     request: NukeGetParameterValuesRequest,
 ) -> NukeGetParameterValuesResultSuccess | NukeGetParameterValuesResultFailure:
-    """Read every declared parameter's current value for one or both sides of the loaded workflow.
-
-    Driven by the same ``workflow_shape`` that ``describe_workflow`` reports, so what a host
-    can read back here is exactly what it was told to expect: the same parameters, the same
-    normalized descriptor shape as a parameter's ``default`` and as a live
-    ``NukeParameterValueEvent``.
-    """
     attempted = "to read declared parameter values"
 
-    # Deduplicated before the unknown-name check, not after: a repeated name must not
-    # inflate requested_sections or the "N section(s)" count below, since that field's
-    # whole job is telling a host what was actually read apart from what came back empty.
+    # Deduplicate before validation so repeated names do not inflate the reported section count.
     sections: list[str] = list(dict.fromkeys(request.sections)) if request.sections else list(PARAMETER_SECTIONS)
     unknown = [section for section in sections if section not in PARAMETER_SECTIONS]
     if unknown:
@@ -82,32 +64,7 @@ def handle_get_parameter_values(
 def handle_set_parameter_values(
     request: NukeSetParameterValuesRequest,
 ) -> NukeSetParameterValuesResultSuccess | NukeSetParameterValuesResultFailure:
-    """Set values on the loaded workflow's declared inputs, without starting a run.
-
-    Shares its allow-list and its per-pair engine calls with ``NukeExecuteWorkflowRequest``,
-    through ``parameter_values.unaddressable_inputs_reason`` and ``parameter_values.apply_inputs``,
-    so a rejection reads the same way whether a host got it from setting a value live or from
-    starting a run.
-
-    Refuses a request with no pair to act on and nothing to reject: unlike execute, where no
-    inputs still means "run the graph as it stands," this verb sets values and nothing else, so
-    nothing to set is nothing to do. That covers an empty ``inputs`` and one where every named
-    node maps to an empty parameter dict, such as ``{"Start Flow": {}}``; either would otherwise
-    reach ``apply_inputs`` and come back a trivial, indistinguishable-from-real success with
-    nothing applied and nothing rejected. A node mapped to something that is not a dict is not
-    covered by this refusal, since ``apply_inputs`` has a rejection to report for it.
-
-    Also refuses while the engine is executing. The engine's own scheduler decides when
-    a node's parameter is actually read, so a value set mid-run cannot be told apart from one
-    that lands before the node that consumes it or one that lands after, and this layer must
-    not answer as if it knows which. A host that wants to stay live with the engine sets
-    values between runs; ``NukeCancelExecutionRequest`` is the way out of a run in progress.
-
-    Both refusals below report the loaded workflow's id, so a host reading
-    ``NukeSetParameterValuesResultFailure.workflow_id`` can tell a busy or empty-request
-    refusal against a loaded graph apart from one where nothing is loaded at all, the same
-    distinction ``NukeGetExecutionStateResultSuccess.workflow_id`` makes.
-    """
+    """Refuse writes during execution because parameter-read timing is unavailable."""
     attempted = "to set parameter values on the loaded workflow"
     loaded_id = engine.current_workflow_id()
 

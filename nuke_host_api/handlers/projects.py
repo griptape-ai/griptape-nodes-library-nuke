@@ -1,15 +1,4 @@
-"""Projects: which workspace the engine is on, what else is available, and how to switch.
-
-Workflows are registered per workspace and a project decides the workspace, so
-NukeListWorkflowsRequest and NukeDescribeWorkflowRequest always answer for whichever
-project happens to be current, with no way for a host to see that project or change it.
-These four verbs close that gap by narrowing the engine's project surface
-(``retained_mode/events/project_events.py``, handled in
-``retained_mode/managers/project_manager.py``) the way everything else in this layer is
-narrowed: ``ProjectTemplate`` is a pydantic model with dozens of fields,
-``ProjectValidationInfo`` and ``ProjectTemplateInfo`` are engine dataclasses, and
-``ProjectInfo`` additionally carries parsed macro caches. None of them cross the boundary.
-"""
+"""Narrow the engine's project API for hosts."""
 
 from __future__ import annotations
 
@@ -78,20 +67,7 @@ def handle_list_projects(
 
 
 def _describe_project(info: ProjectTemplateInfo, *, current_id: str, loaded: bool) -> dict[str, Any]:
-    """Narrow one ProjectTemplateInfo, loaded or failed, to the one shape NukeListProjectsRequest reports.
-
-    The engine builds the two kinds identically except for which fields it bothers to fill
-    in: a failed entry (``on_list_project_templates_request``) is constructed as
-    ``ProjectTemplateInfo(project_id=str(template_path), validation=validation)`` and
-    nothing else, so ``name``, ``project_file_path``, and ``parent_project_id`` are always
-    ``None`` on one, and its ``project_id`` is always the stringified path of the file that
-    failed to load. That guarantee (true only for a failed entry; a loaded one's id may be a
-    real GUID, a legacy canonical path, or the system-defaults sentinel) is what lets a
-    failed entry's missing ``file_path`` fall back to its own id instead of to an empty
-    string, while a missing ``name`` falls back to an explicit empty string on both kinds
-    rather than to the opaque id, which this protocol's own rule says a host must never
-    parse, construct, or display.
-    """
+    """Failed entries use their path as ID and may omit all other identity fields."""
     file_path = info.project_file_path
     if file_path is None and not loaded:
         file_path = info.project_id
@@ -114,11 +90,6 @@ def _describe_project(info: ProjectTemplateInfo, *, current_id: str, loaded: boo
 
 
 def _unavailable_reason(info: ProjectTemplateInfo) -> str:
-    """Collapse the engine's two independent unavailability signals into one string.
-
-    A failed parse and an engine-version mismatch are unrelated engine mechanisms, but a
-    host disabling a menu entry does not need to know which one fired.
-    """
     if not info.engine_version_compatible:
         return info.engine_version_reason or f"This project requires engine version {info.required_engine_version}."
     if not info.validation.is_usable():
@@ -156,19 +127,7 @@ def handle_get_current_project(
 def handle_set_current_project(
     request: NukeSetCurrentProjectRequest,
 ) -> NukeSetCurrentProjectResultSuccess | NukeSetCurrentProjectResultFailure:
-    """Switch projects, refusing while the engine is executing.
-
-    Reloading libraries under a live run is worse than refusing outright: the very library
-    driving the run could be torn down and rebuilt out from under it. Serial with
-    NukeExecuteWorkflowRequest for the same reason that verb refuses to start a second run.
-
-    ``workspace_changed`` is computed here rather than read from the engine's own result, by
-    comparing ``_current_workspace_dir`` before and after the switch. See that helper for why
-    it reads the live workspace rather than the offline resolver. The engine's
-    SetCurrentProjectResultSuccess itself carries no field for this; it only ever gains one
-    as a side effect of a GUI-facing "should I treat my local model as stale" flag that is
-    not documented to mean workspace change specifically and is not safe to depend on here.
-    """
+    """Refuse switches during execution and compare live workspaces around the switch."""
     attempted = f"to set the current project to '{request.project_id}'"
 
     if engine.is_running():
@@ -235,15 +194,7 @@ def _current_project_id() -> str:
 
 
 def _current_workspace_dir() -> str:
-    """Return the workspace directory the engine is actually configured against right now.
-
-    Reads GetWorkspaceRequest, not ResolveProjectWorkspaceRequest: this is the live value a
-    caller wants when asking about the project that is current, the same value
-    ``ProjectManager._activate_project`` itself compares before and after a switch to decide
-    whether to reload the workflow registry. Unlike the resolver, it never answers empty,
-    because it names no project id to fail to resolve; it just reads whatever the engine's
-    ``config_manager.workspace_path`` is, defaults included.
-    """
+    """Read live workspace configuration because project resolution can be empty for system defaults."""
     workspace = engine.request(GetWorkspaceRequest(), GetWorkspaceResultSuccess)
     if workspace.value is None:
         return ""
@@ -251,14 +202,7 @@ def _current_workspace_dir() -> str:
 
 
 def _resolve_workspace_dir(project_id: str) -> str:
-    """Return the workspace directory a project id would resolve to if activated, or empty when it resolves to none.
-
-    The offline previewer: used only by NukeDescribeProjectRequest, for a project that is
-    not current, where there is no live workspace to read and a resolved guess is the whole
-    point. Answers ``None`` (narrowed here to empty) for any id with no readable project file
-    on disk, which includes the system-defaults sentinel, so it must never be used for the
-    project that is actually current; see ``_current_workspace_dir``.
-    """
+    """Preview a project's workspace; unreadable files and system defaults resolve to empty."""
     resolved = engine.request(
         ResolveProjectWorkspaceRequest(project_id=project_id), ResolveProjectWorkspaceResultSuccess
     )
