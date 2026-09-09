@@ -70,8 +70,6 @@ logger = logging.getLogger("griptape_nodes")
 
 
 class ExecutionBridge:
-    """Subscribes to engine execution events and emits host notifications."""
-
     def __init__(self) -> None:
         self._installed = False
 
@@ -187,7 +185,6 @@ class ExecutionBridge:
         )
 
     def _on_involved_nodes(self, event: InvolvedNodesEvent) -> None:
-        """Forward the engine's node list."""
         self._emit(NukeExecutionNodesEvent(involved_nodes=list(event.involved_nodes)))
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:

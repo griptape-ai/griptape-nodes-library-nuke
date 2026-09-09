@@ -2,10 +2,7 @@
 
 A versioned API for driving the Griptape Nodes engine from Foundry Nuke.
 
-Nuke is pinned by studios for years and its plugin is a recompiled-per-version C++
-binary, so it is the slowest-moving artifact in the system. The engine moves on its own,
-faster release cadence. This library sits between them: it owns a small set of verbs and value
-types that the plugin binds to, and absorbs engine churn behind them.
+Studios pin Nuke and rebuild its C++ plugins per version, while the engine releases independently. This library gives the plugin a small, stable set of verbs and value types and absorbs engine changes.
 
 ```
 griptape-nodes-library.json       library registration
@@ -109,13 +106,7 @@ to read, and the only way to make one readable is to load it, which clears all o
 A read verb that quietly did that would discard a graph an editor user had open. So loading is
 its own verb, called deliberately, and a host is expected to confirm it with the artist.
 
-Before it existed, loading was a side effect of `NukeExecuteWorkflowRequest`, which left a
-host unable to read or set a parameter's live value without starting a run.
-
-One host verb, four engine requests plus one per declared parameter, because the engine has no
-load-and-describe entry point: `ImportWorkflowRequest` registers a file the engine has not seen
-and costs one more, `RunWorkflowFromRegistryRequest` builds the graph, and values come back one
-`GetParameterValueRequest` at a time.
+The engine has no load-and-describe entry point. Loading uses four engine requests plus one per declared parameter: `ImportWorkflowRequest` registers an unseen file, `RunWorkflowFromRegistryRequest` builds the graph, and values require one `GetParameterValueRequest` each.
 
 The reply carries four fields rather than two: `inputs` and `outputs` are exactly
 `describe_workflow`'s parameter lists, and `input_values` and `output_values` are exactly
@@ -276,13 +267,7 @@ a host has one value format rather than two.
 
 ### 7. Projects
 
-Workflows are registered per workspace and a project decides the workspace, so
-`NukeListWorkflowsRequest` and `NukeDescribeWorkflowRequest` always answer for whichever
-project happens to be current, with no way for a host to see that project or change it
-until now. `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`,
-`NukeSetCurrentProjectRequest`, and `NukeDescribeProjectRequest` wrap the engine's project
-surface (`retained_mode/events/project_events.py`, handled in
-`retained_mode/managers/project_manager.py`).
+Workflows are registered per workspace, and the current project selects the workspace. `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, and `NukeDescribeProjectRequest` wrap the engine's project surface (`retained_mode/events/project_events.py`, handled in `retained_mode/managers/project_manager.py`).
 
 `ProjectTemplate` is a pydantic model with dozens of fields, `ProjectValidationInfo` and
 `ProjectTemplateInfo` are engine dataclasses, and `ProjectInfo` additionally carries parsed
@@ -455,16 +440,9 @@ the meaning of one.
 `SUPPORTED_PROTOCOL_VERSIONS` is the support window. Studios keep plugin binaries in
 service for years, so entries leave on a stated schedule.
 
-### Nothing protects the contract yet
+### Contract snapshot
 
-The surface is not frozen. No plugin binary has been compiled against it, so there is no
-promise to keep and the set of verbs, types, and fields is still being reshaped.
-
-A snapshot guard belongs here the day the first plugin ships. It records everything a
-plugin can observe (verb and notification names, every payload's fields and whether each
-is required, the value type and source kind sets, the state strings, the descriptor keys)
-and asserts **frozen remains a subset of current**, which is the versioning policy made
-executable:
+The surface remains mutable until a plugin binary binds to it. Before shipping a plugin, add a snapshot that records observable names, fields, requiredness, enum members, and descriptor keys, then asserts that the frozen surface remains a subset of the current surface:
 
 | Change | Result |
 |---|---|
@@ -474,19 +452,11 @@ executable:
 | Make an optional field required | **fails** |
 | Drop a version from the support window | **fails** |
 
-A working implementation is kept outside version control, at
-`~/archive/griptape-nodes-library-nuke/host-api-reference-clients-20260825/` on the
-maintainer's machine, along with the steps to restore it. Move it into the repo when the guard
-lands. Recording a version is a promise to plugins already compiled against it, so record once
-and never overwrite.
+Record the snapshot once; overwriting it would erase the compatibility baseline.
 
-Until then, the rest of the suite does not catch a rename. Renaming a verb and deleting a
-result field, with the rename propagated into the tests the way an IDE would, leaves all
-other tests green.
+Without that guard, a rename propagated through the tests can leave the suite green.
 
-### What is still not covered
-
-Being explicit, because these are the remaining ways the contract can break.
+### Uncovered compatibility risks
 
 - **Semantic drift.** Nothing detects a field that keeps its name and changes meaning. If
   `terminal_node` started reporting the declared output node instead of the node control
@@ -503,9 +473,7 @@ Being explicit, because these are the remaining ways the contract can break.
 - **The support window is a list, not a policy.** Dropping v1 fails the test, but nothing
   encodes how long a version must stay supported. That remains a human decision.
 
-## Constraints discovered while building this
-
-Load-bearing for the design, and documented nowhere obvious.
+## Engine constraints
 
 1. **Library-internal top-level packages are process-global.** The first library to
     import a given package name owns it for the process lifetime; a later copy silently

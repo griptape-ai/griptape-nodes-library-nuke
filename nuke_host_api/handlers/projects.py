@@ -52,7 +52,6 @@ from nuke_host_api.events import (
 def handle_list_projects(
     request: NukeListProjectsRequest,
 ) -> NukeListProjectsResultSuccess | NukeListProjectsResultFailure:
-    """Fold the engine's loaded and failed template lists into one, the way workflow listing does."""
     listed = engine.request(
         ListProjectTemplatesRequest(include_system_builtins=request.include_system_builtins),
         ListProjectTemplatesResultSuccess,
@@ -131,7 +130,6 @@ def _unavailable_reason(info: ProjectTemplateInfo) -> str:
 def handle_get_current_project(
     request: NukeGetCurrentProjectRequest,  # noqa: ARG001
 ) -> NukeGetCurrentProjectResultSuccess | NukeGetCurrentProjectResultFailure:
-    """Read the engine's current ProjectInfo and flatten it to named primitives."""
     current = engine.request(GetCurrentProjectRequest(), GetCurrentProjectResultSuccess)
     if current.value is None:
         return failure(
@@ -207,7 +205,6 @@ def handle_set_current_project(
 def handle_describe_project(
     request: NukeDescribeProjectRequest,
 ) -> NukeDescribeProjectResultSuccess | NukeDescribeProjectResultFailure:
-    """Preview a project's workspace and validation without activating it."""
     attempted = f"to describe project '{request.project_id}'"
 
     template = engine.request(GetProjectTemplateRequest(project_id=request.project_id), GetProjectTemplateResultSuccess)
@@ -231,7 +228,6 @@ def handle_describe_project(
 
 
 def _current_project_id() -> str:
-    """Return the current project's id, or empty when the engine reports none is set."""
     current = engine.request(GetCurrentProjectRequest(), GetCurrentProjectResultSuccess)
     if current.value is None:
         return ""

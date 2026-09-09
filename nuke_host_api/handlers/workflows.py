@@ -19,7 +19,6 @@ from nuke_host_api.events import (
 def handle_list_workflows(
     request: NukeListWorkflowsRequest,
 ) -> NukeListWorkflowsResultSuccess | NukeListWorkflowsResultFailure:
-    """Translate to ListAllWorkflowsRequest and narrow the result."""
     table = workflow_table()
     if table is None:
         return failure(
