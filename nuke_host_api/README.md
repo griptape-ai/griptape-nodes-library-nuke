@@ -56,17 +56,15 @@ Unit tests need nothing running:
 make test/unit
 ```
 
-There is no reference client in the repo. A live smoke suite drives a running engine through
-the stdlib harness in `tests/integration/host_api_client.py`:
+The live smoke suite drives a running engine through the stdlib harness in
+`tests/integration/host_api_client.py`:
 
 ```bash
 make test/integration/host-api
 ```
 
-That harness is a test client, not something a plugin author should port wholesale, and it
-speaks `local_socket` rather than `websocket_direct`, the transport a plugin uses. So
-`INTEGRATION.md` is the contract, and anything transport-specific in it is verified by hand
-until the plugin exists.
+It uses `local_socket` rather than the plugin transport, `websocket_direct`.
+`INTEGRATION.md` defines transport behavior not covered by the smoke suite.
 
 ## The capabilities
 
@@ -134,11 +132,10 @@ discovery, `NukeLoadWorkflowRequest` to put one in the engine, then
 `NukeExecuteWorkflowRequest`, with `NukeGetExecutionStateRequest` and
 `NukeCancelExecutionRequest` against the engine.
 
-No execution identifier, deliberately. The engine threads none through its execution events, so
+No execution identifier. The engine threads none through its execution events, so
 any id minted here could not be correlated with the notifications that follow; attributing
 events to "whatever started most recently" is silently wrong as soon as anything else
-drives the engine, including the editor. Adding an id once the engine carries one is an
-additive change and costs no version bump, so there is no reason to fake one now.
+drives the engine, including the editor. An identifier can be added when engine events carry one.
 
 What makes that survivable is refusing to start a second run while one is in progress.
 Without the guard, a host could not tell which run any following notification described, or
@@ -505,10 +502,8 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 4. **`broadcast_app_event` does not reach a host.** It only notifies in-process
     listeners. `put_event(AppEvent(payload=...))` is the path that reaches IPC.
 
-5. **Result shapes are not stable in type, only in key.** `workflow_shape` arrives as a
-    JSON string for some workflows and null for others. An early version assumed a dict
-    and silently returned zero parameters for every workflow while every request still
-    reported success.
+5. **Result shapes vary in type, not key.** `workflow_shape` can be a
+    JSON string or null.
 
 6. **A library with zero nodes fails to load** with "no nodes were loaded". Not an issue
     here, since this library already ships nodes.
@@ -522,8 +517,8 @@ Without that guard, a rename propagated through the tests can leave the suite gr
     `RGBA`, `Grayscale`, `CMYK`. That is channel layout, not a transfer function, so
     nothing can say whether pixels are sRGB or scene-linear. Nuke works scene-linear, so
     untagged 8-bit output is silently wrong and reads as a tool bug.
-    `GTImage.colorspace` is reserved and always null: a nullable field now is free, a
-    required one later is a version bump.
+    `GTImage.colorspace` is reserved and always null because adding it later as required would
+    require a version bump.
 
 9. **Two brace systems share one syntax.** Directory macros (`{outputs}`) and workflow
     variables (`{MY_VAR}`) are syntactically identical, and only name resolution separates
@@ -561,7 +556,7 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   should be narrowed into named fields first. Adding them costs no version bump.
 - **A host addresses inputs by node name.** Node names are editable in the canvas, so
   renaming a start node breaks a host's saved knob mapping. Re-describing on connect is the
-  only mitigation today.
+  only mitigation.
 - **A stuck node locks a host out.** `flow_is_running` is true while the engine reports any
   resolving or control node, and both execute and load refuse while it is. A node that never
   returns, a Nuke subprocess that hangs, leaves that state set and every later execute and load

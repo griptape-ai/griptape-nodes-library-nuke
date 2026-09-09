@@ -1,5 +1,3 @@
-"""Workflow discovery: what a host may run, and what each one's parameters are."""
-
 from __future__ import annotations
 
 from nuke_host_api import shape
@@ -54,11 +52,7 @@ def handle_list_workflows(
 def handle_describe_workflow(
     request: NukeDescribeWorkflowRequest,
 ) -> NukeDescribeWorkflowResultSuccess | NukeDescribeWorkflowResultFailure:
-    """Describe one workflow, narrowing every parameter type on the way out.
-
-    Distinguishes an unreadable registry from an unknown id, because they are different
-    answers to a host: one is worth retrying, the other never is.
-    """
+    """Distinguish an unreadable registry from an unknown workflow ID."""
     found = lookup_workflow(request.workflow_id)
     if not found.registry_readable:
         return failure(

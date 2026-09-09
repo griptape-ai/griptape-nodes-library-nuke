@@ -1,5 +1,3 @@
-"""Execution: start a run, report on it, stop it."""
-
 from __future__ import annotations
 
 from griptape_nodes.retained_mode.events.execution_events import (
@@ -29,22 +27,7 @@ from nuke_host_api.protocol import ExecutionState
 def handle_execute_workflow(
     request: NukeExecuteWorkflowRequest,
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
-    """Apply inputs to the loaded workflow, then start the flow.
-
-    Loads nothing. ``NukeLoadWorkflowRequest`` owns that, so this verb cannot discard the
-    graph whose parameters a host has just been setting, and a host can set values, read them
-    back, and run without the engine rebuilding the graph in between.
-
-    Refuses to start over a run already in progress. With no execution id in the engine's
-    events a host could not tell which run the notifications that followed belonged to, nor
-    which one a cancel would stop. Serial execution is what makes those two gaps survivable.
-
-    Also refuses inputs it could not apply at all, and says which of three reasons it hit.
-    ``current_workflow_id`` answers for any graph the engine holds, including the unsaved one
-    an editor user is working on, and an unsaved graph publishes no declared shape to address
-    inputs to. An unreadable registry and an entry that has vanished from a readable one leave
-    the same empty allow-list behind for unrelated reasons, and each is fixed differently.
-    """
+    """Refuse concurrent runs because engine events carry no execution ID."""
     attempted = (
         f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
     )
@@ -69,8 +52,7 @@ def handle_execute_workflow(
             workflow_id=request.workflow_id,
         )
 
-    # Refused rather than loaded. Honouring the id would put loading back inside execute, and
-    # ignoring it would run a workflow the host did not ask for while reporting success.
+    # A workflow ID is a guard, not an implicit load request.
     if request.workflow_id and request.workflow_id != loaded_id:
         return failure(
             NukeExecuteWorkflowResultFailure,
@@ -85,9 +67,7 @@ def handle_execute_workflow(
     found = engine.lookup_workflow(loaded_id)
     declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
 
-    # Only checked when there are inputs to check. With none, what the workflow declares does
-    # not bear on the run, and a graph with no declared shape is exactly what an empty
-    # workflow_id is for.
+    # Shapeless graphs remain executable when no inputs need validation.
     if request.inputs:
         refusal = parameter_values.unaddressable_inputs_reason(
             loaded_id, found, declared, no_inputs_remedy="send no inputs to run the graph as it stands"
@@ -134,14 +114,7 @@ def handle_execute_workflow(
 def handle_get_execution_state(
     request: NukeGetExecutionStateRequest,  # noqa: ARG001
 ) -> NukeGetExecutionStateResultSuccess | NukeGetExecutionStateResultFailure:
-    """Translate the engine's flow state.
-
-    Holds no state of its own, so this cannot drift from the engine's own view the way a
-    cached copy would, and it still works after a host reconnects and has missed every
-    notification. Reports execution state only: a workflow's parameter values are a separate
-    read, ``NukeGetParameterValuesRequest``, because each one costs an engine round trip per
-    parameter and a host polling only for liveness should not pay for it.
-    """
+    """Read live flow state so reconnects do not depend on missed notifications."""
     attempted = "to read the engine's execution state"
 
     flow_name = engine.top_level_flow_name()
@@ -179,12 +152,7 @@ def handle_get_execution_state(
 def handle_cancel_execution(
     request: NukeCancelExecutionRequest,  # noqa: ARG001
 ) -> NukeCancelExecutionResultSuccess | NukeCancelExecutionResultFailure:
-    """Ask the engine to stop executing.
-
-    Cancels whatever the engine is running, because the engine offers no way to name a
-    specific execution. Correct while executions are serial, wrong the moment they are
-    not, which is a reason to want an engine-side execution id.
-    """
+    """Cancel the only running execution because the engine exposes no execution ID."""
     attempted = "to cancel the running workflow"
 
     flow_name = engine.top_level_flow_name()
@@ -203,5 +171,4 @@ def handle_cancel_execution(
             because=f"the engine refused. {cancelled.details}",
         )
 
-    # The terminal state arrives as a NukeExecutionStateEvent when the engine unwinds.
     return NukeCancelExecutionResultSuccess(result_details="Requested cancellation of the running workflow.")

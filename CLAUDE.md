@@ -64,7 +64,7 @@ Makefile                 All dev workflows (check, fix, version, deps)
 - `make fix` auto-corrects format and lint issues.
 - No comments unless the WHY is non-obvious (a hidden constraint, a workaround, a subtle invariant). Do not describe what the code does.
 - One-sentence docstrings max on public classes. No multi-line docstrings.
-- Exception: `nuke_host_api/` is a long-lived plugin protocol. Preserve engine-constraint rationale there, including unavailable engine data, reserved values, and versioning decisions. Multi-paragraph docstrings are allowed only in that package.
+- `nuke_host_api/` is a long-lived plugin protocol; preserve engine constraints, reserved values, and versioning decisions.
 - `from __future__ import annotations` first in every file. Stdlib → third-party → local import order.
 
 ---

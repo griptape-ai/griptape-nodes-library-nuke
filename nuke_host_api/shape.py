@@ -1,10 +1,4 @@
-"""Projection of the engine's workflow_shape into host-visible parameters.
-
-Reads registry entries and shape sections only, so it never issues an engine request of its
-own and needs no engine fake to test. Both verbs that publish parameters and both that consume
-them go through here, so a host cannot be told one thing by describe and another by
-execute.
-"""
+"""Project engine workflow shapes into host-visible parameters."""
 
 from __future__ import annotations
 
@@ -24,12 +18,7 @@ logger = logging.getLogger("griptape_nodes")
 
 
 def workflow_shape(entry: dict) -> dict:
-    """Return a registry entry's workflow_shape as a dict.
-
-    The engine sends this field as a JSON *string* for some workflows and omits it for
-    others. Absorbing that inconsistency is this layer's job; a host must never have to
-    know about it.
-    """
+    """Accept engine shapes encoded as dictionaries, JSON strings, or missing values."""
     raw_shape = entry.get("workflow_shape")
     if isinstance(raw_shape, dict):
         return raw_shape
@@ -45,13 +34,7 @@ def workflow_shape(entry: dict) -> dict:
 
 
 def is_runnable(entry: dict) -> tuple[bool, str]:
-    """Decide whether a host could actually execute this workflow, and say why not.
-
-    A declared input/output shape is necessary but not sufficient: the registry keeps
-    entries whose backing file has been moved or deleted, and its ``is_saved`` flag stays
-    True in that case, so it cannot be trusted. A host builds a menu from this answer, and
-    an entry that always fails to load is worse than an absent one.
-    """
+    """Reject stale registry entries because ``is_saved`` remains true after file deletion."""
     if not workflow_shape(entry):
         return False, "No declared input/output shape, so a host cannot drive it."
 
@@ -59,8 +42,7 @@ def is_runnable(entry: dict) -> tuple[bool, str]:
     if not file_path:
         return False, "The registry has no file path for this workflow."
 
-    # Registry paths are workspace-relative, so they are resolved through the engine's own
-    # resolver rather than against the process working directory.
+    # Registry paths are workspace-relative.
     absolute_path = Path(WorkflowRegistry.get_complete_file_path(str(file_path)))
     if not absolute_path.exists():
         return False, f"The workflow file is missing from disk: {absolute_path}"
@@ -69,12 +51,7 @@ def is_runnable(entry: dict) -> tuple[bool, str]:
 
 
 def data_parameters(section: object) -> Iterator[tuple[str, str, dict]]:
-    """Yield (node, parameter, parameter dict) for every data parameter in a shape section.
-
-    Control-flow parameters are execution wiring rather than data, so they never reach a
-    host. Shared by the describe path and the input allow-list so the two cannot disagree
-    about which parameters exist.
-    """
+    """Exclude control-flow parameters from the shared publication and allow-list projection."""
     if not isinstance(section, dict):
         return
     for node_name, parameters in section.items():
@@ -89,17 +66,7 @@ def data_parameters(section: object) -> Iterator[tuple[str, str, dict]]:
 
 
 def declared_parameters(section: object) -> list[dict[str, Any]]:
-    """Flatten a workflow_shape section into host-visible parameters.
-
-    The engine hands back ``{node: {parameter: {...20+ keys...}}}`` where the inner dict
-    changes shape between releases. A host needs enough to build a knob and nothing that
-    ties it to engine vocabulary, so the width stops here: identity, host type, the
-    author's default, help text, and whether it may be set. Unrecognized types degrade into
-    the closed host set.
-
-    ``default`` is a normalized descriptor rather than a raw engine value, so a parameter's
-    default and its live value arrive in the same shape.
-    """
+    """Normalize defaults so declarations and live values share one descriptor shape."""
     return [
         {
             "node": node_name,
@@ -115,12 +82,7 @@ def declared_parameters(section: object) -> list[dict[str, Any]]:
 
 
 def input_parameter_ids(entry: dict) -> set[tuple[str, str]]:
-    """Return the (node, parameter) pairs a host may set on this workflow.
-
-    Reads identity only. Building full parameter descriptors here would normalize every default,
-    and normalizing a macro-templated one issues an engine request whose result this caller
-    then discards.
-    """
+    """Avoid normalizing defaults because macro normalization issues engine requests."""
     return {
         (node_name, parameter_name)
         for node_name, parameter_name, _ in data_parameters(workflow_shape(entry).get("inputs"))

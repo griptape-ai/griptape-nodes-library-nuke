@@ -23,8 +23,7 @@ sends, receives, and must handle.
 
 ## Bound surface
 
-Defined in `nuke_host_api/protocol.py`. Not yet pinned by a recorded snapshot: no plugin
-has been compiled against this version, so the surface can still change.
+Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibility snapshot.
 
 | Category | Members |
 |---|---|
@@ -1171,8 +1170,7 @@ Terminal notification.
 
 `completed` means only that the engine finished the flow, not that it succeeded. The
 engine's `ControlFlowResolvedEvent` fires on both a clean run and an errored one and
-carries no status field, so this layer has nothing else to report. `failed` is reserved
-for the day the engine exposes that outcome on an event; it is not emitted today. The
+carries no status field, so this layer has nothing else to report. `failed` is reserved for an engine-provided flow outcome and is not emitted. The
 only way to detect an actual failure is to catch the live `NukeNodeStateEvent` with
 `state: "failed"` as it is pushed. `NukeGetExecutionStateRequest` cannot recover a missed
 one after the fact: its result carries running state and active/involved nodes, never a
