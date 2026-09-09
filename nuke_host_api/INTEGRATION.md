@@ -28,7 +28,7 @@ has been compiled against this version, so the surface can still change.
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
+| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
@@ -64,6 +64,7 @@ project verbs read and change engine-wide project state and need no loaded workf
 | `NukeLoadWorkflowRequest` | no, it is what loads one | yes, or a `file_path` |
 | `NukeExecuteWorkflowRequest` | yes | optional, and must match what is loaded |
 | `NukeGetParameterValuesRequest` | yes | no |
+| `NukeSetParameterValuesRequest` | yes | no |
 | `NukeGetExecutionStateRequest` | yes | no |
 | `NukeCancelExecutionRequest` | yes | no |
 
@@ -892,6 +893,67 @@ A name outside `inputs`/`outputs` fails rather than answering with nothing:
   }
 }
 ```
+
+### NukeSetParameterValuesRequest
+
+The write half of `NukeGetParameterValuesRequest`: sets values on the loaded workflow's
+declared inputs without starting a run, for a host that wants to stay live with the engine as
+an artist edits a knob rather than only diverging locally until the next
+`NukeExecuteWorkflowRequest`. Loaded-state-addressed like the read verb, so it takes no
+`workflow_id` either.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values. A request with no pair to act on is refused, not answered as a trivial success: that covers an empty `inputs` and one where every node maps to an empty parameter dict |
+
+| `NukeSetParameterValuesResultSuccess` field | Type | Notes |
+|---|---|---|
+| `workflow_id` | `str` | The workflow the values were applied to |
+| `applied_inputs` | `list[dict]` | `{node, parameter}` the engine accepted |
+| `rejected_inputs` | `list[dict]` | `{node, parameter, reason}` |
+
+```json
+{
+  "inputs": {
+    "Start Flow": {
+      "topic": "a quiet harbour at dusk"
+    }
+  }
+}
+```
+
+```json
+{
+  "workflow_id": "nuke_api_smoke",
+  "applied_inputs": [
+    {
+      "node": "Start Flow",
+      "parameter": "topic"
+    }
+  ],
+  "rejected_inputs": []
+}
+```
+
+Same allow-list, same two host-side rejection reasons, and the same rule that a rejection is
+not a failure of the request, as `NukeExecuteWorkflowRequest`: see that verb's section above
+for `"Expected an object of parameters."`, `"Not a declared input parameter of this
+workflow."`, and how the engine's own reason for refusing a declared pair reaches the host.
+Sending a request with no pair to act on is refused here, unlike execute, because there is
+nothing else for this verb to do; `NukeExecuteWorkflowRequest` treats empty inputs as "run the
+graph as it stands." A loaded graph that declares no input parameters, and a registry the
+engine cannot read, are refused the same two causes execute refuses them for, worded without
+the fallback execute offers: `NukeExecuteWorkflowRequest`'s versions of these two refusals end
+with "or send no inputs to run the graph as it stands," and this verb's do not, since sending
+no inputs is exactly what this verb's own empty-request refusal turns away. A loaded id no
+longer in the registry is refused the same third way execute refuses it: that refusal names no
+fallback either way.
+
+Refused while the engine is executing. The engine's own scheduler decides when a node's
+parameter is actually read, so a value set mid-run cannot be told apart from one that lands
+before the node that consumes it or one that lands after, and this layer must not answer as if
+it knows which. Wait for `NukeGetExecutionStateRequest` to report `running: false`, or the
+terminal `NukeExecutionStateEvent`, or cancel with `NukeCancelExecutionRequest`, then retry.
 
 ### NukeCancelExecutionRequest
 

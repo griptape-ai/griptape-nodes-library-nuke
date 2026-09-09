@@ -9,12 +9,19 @@ from griptape_nodes.retained_mode.events.context_events import (
     GetWorkflowContextRequest,
     GetWorkflowContextSuccess,
 )
+from griptape_nodes.retained_mode.events.execution_events import (
+    GetFlowStateRequest,
+    GetFlowStateResultSuccess,
+    StartFlowRequest,
+)
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultFailure,
+    SetParameterValueRequest,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
+    ListAllWorkflowsResultFailure,
     ListAllWorkflowsResultSuccess,
 )
 
@@ -22,10 +29,13 @@ from nuke_host_api.events import (
     NukeGetParameterValuesRequest,
     NukeGetParameterValuesResultFailure,
     NukeGetParameterValuesResultSuccess,
+    NukeSetParameterValuesRequest,
+    NukeSetParameterValuesResultFailure,
+    NukeSetParameterValuesResultSuccess,
 )
-from nuke_host_api.handlers import handle_get_parameter_values
+from nuke_host_api.handlers import handle_get_parameter_values, handle_set_parameter_values
 from nuke_host_api.protocol import ParameterSection, ValueType
-from tests.unit.host_api_fakes import SHAPE, respond_to_get_value, use_engine
+from tests.unit.host_api_fakes import SHAPE, execute_responses, respond_to_get_value, use_engine
 
 NOTHING_LOADED = {GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="", result_details="ok")}
 
@@ -124,3 +134,134 @@ class TestGetParameterValues:
         assert isinstance(result, NukeGetParameterValuesResultSuccess)
         descriptor = result.outputs["End Flow"]["was_successful"]
         assert set(descriptor) == {"value_type", "sources", "colorspace", "engine_type"}
+
+
+# execute_responses() already sets up an idle flow with "wf1" loaded and its declared shape
+# readable, which is exactly the preflight NukeSetParameterValuesRequest shares with
+# NukeExecuteWorkflowRequest.
+UNSAVED_GRAPH_LOADED: dict[type, Any] = {
+    GetWorkflowContextRequest: GetWorkflowContextSuccess(
+        workflow_name="unsaved:9f0c", is_saved=False, result_details="ok"
+    ),
+    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
+        workflows={"wf1": {"workflow_shape": SHAPE}, "unsaved:9f0c": {"name": "Untitled"}}, result_details="ok"
+    ),
+}
+
+
+class TestSetParameterValues:
+    def test_a_declared_input_is_applied_without_starting_a_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultSuccess)
+        assert result.workflow_id == "wf1"
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
+        assert result.rejected_inputs == []
+        assert not any(isinstance(r, StartFlowRequest) for r in engine.requests)
+
+    def test_an_empty_request_is_refused_rather_than_answered_as_a_trivial_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest())
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert "nothing to set" in str(result.result_details)
+        assert result.workflow_id == "wf1", "a workflow is loaded, so the refusal must say which one"
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
+
+    def test_a_node_mapped_to_an_empty_parameter_dict_is_refused_the_same_way_as_no_inputs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """{"Start Flow": {}} has no pair to act on and none to reject: a trivial success too."""
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert "nothing to set" in str(result.result_details)
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
+
+    def test_refuses_while_the_engine_is_executing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A value set mid-run cannot be told apart from one that landed in time or too late."""
+        engine = use_engine(
+            monkeypatch,
+            execute_responses(
+                {
+                    GetFlowStateRequest: GetFlowStateResultSuccess(
+                        control_nodes=["C1"], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="busy"
+                    )
+                }
+            ),
+        )
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert result.workflow_id == "wf1", "busy must not read the same as nothing loaded"
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
+
+    def test_fails_when_nothing_is_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch, execute_responses(NOTHING_LOADED))
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert "NukeLoadWorkflowRequest" in str(result.result_details)
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
+
+    def test_a_pair_outside_the_allow_list_is_rejected_not_forwarded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = handle_set_parameter_values(
+            NukeSetParameterValuesRequest(
+                inputs={"Start Flow": {"topic": "ok"}, "Some Private Node": {"api_key": "stolen"}}
+            )
+        )
+
+        assert isinstance(result, NukeSetParameterValuesResultSuccess)
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
+        assert result.rejected_inputs == [
+            {
+                "node": "Some Private Node",
+                "parameter": "api_key",
+                "reason": "Not a declared input parameter of this workflow.",
+            }
+        ]
+        touched = {r.node_name for r in engine.requests if isinstance(r, SetParameterValueRequest)}
+        assert touched == {"Start Flow"}
+
+    def test_values_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        assert result.workflow_id == "unsaved:9f0c"
+        details = str(result.result_details)
+        assert "declares no input parameters" in details
+        assert details.endswith("save it and load it by id."), (
+            "no dead-end remedy: this verb refuses an empty request too"
+        )
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
+
+    def test_an_unreadable_registry_is_a_retryable_refusal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(
+            monkeypatch,
+            execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
+        )
+
+        result = handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}}))
+
+        assert isinstance(result, NukeSetParameterValuesResultFailure)
+        details = str(result.result_details)
+        assert "could not read the workflow registry" in details
+        assert details.endswith("could not be checked against it. Retry."), (
+            "no dead-end remedy: this verb refuses an empty request too"
+        )
+        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
