@@ -12,7 +12,7 @@ from nuke_host_api.protocol import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
 
 @verb(NukeConnectRequest)
-def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | NukeConnectResultFailure:
+async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | NukeConnectResultFailure:
     """Install the engine-global event bridge only after a host connects."""
     offered = request.client_protocol_versions or [PROTOCOL_VERSION]
     mutual = sorted(set(offered) & set(SUPPORTED_PROTOCOL_VERSIONS), reverse=True)
@@ -37,12 +37,12 @@ def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | Nu
     return NukeConnectResultSuccess(
         protocol_version=mutual[0],
         supported_protocol_versions=list(SUPPORTED_PROTOCOL_VERSIONS),
-        engine_version=engine_version(),
+        engine_version=await engine_version(),
         library_version=library_version.version(),
         event_topic=event_topic(),
         value_types=list(VALUE_TYPES),
         engine_id=engine_id(),
         session_id=session_id(),
-        engine_name=engine_name(),
+        engine_name=await engine_name(),
         result_details=f"Connected {client} on host API protocol version {mutual[0]}.",
     )

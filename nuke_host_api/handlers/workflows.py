@@ -14,10 +14,10 @@ from nuke_host_api.events import (
 
 
 @verb(NukeListWorkflowsRequest)
-def handle_list_workflows(
+async def handle_list_workflows(
     request: NukeListWorkflowsRequest,
 ) -> NukeListWorkflowsResultSuccess | NukeListWorkflowsResultFailure:
-    table = workflow_table()
+    table = await workflow_table()
     if table is None:
         return failure(
             NukeListWorkflowsResultFailure,
@@ -49,11 +49,11 @@ def handle_list_workflows(
 
 
 @verb(NukeDescribeWorkflowRequest)
-def handle_describe_workflow(
+async def handle_describe_workflow(
     request: NukeDescribeWorkflowRequest,
 ) -> NukeDescribeWorkflowResultSuccess | NukeDescribeWorkflowResultFailure:
     """Distinguish an unreadable registry from an unknown workflow ID."""
-    found = lookup_workflow(request.workflow_id)
+    found = await lookup_workflow(request.workflow_id)
     if not found.registry_readable:
         return failure(
             NukeDescribeWorkflowResultFailure,

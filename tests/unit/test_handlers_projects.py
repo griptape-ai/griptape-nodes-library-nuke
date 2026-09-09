@@ -127,7 +127,7 @@ def _current(info: ProjectInfo | None) -> dict[type, object]:
 
 
 class TestListProjects:
-    def test_folds_loaded_and_failed_templates_into_one_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_folds_loaded_and_failed_templates_into_one_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         loaded = ProjectTemplateInfo(
             project_id="proj-1", validation=_validation(), name="Proj One", engine_version_compatible=True
         )
@@ -143,7 +143,7 @@ class TestListProjects:
         }
         use_engine(monkeypatch, responses)
 
-        result = handle_list_projects(NukeListProjectsRequest())
+        result = await handle_list_projects(NukeListProjectsRequest())
 
         assert isinstance(result, NukeListProjectsResultSuccess)
         by_id = {project["id"]: project for project in result.projects}
@@ -153,7 +153,7 @@ class TestListProjects:
         assert by_id["proj-2"]["current"] is False
         assert by_id["proj-2"]["unavailable_reason"]
 
-    def test_a_failed_entrys_id_is_reused_as_its_file_path_but_never_as_its_name(
+    async def test_a_failed_entrys_id_is_reused_as_its_file_path_but_never_as_its_name(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A failed entry's id is the stringified path that failed to load; a host must never display it as a name."""
@@ -169,14 +169,14 @@ class TestListProjects:
         }
         use_engine(monkeypatch, responses)
 
-        result = handle_list_projects(NukeListProjectsRequest())
+        result = await handle_list_projects(NukeListProjectsRequest())
 
         assert isinstance(result, NukeListProjectsResultSuccess)
         entry = result.projects[0]
         assert entry["name"] == ""
         assert entry["file_path"] == "/projects/broken/griptape-nodes-project.yml"
 
-    def test_an_engine_incompatible_project_is_unavailable_with_a_reason_a_host_can_show(
+    async def test_an_engine_incompatible_project_is_unavailable_with_a_reason_a_host_can_show(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         loaded = ProjectTemplateInfo(
@@ -195,13 +195,13 @@ class TestListProjects:
         }
         use_engine(monkeypatch, responses)
 
-        result = handle_list_projects(NukeListProjectsRequest())
+        result = await handle_list_projects(NukeListProjectsRequest())
 
         assert isinstance(result, NukeListProjectsResultSuccess)
         assert result.projects[0]["available"] is False
         assert result.projects[0]["unavailable_reason"] == "This engine is too old."
 
-    def test_a_failed_to_load_template_reports_unavailable_even_with_no_engine_incompatibility(
+    async def test_a_failed_to_load_template_reports_unavailable_even_with_no_engine_incompatibility(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         failed = ProjectTemplateInfo(project_id="proj-2", validation=_validation(ProjectValidationStatus.MISSING))
@@ -213,25 +213,25 @@ class TestListProjects:
         }
         use_engine(monkeypatch, responses)
 
-        result = handle_list_projects(NukeListProjectsRequest())
+        result = await handle_list_projects(NukeListProjectsRequest())
 
         assert isinstance(result, NukeListProjectsResultSuccess)
         assert result.projects[0]["available"] is False
         assert result.projects[0]["unavailable_reason"]
 
-    def test_an_unreadable_registry_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_an_unreadable_registry_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # ListProjectTemplatesRequest has no engine-level failure result: its handler never
         # refuses. The only way this layer sees a failure is the app's own catch-all, an
         # unhandled exception turned into a bare ResultPayloadFailure.
         use_engine(monkeypatch, {ListProjectTemplatesRequest: ResultPayloadFailure(result_details="no")})
 
-        result = handle_list_projects(NukeListProjectsRequest())
+        result = await handle_list_projects(NukeListProjectsRequest())
 
         assert isinstance(result, NukeListProjectsResultFailure)
 
 
 class TestGetCurrentProject:
-    def test_flattens_project_info_to_named_primitives(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_flattens_project_info_to_named_primitives(self, monkeypatch: pytest.MonkeyPatch) -> None:
         info = _project_info(
             "proj-1",
             file_path=Path("/projects/proj-1/griptape-nodes-project.yml"),
@@ -242,7 +242,7 @@ class TestGetCurrentProject:
         responses = {**_current(info), **_workspace("/workspace/proj-1")}
         use_engine(monkeypatch, responses)
 
-        result = handle_get_current_project(NukeGetCurrentProjectRequest())
+        result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
         assert result.id == "proj-1"
@@ -254,14 +254,16 @@ class TestGetCurrentProject:
         assert result.validation_status == "FLAWED"
         assert result.problems == ["something is off"]
 
-    def test_no_current_project_is_reported_as_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_no_current_project_is_reported_as_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(monkeypatch, _current(None))
 
-        result = handle_get_current_project(NukeGetCurrentProjectRequest())
+        result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultFailure)
 
-    def test_a_project_with_no_backing_file_reports_an_empty_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_project_with_no_backing_file_reports_an_empty_file_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The system defaults project has no backing file, but it still has a real, live workspace.
 
         ``file_path`` is empty because the defaults are not file-backed. ``workspace_dir`` is
@@ -272,7 +274,7 @@ class TestGetCurrentProject:
         responses = {**_current(info), **_workspace("/workspace/global")}
         use_engine(monkeypatch, responses)
 
-        result = handle_get_current_project(NukeGetCurrentProjectRequest())
+        result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
         assert result.file_path == ""
@@ -280,7 +282,9 @@ class TestGetCurrentProject:
 
 
 class TestSetCurrentProject:
-    def test_reports_workspace_changed_when_the_live_workspace_differs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_reports_workspace_changed_when_the_live_workspace_differs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         after_info = _project_info("proj-2")
         workspaces = iter(["/workspace/proj-1", "/workspace/proj-2"])
         fake = use_engine(
@@ -295,14 +299,14 @@ class TestSetCurrentProject:
             },
         )
 
-        result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
+        result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
 
         assert isinstance(result, NukeSetCurrentProjectResultSuccess)
         assert result.project_id == "proj-2"
         assert result.workspace_changed is True
         assert any(isinstance(req, SetCurrentProjectRequest) and req.project_id == "proj-2" for req in fake.requests)
 
-    def test_reports_workspace_unchanged_when_the_live_workspace_is_the_same(
+    async def test_reports_workspace_unchanged_when_the_live_workspace_is_the_same(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         info = _project_info("proj-1")
@@ -316,12 +320,12 @@ class TestSetCurrentProject:
             },
         )
 
-        result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-1"))
+        result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-1"))
 
         assert isinstance(result, NukeSetCurrentProjectResultSuccess)
         assert result.workspace_changed is False
 
-    def test_a_switch_onto_system_defaults_sharing_the_outgoing_workspace_reports_unchanged(
+    async def test_a_switch_onto_system_defaults_sharing_the_outgoing_workspace_reports_unchanged(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Regression for the offline resolver's blind spot: it cannot resolve the defaults sentinel at all.
@@ -342,12 +346,12 @@ class TestSetCurrentProject:
             },
         )
 
-        result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id=None))
+        result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id=None))
 
         assert isinstance(result, NukeSetCurrentProjectResultSuccess)
         assert result.workspace_changed is False
 
-    def test_refuses_while_the_engine_is_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_refuses_while_the_engine_is_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(
             monkeypatch,
             {
@@ -358,12 +362,12 @@ class TestSetCurrentProject:
             },
         )
 
-        result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
+        result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
 
         assert isinstance(result, NukeSetCurrentProjectResultFailure)
         assert "already executing" in str(result.result_details)
 
-    def test_an_engine_refusal_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_an_engine_refusal_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(
             monkeypatch,
             {
@@ -373,14 +377,14 @@ class TestSetCurrentProject:
             },
         )
 
-        result = handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
+        result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
 
         assert isinstance(result, NukeSetCurrentProjectResultFailure)
         assert "engine version mismatch" in str(result.result_details)
 
 
 class TestDescribeProject:
-    def test_previews_workspace_and_validation_without_activating(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_previews_workspace_and_validation_without_activating(self, monkeypatch: pytest.MonkeyPatch) -> None:
         responses = {
             GetProjectTemplateRequest: GetProjectTemplateResultSuccess(
                 template=_template("Proj Two", "another project"),
@@ -391,7 +395,7 @@ class TestDescribeProject:
         }
         use_engine(monkeypatch, responses)
 
-        result = handle_describe_project(NukeDescribeProjectRequest(project_id="proj-2"))
+        result = await handle_describe_project(NukeDescribeProjectRequest(project_id="proj-2"))
 
         assert isinstance(result, NukeDescribeProjectResultSuccess)
         assert result.project_id == "proj-2"
@@ -401,13 +405,13 @@ class TestDescribeProject:
         assert result.validation_status == "GOOD"
         assert result.problems == []
 
-    def test_an_unloaded_project_id_is_reported_as_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_an_unloaded_project_id_is_reported_as_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(
             monkeypatch,
             {GetProjectTemplateRequest: GetProjectTemplateResultFailure(result_details="not loaded yet")},
         )
 
-        result = handle_describe_project(NukeDescribeProjectRequest(project_id="ghost"))
+        result = await handle_describe_project(NukeDescribeProjectRequest(project_id="ghost"))
 
         assert isinstance(result, NukeDescribeProjectResultFailure)
         assert result.project_id == "ghost"

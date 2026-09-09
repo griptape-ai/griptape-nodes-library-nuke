@@ -55,14 +55,19 @@ const Transport = (function () {
   // Registering the reply is separate from sending the frame, because a batch registers several
   // replies and sends one frame.
   function trackReply(requestId, requestType, timeoutMs) {
-    const budget = timeoutMs || REQUEST_TIMEOUT_MS;
+    const budget = timeoutMs === undefined ? REQUEST_TIMEOUT_MS : timeoutMs;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(requestId);
-        reject(
-          new Error("Timed out after " + budget / 1000 + "s waiting for a reply to " + requestType),
-        );
-      }, budget);
+      // A budget of 0 means none: execute's reply waits out the whole run.
+      const timer = budget
+        ? setTimeout(() => {
+            pending.delete(requestId);
+            reject(
+              new Error(
+                "Timed out after " + budget / 1000 + "s waiting for a reply to " + requestType,
+              ),
+            );
+          }, budget)
+        : null;
       pending.set(requestId, { resolve, reject, timer });
     });
   }

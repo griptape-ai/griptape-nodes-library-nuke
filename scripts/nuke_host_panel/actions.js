@@ -4,7 +4,8 @@
 // loaded-workflow state, so they live together and are grouped by section below.
 const Actions = (function () {
   const { VERB } = Protocol;
-  const { DRAIN_GRACE_MS, HISTORY_LIMIT, POLL_TICK_MS, WRITE_THROUGH_DEBOUNCE_MS } = Config;
+  const { DRAIN_GRACE_MS, EXECUTE_TIMEOUT_MS, HISTORY_LIMIT, POLL_TICK_MS, WRITE_THROUGH_DEBOUNCE_MS } =
+    Config;
   const { banner, guard, remembered, rememberFields, remember, setState, state } = Store;
   const { closeSocket, detailOf, isOpen, request, requestBatch, succeeded } = Transport;
   const { noteRunActivity } = Events;
@@ -247,23 +248,32 @@ const Actions = (function () {
     });
     noteRunActivity(true);
 
+    // Both before the request, not after it: execute's reply lands when the run ends, so a run log
+    // entry opened after it would be closed by the terminal event before it existed, and a poll
+    // started after it would find the run already over.
+    openRun();
+    startPolling();
+
     // Sending the loaded id turns a graph swapped out from under this panel into a refusal instead
     // of a run of the wrong thing.
-    const reply = await request(VERB.EXECUTE_WORKFLOW, {
-      workflow_id: state().loaded.workflow_id,
-      inputs: collectInputs(),
-    });
+    const reply = await request(
+      VERB.EXECUTE_WORKFLOW,
+      {
+        workflow_id: state().loaded.workflow_id,
+        inputs: collectInputs(),
+      },
+      EXECUTE_TIMEOUT_MS,
+    );
 
     if (!succeeded(reply)) {
+      stopPolling();
+      discardRun();
       setState({ runActive: false, runStartedAt: null, runOrigin: null });
       banner("bad", "Run refused.", detailOf(reply));
       return;
     }
 
-    openRun();
-    startPolling();
-
-    if (reportRejections("The run started anyway.", reply.result || {}, true)) return;
+    if (reportRejections("The run went ahead anyway.", reply.result || {}, true)) return;
     setState({ banner: null });
   }
 
@@ -365,6 +375,12 @@ const Actions = (function () {
         .concat(state().history)
         .slice(0, HISTORY_LIMIT),
     });
+  }
+
+  // A refused run is not a run. The entry is opened before the request, because the reply is the
+  // last thing to arrive, so a refusal has to take it back out.
+  function discardRun() {
+    setState({ history: state().history.filter((run) => run.state !== "running") });
   }
 
   // Failures are copied off the node states: the terminal event carries no outcome, and no later

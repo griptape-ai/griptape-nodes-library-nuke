@@ -38,10 +38,10 @@ from nuke_host_api.events import (
 
 
 @verb(NukeListProjectsRequest)
-def handle_list_projects(
+async def handle_list_projects(
     request: NukeListProjectsRequest,
 ) -> NukeListProjectsResultSuccess | NukeListProjectsResultFailure:
-    listed = engine.request(
+    listed = await engine.request(
         ListProjectTemplatesRequest(include_system_builtins=request.include_system_builtins),
         ListProjectTemplatesResultSuccess,
     )
@@ -52,7 +52,7 @@ def handle_list_projects(
             because=f"the engine could not read the project registry. {listed.details}",
         )
 
-    current_id = _current_project_id()
+    current_id = await _current_project_id()
     projects = [
         _describe_project(info, current_id=current_id, loaded=True) for info in listed.value.successfully_loaded
     ]
@@ -98,10 +98,10 @@ def _unavailable_reason(info: ProjectTemplateInfo) -> str:
 
 
 @verb(NukeGetCurrentProjectRequest)
-def handle_get_current_project(
+async def handle_get_current_project(
     request: NukeGetCurrentProjectRequest,  # noqa: ARG001
 ) -> NukeGetCurrentProjectResultSuccess | NukeGetCurrentProjectResultFailure:
-    current = engine.request(GetCurrentProjectRequest(), GetCurrentProjectResultSuccess)
+    current = await engine.request(GetCurrentProjectRequest(), GetCurrentProjectResultSuccess)
     if current.value is None:
         return failure(
             NukeGetCurrentProjectResultFailure,
@@ -116,7 +116,7 @@ def handle_get_current_project(
         description=info.template.description or "",
         file_path=str(info.project_file_path) if info.project_file_path is not None else "",
         base_dir=str(info.project_base_dir),
-        workspace_dir=_current_workspace_dir(),
+        workspace_dir=await _current_workspace_dir(),
         validation_status=str(info.validation.status),
         problems=[problem.message for problem in info.validation.problems],
         result_details=f"Current project is '{info.project_id}'.",
@@ -124,13 +124,13 @@ def handle_get_current_project(
 
 
 @verb(NukeSetCurrentProjectRequest)
-def handle_set_current_project(
+async def handle_set_current_project(
     request: NukeSetCurrentProjectRequest,
 ) -> NukeSetCurrentProjectResultSuccess | NukeSetCurrentProjectResultFailure:
     """Refuse switches during execution and compare live workspaces around the switch."""
     attempted = f"to set the current project to '{request.project_id}'"
 
-    if engine.is_running():
+    if await engine.is_running():
         return failure(
             NukeSetCurrentProjectResultFailure,
             attempted=attempted,
@@ -140,9 +140,11 @@ def handle_set_current_project(
             ),
         )
 
-    before_workspace = _current_workspace_dir()
+    before_workspace = await _current_workspace_dir()
 
-    switched = engine.request(SetCurrentProjectRequest(project_id=request.project_id), SetCurrentProjectResultSuccess)
+    switched = await engine.request(
+        SetCurrentProjectRequest(project_id=request.project_id), SetCurrentProjectResultSuccess
+    )
     if switched.value is None:
         return failure(
             NukeSetCurrentProjectResultFailure,
@@ -150,8 +152,8 @@ def handle_set_current_project(
             because=f"the engine refused. {switched.details}",
         )
 
-    current_id = _current_project_id()
-    after_workspace = _current_workspace_dir()
+    current_id = await _current_project_id()
+    after_workspace = await _current_workspace_dir()
 
     return NukeSetCurrentProjectResultSuccess(
         project_id=current_id,
@@ -161,12 +163,14 @@ def handle_set_current_project(
 
 
 @verb(NukeDescribeProjectRequest)
-def handle_describe_project(
+async def handle_describe_project(
     request: NukeDescribeProjectRequest,
 ) -> NukeDescribeProjectResultSuccess | NukeDescribeProjectResultFailure:
     attempted = f"to describe project '{request.project_id}'"
 
-    template = engine.request(GetProjectTemplateRequest(project_id=request.project_id), GetProjectTemplateResultSuccess)
+    template = await engine.request(
+        GetProjectTemplateRequest(project_id=request.project_id), GetProjectTemplateResultSuccess
+    )
     if template.value is None:
         return failure(
             NukeDescribeProjectResultFailure,
@@ -179,31 +183,31 @@ def handle_describe_project(
         project_id=request.project_id,
         name=template.value.template.name,
         description=template.value.template.description or "",
-        workspace_dir=_resolve_workspace_dir(request.project_id),
+        workspace_dir=await _resolve_workspace_dir(request.project_id),
         validation_status=str(template.value.validation.status),
         problems=[problem.message for problem in template.value.validation.problems],
         result_details=f"Described project '{request.project_id}' for a host client.",
     )
 
 
-def _current_project_id() -> str:
-    current = engine.request(GetCurrentProjectRequest(), GetCurrentProjectResultSuccess)
+async def _current_project_id() -> str:
+    current = await engine.request(GetCurrentProjectRequest(), GetCurrentProjectResultSuccess)
     if current.value is None:
         return ""
     return str(current.value.project_info.project_id)
 
 
-def _current_workspace_dir() -> str:
+async def _current_workspace_dir() -> str:
     """Read live workspace configuration because project resolution can be empty for system defaults."""
-    workspace = engine.request(GetWorkspaceRequest(), GetWorkspaceResultSuccess)
+    workspace = await engine.request(GetWorkspaceRequest(), GetWorkspaceResultSuccess)
     if workspace.value is None:
         return ""
     return workspace.value.workspace_path
 
 
-def _resolve_workspace_dir(project_id: str) -> str:
+async def _resolve_workspace_dir(project_id: str) -> str:
     """Preview a project's workspace; unreadable files and system defaults resolve to empty."""
-    resolved = engine.request(
+    resolved = await engine.request(
         ResolveProjectWorkspaceRequest(project_id=project_id), ResolveProjectWorkspaceResultSuccess
     )
     if resolved.value is None or resolved.value.workspace_dir is None:

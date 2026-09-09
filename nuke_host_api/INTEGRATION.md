@@ -677,9 +677,16 @@ comp they had open went with it.
 
 ### NukeExecuteWorkflowRequest
 
-Applies inputs to the loaded workflow and starts it. Loads nothing: call
-`NukeLoadWorkflowRequest` first. Returns once execution has started; progress and the terminal
-state arrive as notifications.
+Applies inputs to the loaded workflow and runs it. Loads nothing: call
+`NukeLoadWorkflowRequest` first. The reply lands when the run ends, so progress is the
+notification stream, not this result. Give this verb no request timeout, or one as long as the
+longest render the host allows.
+
+The engine's own `StartFlowRequest` resolves only when the flow does, and the handler awaits it
+rather than detaching it, which is what keeps the engine's loop free to publish notifications
+and answer other requests mid-run. A host that wants to know a run has begun watches for the
+first `NukeNodeStateEvent` or `NukeExecutionNodesEvent`, or polls
+`NukeGetExecutionStateRequest`.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -692,8 +699,8 @@ run of the wrong workflow. Leave it empty to drive a graph the host did not load
 
 | `NukeExecuteWorkflowResultSuccess` field | Type | Notes |
 |---|---|---|
-| `workflow_id` | `str` | The workflow that ran. Always the loaded one, so a host that sent no id still learns what it started |
-| `state` | `str` | An execution state |
+| `workflow_id` | `str` | The workflow that ran. Always the loaded one, so a host that sent no id still learns what it ran |
+| `state` | `str` | Always `completed`, which carries no outcome: the engine reports none. Node failures arrive as `NukeNodeStateEvent` |
 | `applied_inputs` | `list[dict]` | `{node, parameter}` the engine accepted |
 | `rejected_inputs` | `list[dict]` | `{node, parameter, reason}` |
 
@@ -711,7 +718,7 @@ run of the wrong workflow. Leave it empty to drive a graph the host did not load
 ```json
 {
   "workflow_id": "nuke_api_smoke",
-  "state": "running",
+  "state": "completed",
   "applied_inputs": [
     {
       "node": "Start Flow",
@@ -765,10 +772,10 @@ Nothing loaded is also a refusal, naming `NukeLoadWorkflowRequest`.
 One execution at a time. Starting a run while one is in progress returns
 `NukeExecuteWorkflowResultFailure` rather than displacing it, because the engine threads no
 execution identifier through its execution events: a second run's notifications would be
-indistinguishable from the first's, and a cancel could not say which to stop. Poll
-`NukeGetExecutionStateRequest` for `running: false`, or wait for the terminal
-`NukeExecutionStateEvent`, before starting the next one. An execution id would arrive as an
-added field, which a tolerant parser already handles.
+indistinguishable from the first's, and a cancel could not say which to stop. Since a run no
+longer occupies the engine, this refusal is what a second host gets mid-run rather than a
+request that waits. An execution id would arrive as an added field, which a tolerant parser
+already handles.
 
 ### NukeGetExecutionStateRequest
 
@@ -1156,7 +1163,7 @@ Terminal notification.
 
 | Field | Type | Notes |
 |---|---|---|
-| `state` | `str` | In practice only `completed` or `cancelled` arrive on this notification. `running` is reported on `NukeExecuteWorkflowResultSuccess` instead, and `failed` is reserved (see below) |
+| `state` | `str` | In practice only `completed` or `cancelled` arrive on this notification. `running` is never reported anywhere, and `failed` is reserved (see below) |
 | `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node |
 | `detail` | `str` | Human-readable reason |
 

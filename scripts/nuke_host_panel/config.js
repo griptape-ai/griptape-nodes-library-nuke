@@ -6,6 +6,8 @@ const Config = (function () {
   // The first request gets a shorter budget: its usual failure is a library that is not installed,
   // and the engine answers an unhandled request type with silence.
   const CONNECT_TIMEOUT_MS = 12000;
+  // Execute replies when the run ends, and a render is as long as it is. 0 means no budget.
+  const EXECUTE_TIMEOUT_MS = 0;
 
   // Trailing parameter values follow the terminal event, so outputs are read after a grace period.
   const DRAIN_GRACE_MS = 800;
@@ -29,6 +31,7 @@ const Config = (function () {
     REPLY_TOPIC,
     REQUEST_TIMEOUT_MS,
     CONNECT_TIMEOUT_MS,
+    EXECUTE_TIMEOUT_MS,
     DRAIN_GRACE_MS,
     RECONNECT_BACKOFF_MS,
     WRITE_THROUGH_DEBOUNCE_MS,

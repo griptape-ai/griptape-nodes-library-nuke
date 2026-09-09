@@ -343,11 +343,12 @@ class TestExecute:
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
         """Serial execution is what makes the missing engine-side execution id survivable.
 
-        Skips rather than fails when the first run finishes too fast to race, since that is a
-        property of the chosen workflow and not of the guard.
+        The first execute is sent without waiting: its reply lands when the run ends, and the
+        point is to be mid-run. Skips rather than fails when the first run finishes too fast to
+        race, since that is a property of the chosen workflow and not of the guard.
         """
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
-        assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
+        client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
 
         state = result_of(client.request(Verb.GET_EXECUTION_STATE))
         if not state.get("running"):
