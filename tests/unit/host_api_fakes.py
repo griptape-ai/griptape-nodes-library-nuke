@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
+    GetEngineNameResultSuccess,
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
 )
@@ -73,6 +74,8 @@ WORKFLOW_TABLE = {"wf1": {"name": "WF One", "description": "d", "workflow_shape"
 IDLE_FLOW = GetFlowStateResultSuccess(control_nodes=[], resolving_nodes=[], involved_nodes=[], result_details="idle")
 
 ENGINE_VERSION = GetEngineVersionResultSuccess(major=0, minor=97, patch=0, result_details="ok")
+
+ENGINE_NAME = GetEngineNameResultSuccess(engine_name="Engine One", result_details="ok")
 
 
 class FakeEngine:

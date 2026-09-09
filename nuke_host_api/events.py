@@ -45,6 +45,10 @@ class NukeConnectRequest(RequestPayload):
 class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     """Session opened.
 
+    ``engine_id``, ``session_id``, and ``engine_name`` are read from this reply rather than
+    from the result envelope, which makes no compatibility promise about carrying them; see
+    INTEGRATION.md.
+
     Args:
         protocol_version: The agreed version. The host must use only this version's
             vocabulary for the rest of the session.
@@ -54,6 +58,11 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
         event_topic: The topic notifications are published on. A host subscribes to it to
             receive them; it cannot derive the value.
         value_types: The closed value type set for this protocol version.
+        engine_id: The engine's own id. Empty when the engine has not set one.
+        session_id: The engine's active session, or empty when no session is open. Engine
+            state, shared with the editor and every other client, not this connection's own.
+        engine_name: The engine's human-readable name. Empty when the engine could not
+            report one.
     """
 
     protocol_version: int
@@ -62,6 +71,9 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     library_version: str
     event_topic: str
     value_types: list[str]
+    engine_id: str = ""
+    session_id: str = ""
+    engine_name: str = ""
 
 
 @dataclass

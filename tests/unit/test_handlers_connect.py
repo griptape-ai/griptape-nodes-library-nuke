@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import pytest
-from griptape_nodes.retained_mode.events.app_events import GetEngineVersionRequest
+from griptape_nodes.retained_mode.events.app_events import (
+    GetEngineNameRequest,
+    GetEngineNameResultFailure,
+    GetEngineVersionRequest,
+)
 
 from nuke_host_api import execution_bridge
 from nuke_host_api.events import NukeConnectRequest, NukeConnectResultFailure, NukeConnectResultSuccess
 from nuke_host_api.handlers import handle_connect
 from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES
-from tests.unit.host_api_fakes import ENGINE_VERSION, use_engine
+from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, use_engine
 
 
 @pytest.fixture(autouse=True)
 def _fake_engine(monkeypatch: pytest.MonkeyPatch) -> None:
-    use_engine(monkeypatch, {GetEngineVersionRequest: ENGINE_VERSION})
+    use_engine(monkeypatch, {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME})
 
 
 @pytest.fixture(autouse=True)
@@ -81,3 +85,41 @@ def test_the_highest_mutual_version_wins() -> None:
     result = handle_connect(NukeConnectRequest(client_protocol_versions=[99, PROTOCOL_VERSION]))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.protocol_version == PROTOCOL_VERSION
+
+
+def test_identity_is_read_from_the_handshake_not_the_envelope() -> None:
+    """engine_id, session_id, and engine_name are populated on the handshake reply."""
+    result = handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    assert isinstance(result, NukeConnectResultSuccess)
+    assert result.engine_id == "engine-xyz"
+    assert result.session_id == "session-abc"
+    assert result.engine_name == "Engine One"
+
+
+def test_a_direct_engine_connection_with_no_session_reports_no_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host connecting straight to an engine, with no session layered on top, gets empty."""
+    use_engine(
+        monkeypatch,
+        {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME},
+        session_id="",
+    )
+    result = handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    assert isinstance(result, NukeConnectResultSuccess)
+    assert result.session_id == ""
+    assert result.event_topic == "engines/engine-xyz/response"
+
+
+def test_a_refused_name_lookup_reports_an_empty_name_not_a_failed_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The engine's own name lookup fails only on an unexpected exception, never on an unset
+    name. Either way, connect is still a successful handshake.
+    """
+    use_engine(
+        monkeypatch,
+        {
+            GetEngineVersionRequest: ENGINE_VERSION,
+            GetEngineNameRequest: GetEngineNameResultFailure(error_message="boom", result_details="boom"),
+        },
+    )
+    result = handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    assert isinstance(result, NukeConnectResultSuccess)
+    assert result.engine_name == ""
