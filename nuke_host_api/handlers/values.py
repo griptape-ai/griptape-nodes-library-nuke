@@ -103,8 +103,8 @@ def handle_set_parameter_values(
     not answer as if it knows which. A host that wants to stay live with the engine sets
     values between runs; ``NukeCancelExecutionRequest`` is the way out of a run in progress.
 
-    ``current_workflow_id`` is read before either refusal, not after, so a host reading
-    ``NukeSetParameterValuesResultFailure.workflow_id`` can always tell a busy or empty-request
+    Both refusals below report the loaded workflow's id, so a host reading
+    ``NukeSetParameterValuesResultFailure.workflow_id`` can tell a busy or empty-request
     refusal against a loaded graph apart from one where nothing is loaded at all, the same
     distinction ``NukeGetExecutionStateResultSuccess.workflow_id`` makes.
     """

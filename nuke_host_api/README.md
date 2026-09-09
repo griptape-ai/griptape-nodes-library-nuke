@@ -242,9 +242,10 @@ a related reason: the engine's own scheduler decides when a node's parameter is 
 so a value set mid-run cannot be told apart from one that lands before the node that consumes
 it or one that lands after, and answering as if it landed in time would be a claim this layer
 cannot verify. A host that wants to stay live with the engine sets values between runs;
-`NukeCancelExecutionRequest` is the way out of a run in progress. Both refusals read the loaded
-workflow's id before returning, so `NukeSetParameterValuesResultFailure.workflow_id` is never
-empty merely because a refusal happened before this handler would otherwise have looked.
+`NukeCancelExecutionRequest` is the way out of a run in progress. Both refusals report the
+loaded workflow's id, so a host reading `NukeSetParameterValuesResultFailure.workflow_id` can
+tell a busy or empty-request refusal against a loaded graph apart from one where nothing is
+loaded at all.
 
 ### 5. Node execution changes
 

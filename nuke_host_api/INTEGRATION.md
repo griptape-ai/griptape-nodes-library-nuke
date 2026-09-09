@@ -937,8 +937,8 @@ engine cannot read, are refused the same two causes execute refuses them for, wo
 the fallback execute offers: `NukeExecuteWorkflowRequest`'s versions of these two refusals end
 with "or send no inputs to run the graph as it stands," and this verb's do not, since sending
 no inputs is exactly what this verb's own empty-request refusal turns away. A loaded id no
-longer in the registry is refused the same third way execute refuses it, unchanged, since that
-refusal never named a fallback either way.
+longer in the registry is refused the same third way execute refuses it: that refusal names no
+fallback either way.
 
 Refused while the engine is executing. The engine's own scheduler decides when a node's
 parameter is actually read, so a value set mid-run cannot be told apart from one that lands
