@@ -74,13 +74,17 @@ def event_topic() -> str:
 
     Mirrors the app layer's default response topic. A host cannot derive this, so
     NukeConnectRequest hands it over.
+
+    Reads through ``session_id()``/``engine_id()`` rather than calling
+    ``GriptapeNodes`` directly a second time, so this and ``NukeConnectResultSuccess`` cannot
+    read the same engine state two different ways.
     """
-    session_id = GriptapeNodes.get_session_id()
-    if session_id:
-        return f"sessions/{session_id}/response"
-    engine_id = GriptapeNodes.get_engine_id()
-    if engine_id:
-        return f"engines/{engine_id}/response"
+    active_session = session_id()
+    if active_session:
+        return f"sessions/{active_session}/response"
+    active_engine = engine_id()
+    if active_engine:
+        return f"engines/{active_engine}/response"
     return "response"
 
 

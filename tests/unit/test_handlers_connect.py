@@ -88,11 +88,7 @@ def test_the_highest_mutual_version_wins() -> None:
 
 
 def test_identity_is_read_from_the_handshake_not_the_envelope() -> None:
-    """engine_id, session_id, and engine_name belong to the versioned reply.
-
-    The result envelope also carries engine_id and session_id, but makes no compatibility
-    promise about doing so, so a plugin binds to these fields instead.
-    """
+    """engine_id, session_id, and engine_name are populated on the handshake reply."""
     result = handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_id == "engine-xyz"

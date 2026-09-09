@@ -45,6 +45,10 @@ class NukeConnectRequest(RequestPayload):
 class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     """Session opened.
 
+    ``engine_id``, ``session_id``, and ``engine_name`` are read from this reply rather than
+    from the result envelope, which makes no compatibility promise about carrying them; see
+    INTEGRATION.md.
+
     Args:
         protocol_version: The agreed version. The host must use only this version's
             vocabulary for the rest of the session.
@@ -55,19 +59,10 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
             receive them; it cannot derive the value.
         value_types: The closed value type set for this protocol version.
         engine_id: The engine's own id. Empty when the engine has not set one.
-        session_id: The session this connection joined. Empty when no session is open,
-            which is the case for a direct engine connection with no session layered on top.
+        session_id: The engine's active session, or empty when no session is open. Engine
+            state, shared with the editor and every other client, not this connection's own.
         engine_name: The engine's human-readable name. Empty when the engine could not
             report one.
-
-        The three identity fields are read from the versioned handshake reply rather than
-        from the result envelope, which also carries ``engine_id`` and ``session_id`` but
-        makes no compatibility promise about doing so: envelope shape belongs to the wire
-        protocol between the engine and every client, not to this library, and a plugin
-        binding to it would be binding to a surface this file does not own. A connect that
-        cannot name the engine is still a successful handshake, not a failure: a bare
-        connectivity check has to succeed with none of the three set, so all three are
-        empty string rather than a refusal when identity is unavailable.
     """
 
     protocol_version: int

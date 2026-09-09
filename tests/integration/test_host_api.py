@@ -177,6 +177,9 @@ class TestConnect:
         assert body["engine_version"] and body["engine_version"] != "unknown"
         assert body["library_version"] != "unknown", "library_version is read from the shipped manifest"
         assert body["event_topic"]
+        assert body["engine_id"], "engine_id must survive the wire, matching engine discovery's id"
+        assert isinstance(body["session_id"], str), "session_id must be present even when empty"
+        assert body["engine_name"], "engine_name must survive the wire, matching engine discovery's name"
 
     def test_an_unsupported_protocol_version_is_refused_and_names_the_window(self, client: HostClient) -> None:
         reply = client.request(Verb.CONNECT, {"client_protocol_versions": [99]})

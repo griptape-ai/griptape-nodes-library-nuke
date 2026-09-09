@@ -135,8 +135,9 @@ this protocol, so a host that parses them binds to the one surface here that is 
 unversioned. The result envelope carries `engine_id` and `session_id` too, but the same
 rule applies: envelope shape belongs to the wire protocol shared by the engine and every
 client, not to this library, so it makes no promise either. `NukeConnectResultSuccess`
-carries the engine and library versions, plus `engine_id`, `session_id`, and `engine_name`,
-so identity a plugin binds to comes from the one place this protocol actually versions.
+carries the engine and library versions, plus `engine_id`, `engine_name`, and `session_id`
+(the engine's active session, shared engine state rather than a per-connection identity),
+so what a plugin binds to comes from the one place this protocol actually versions.
 
 ### 3. Subscribe, then connect
 
@@ -342,7 +343,7 @@ other verbs answer without it.
 | `event_topic` | `str` | The topic notifications are published on. Subscribe to it or receive none |
 | `value_types` | `list[str]` | Closed value type set for this version |
 | `engine_id` | `str` | The engine's own id. Empty when the engine has not set one |
-| `session_id` | `str` | The session this connection joined. Empty for a direct engine connection with no session layered on top |
+| `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open |
 | `engine_name` | `str` | Human-readable. Empty when the engine could not report one |
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
