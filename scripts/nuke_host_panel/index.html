@@ -1,0 +1,64 @@
+<!doctype html>
+<!--
+Browser host panel for the Nuke host API. Shell only: markup, styles, and the load order below,
+which is also the layering: nothing earlier in the list reaches for anything later.
+
+Plain scripts rather than ES modules, so this opens straight off the filesystem by double-click. A
+file:// page cannot import a module from a sibling file, and a build step is not worth a panel.
+
+Read README.md in this directory for the file map. The contract is nuke_host_api/INTEGRATION.md;
+nothing here is a contract.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Griptape host panel</title>
+    <link rel="stylesheet" href="./panel.css" />
+  </head>
+  <body>
+    <div id="app" class="booting">Loading...</div>
+    <script>
+      // Preact and htm come off a CDN. Without this, a machine with no network access would show
+      // nothing at all and look broken rather than offline.
+      window.__bootTimer = setTimeout(function () {
+        var root = document.getElementById("app");
+        if (!root || root.dataset.rendered) return;
+        root.innerHTML =
+          '<div class="bootfail"><b>The panel did not start.</b>' +
+          "<p>Most likely preact and htm could not be fetched from unpkg.com: this page has no " +
+          "build step, so it loads them over the network. The engine connection itself is local " +
+          "and unaffected.</p>" +
+          "<p>Without internet access, save the three files below next to this one and change " +
+          "their script tags to point at the local copies. Check the browser console for anything " +
+          "else.</p></div>";
+      }, 8000);
+    </script>
+
+    <!-- rendering library -->
+    <script src="https://unpkg.com/preact@10.23.1/dist/preact.umd.js"></script>
+    <script src="https://unpkg.com/preact@10.23.1/hooks/dist/hooks.umd.js"></script>
+    <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+
+    <!-- the part a plugin reimplements -->
+    <script src="./protocol.js"></script>
+    <script src="./config.js"></script>
+    <script src="./store.js"></script>
+    <script src="./values.js"></script>
+    <script src="./transport.js"></script>
+    <script src="./events.js"></script>
+    <script src="./actions.js"></script>
+    <script src="./session.js"></script>
+
+    <!-- presentation -->
+    <script src="./ui/common.js"></script>
+    <script src="./ui/project.js"></script>
+    <script src="./ui/workflow.js"></script>
+    <script src="./ui/parameters.js"></script>
+    <script src="./ui/run.js"></script>
+    <script src="./ui/outputs.js"></script>
+    <script src="./ui/drawer.js"></script>
+    <script src="./ui/app.js"></script>
+
+    <script src="./main.js"></script>
+  </body>
+</html>
