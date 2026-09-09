@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 from griptape_nodes.retained_mode.events.app_events import (
+    GetEngineNameRequest,
+    GetEngineNameResultFailure,
     GetEngineVersionRequest,
     GetEngineVersionResultFailure,
 )
@@ -28,7 +30,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 
 from nuke_host_api import engine
-from tests.unit.host_api_fakes import ENGINE_VERSION, IDLE_FLOW, WORKFLOW_TABLE, use_engine
+from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, IDLE_FLOW, WORKFLOW_TABLE, use_engine
 
 BUSY_FLOW = GetFlowStateResultSuccess(
     control_nodes=["C1"], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="busy"
@@ -84,6 +86,40 @@ class TestEngineVersion:
     def test_an_engine_that_will_not_say_is_unknown(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(monkeypatch, {GetEngineVersionRequest: GetEngineVersionResultFailure(result_details="no")})
         assert engine.engine_version() == "unknown"
+
+
+class TestEngineId:
+    def test_a_set_id_is_returned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, engine_id="engine-xyz")
+        assert engine.engine_id() == "engine-xyz"
+
+    def test_no_id_is_empty_not_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, engine_id="")
+        assert engine.engine_id() == ""
+
+
+class TestSessionId:
+    def test_a_set_session_is_returned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, session_id="session-abc")
+        assert engine.session_id() == "session-abc"
+
+    def test_a_direct_engine_connection_with_no_session_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, session_id="")
+        assert engine.session_id() == ""
+
+
+class TestEngineName:
+    def test_the_engines_name_is_returned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, {GetEngineNameRequest: ENGINE_NAME})
+        assert engine.engine_name() == "Engine One"
+
+    def test_an_engine_that_refuses_the_lookup_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The engine's own handler fails only on an unexpected exception, never on an unset name."""
+        use_engine(
+            monkeypatch,
+            {GetEngineNameRequest: GetEngineNameResultFailure(error_message="boom", result_details="boom")},
+        )
+        assert engine.engine_name() == ""
 
 
 class TestTopLevelFlowName:

@@ -1,10 +1,10 @@
-"""Negotiate a protocol version and open the event stream."""
+"""Negotiate a protocol version, open the event stream, and hand over engine identity."""
 
 from __future__ import annotations
 
 from nuke_host_api import execution_bridge, library_version
 from nuke_host_api.dispatch import failure, verb
-from nuke_host_api.engine import engine_version, event_topic
+from nuke_host_api.engine import engine_id, engine_name, engine_version, event_topic, session_id
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
@@ -51,5 +51,8 @@ def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | Nu
         library_version=library_version.version(),
         event_topic=event_topic(),
         value_types=list(VALUE_TYPES),
+        engine_id=engine_id(),
+        session_id=session_id(),
+        engine_name=engine_name(),
         result_details=f"Connected {client} on host API protocol version {mutual[0]}.",
     )
