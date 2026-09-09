@@ -1,11 +1,4 @@
-"""Translation: host verbs in, engine requests out.
-
-One module per verb group, and ``ROUTES`` below is the only place a verb is bound to the
-code that answers it. The engine's handler table is keyed by request type, so a verb that
-is declared in ``protocol.py`` and never routed here answers nothing at all with no import
-error to show for it. Keeping the table beside the handlers rather than in the library
-lifecycle module is what lets a test assert the two lists agree.
-"""
+"""Bind each host verb to its handler."""
 
 from __future__ import annotations
 

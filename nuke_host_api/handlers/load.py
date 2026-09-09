@@ -1,23 +1,4 @@
-"""Loading: put a workflow in the engine and hand back everything needed to drive it.
-
-The only verb that changes which workflow the engine holds. Before it existed, loading was a
-side effect of ``NukeExecuteWorkflowRequest``, which left a host unable to see or set a
-parameter's live value without starting a run, and left the layer inconsistent about whether a
-host knows what is loaded: discovery addressed workflows by id, everything else answered for
-whatever execute happened to have loaded last.
-
-One host verb, four engine requests plus one per declared parameter, because the engine has no
-load-and-describe entry point: ``ImportWorkflowRequest`` registers a file the engine has not
-seen and costs one more, ``RunWorkflowFromRegistryRequest`` builds the graph, and the values
-come back one ``GetParameterValueRequest`` at a time. Collapsing them matters more here than
-elsewhere: a host doing this itself would have to know that reading a value requires a load,
-and that the load it needs clears all object state.
-
-What a refusal costs a host is not uniform, and the failure result says which kind it got.
-Every check this handler makes itself is pre-engine and discards nothing. The engine's own load
-is not atomic: with ``run_with_clean_slate=True`` it clears all object state before it builds
-the graph, so a load that fails inside the workflow file leaves the engine empty.
-"""
+"""Load and describe a workflow."""
 
 from __future__ import annotations
 
@@ -42,13 +23,7 @@ from nuke_host_api.protocol import PARAMETER_SECTIONS
 def handle_load_workflow(
     request: NukeLoadWorkflowRequest,
 ) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
-    """Load one workflow, then describe and read it in the same reply.
-
-    Every check this handler can make itself is made before the engine is touched, because
-    loading clears all object state: a request that fails on its own arguments, or on an id
-    that was never registered, must leave whatever was loaded before intact. The engine's own
-    load is the exception, and reports ``engine_state_cleared`` when it fails.
-    """
+    """Validate before loading because the engine clears object state before building the graph."""
     if request.workflow_id and request.file_path:
         return failure(
             NukeLoadWorkflowResultFailure,
@@ -92,8 +67,7 @@ def handle_load_workflow(
 
     attempted = f"to load workflow '{workflow_id}'"
 
-    # Read before loading, not after. An unknown id and an unreadable registry are different
-    # answers to a host, and neither is worth clearing the engine's state to discover.
+    # Validate registry state before the destructive load.
     found = engine.lookup_workflow(workflow_id)
     if not found.registry_readable:
         return failure(
@@ -117,9 +91,7 @@ def handle_load_workflow(
         RunWorkflowFromRegistryResultSuccess,
     )
     if loaded.value is None:
-        # The only refusal that costs a host its previous graph. A clean slate is requested,
-        # and the engine clears all object state before it builds the graph, so by the time
-        # the workflow file itself fails there is nothing left to keep.
+        # Clean-slate loading clears the previous graph before building the replacement.
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,

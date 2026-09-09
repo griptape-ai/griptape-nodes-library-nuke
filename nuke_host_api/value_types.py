@@ -1,29 +1,4 @@
-"""Host-facing data types and the value normalizer.
-
-The engine expresses "an image" in at least six shapes: an ``ImageArtifact`` with
-inline bytes, an ``ImageUrlArtifact`` wrapping a static-server URL, a bare string
-holding that same URL, a workspace-relative path string, an absolute path string,
-or a ``ListArtifact`` of any of those. ``BlobArtifact``, ``VideoUrlArtifact``, and
-``GenericArtifact`` are structurally identical to ``ImageUrlArtifact`` (all carry a
-single ``value``), so the class name is the only discriminator.
-
-This module collapses all of that into a small closed set of host types with one
-structured descriptor shape.
-
-Deliberate non-goals: this normalizer moves no bytes. It does not download, copy,
-sniff file headers, or write anything. The engine writes wherever it writes; this
-layer only makes the *shape* of the value predictable. A format is reported only
-when it is actually known, never guessed, so a host is never told a JPEG is a PNG.
-
-It does perform *pure resolution*: project directory macros like ``{outputs}/render.png``
-are resolved through ``GetPathForMacroRequest``, which is a pure resolver with no disk
-writes (``project_manager.on_get_path_for_macro_request``). A host always needs a real
-path, and resolving one is a lookup, not I/O.
-
-Versioning property this buys: mapping a newly invented engine artifact class into
-an existing host type is an additive change and does not bump the protocol version.
-Adding a host type changes what the host must switch on, and does bump it.
-"""
+"""Normalize engine values into the host protocol's closed type set."""
 
 from __future__ import annotations
 
@@ -48,32 +23,22 @@ logger = logging.getLogger("griptape_nodes")
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "exr", "tif", "tiff", "webp", "dpx", "tga", "hdr"})
 VIDEO_EXTENSIONS = frozenset({"mp4", "mov", "avi", "mkv", "webm", "m4v"})
 
-# The engine's type name for execution wiring. Control parameters carry no data, so they are
-# dropped on every path out of this library: describe never lists them and the event bridge
-# never streams them. Lives here because both of those need it and both are downstream of
-# this module's engine-type knowledge.
+# Control parameters carry no data and are omitted from descriptions and events.
 CONTROL_PARAM_TYPE = "parametercontroltype"
 
-# Any brace token at all. Both project directory macros ({outputs}) and workflow
-# variables ({MY_VAR}) use this shape, so presence of braces alone proves nothing
-# about which system a token belongs to.
+# Braces alone cannot distinguish project macros from workflow variables.
 _HAS_BRACE_TOKEN = re.compile(r"\{[^{}]*\}")
 
 _HASH_RUN = re.compile(r"#+")
 
-# A leading '/', a Windows drive prefix ('C:\' or 'C:/'), or a UNC prefix ('\\server\share') --
-# shapes an operating system treats as absolute, regardless of what type a parameter declares.
+# Recognizes POSIX, drive-letter, and UNC absolute paths.
 _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 
-# Engine parameter type names mapped to host types. Unrecognized names fall back to
-# GTFile when they look artifact-shaped and GTText otherwise, so a host never sees a
-# type it has no case for.
+# Unknown artifact types map to GTFile; other unknown types map to GTText.
 ENGINE_TYPE_TO_VALUE_TYPE = {
     "ImageArtifact": ValueType.IMAGE,
     "ImageUrlArtifact": ValueType.IMAGE,
-    # An image sequence is an image with many sources, so both names in use for one land on
-    # GTImage rather than degrading to GTFile or GTText. "Sequence" is what this library's
-    # own NukeScriptNode declares on a sequence parameter.
+    # Both engine sequence names map to an image with multiple sources.
     "ImageSequenceArtifact": ValueType.IMAGE,
     "Sequence": ValueType.IMAGE,
     "VideoUrlArtifact": ValueType.MOVIE,
@@ -84,30 +49,12 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
     "bool": ValueType.BOOL,
 }
 
-# A container parameter's declared name wraps its element type, as ``list[ImageUrlArtifact]``
-# (built in the engine's ``core_types.py``). The brackets defeat both the mapping table and
-# the ``Artifact`` suffix test, so the wrapper comes off before either one runs.
+# Strip the engine's ``list[T]`` wrapper before mapping the element type.
 _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
 
 
 def value_type_for_engine_type(engine_type: str | None) -> str:
-    """Map a declared engine parameter type name to a value type.
-
-    Used for parameter metadata in describe_workflow, where only the type *name* is
-    available and no value has been produced yet.
-
-    A declared name is a hint for building a knob; the runtime descriptor's ``value_type``
-    is what a host acts on. The two match exactly whenever the declared name carries media
-    or scalar information. They can differ, and only by narrowing, when it does not:
-
-    - A wildcard (``any``, ``all``) accepts anything, so this reports ``GTText`` and a host
-      builds its most permissive control.
-    - An artifact class this version does not map reports ``GTFile``. Its values may still
-      normalize to ``GTImage`` or ``GTMovie``, because ``_normalize_artifact`` classifies an
-      unrecognized class by the extension on the locator it turned out to carry, and a
-      ``GenericArtifact`` holding a ``.jpg`` really is an image. Nothing here can know that
-      before a value exists, and discarding it once one does would be worse.
-    """
+    """Map a declared type before a runtime value is available."""
     if engine_type is None:
         return ValueType.TEXT
 
@@ -124,7 +71,6 @@ def value_type_for_engine_type(engine_type: str | None) -> str:
 
 
 def _extension_of(locator: str) -> str | None:
-    """Return the lowercase extension of a URL or path, or None when absent."""
     path_part = locator
     if locator.startswith(("http://", "https://")):
         path_part = urlparse(locator).path
@@ -137,7 +83,7 @@ def _extension_of(locator: str) -> str | None:
 
 
 def _value_type_for_extension(extension: str | None) -> str:
-    """Classify a file by extension. Unknown extensions are GTFile, not a guess."""
+    """Unknown extensions map to GTFile rather than a guessed format."""
     if extension in IMAGE_EXTENSIONS:
         return ValueType.IMAGE
     if extension in VIDEO_EXTENSIONS:
@@ -146,22 +92,7 @@ def _value_type_for_extension(extension: str | None) -> str:
 
 
 def _resolve_macro(locator: str) -> dict[str, Any] | None:
-    """Resolve a macro template to a path, or return None when it is not a macro.
-
-    Sequence slots are rendered as hash glyphs (``render.####.exr``) rather than
-    failing. That is the engine's ``RENDER_SEQUENCE_PATTERN`` mode, documented as
-    presentation-only because the result is not openable. A Nuke Read node is the
-    one consumer for which the pattern form is the *operationally correct* form,
-    since Nuke expands the padding itself. The returned source therefore sets
-    ``is_pattern`` so a host knows it may hand the string to a Read node but must
-    not open it directly.
-
-    Returns None when the string contains no brace token at all. Returns a
-    ``SourceKind.MACRO`` source when a token is present but unresolvable, which happens
-    for an unresolved ``{VAR}`` workflow variable: variable substitution normally
-    runs during ``aprocess()``, but it can be disabled per-parameter or engine-wide,
-    and an unresolved token must never be mistaken for a path.
-    """
+    """Unresolved sequence slots remain Nuke-readable hash patterns."""
     if not _HAS_BRACE_TOKEN.search(locator):
         return None
 
@@ -192,8 +123,7 @@ def _resolve_macro(locator: str) -> dict[str, Any] | None:
     if not isinstance(result, GetPathForMacroResultSuccess):
         return unresolved
 
-    # Forward slashes: Nuke's TCL layer treats backslashes as escapes, so any path this
-    # layer hands toward a Read node must be slash-normalized before it leaves here.
+    # Nuke's TCL layer treats backslashes as escapes.
     resolved = str(result.absolute_path).replace("\\", "/")
     return {
         "kind": SourceKind.PATH,
@@ -224,9 +154,7 @@ def _source_from_locator(locator: str) -> dict[str, Any]:
             "raw": None,
         }
 
-    # Forward slashes: Nuke's TCL layer treats backslashes as escapes, so any path this
-    # layer hands toward a Read node must be slash-normalized before it leaves here. The
-    # resolved-macro branch above already does this; a literal path string needs it too.
+    # Nuke's TCL layer treats backslashes as escapes.
     normalized = locator.replace("\\", "/")
     return {
         "kind": SourceKind.PATH,
@@ -241,16 +169,7 @@ def _source_from_locator(locator: str) -> dict[str, Any]:
 
 
 def _descriptor(value_type: str, sources: list[dict[str, Any]], engine_type: str) -> dict[str, Any]:
-    """Assemble the wire descriptor.
-
-    ``colorspace`` is reserved and always None today. The engine's ``color_space``
-    field is a PIL-mode channel layout (RGB, RGBA, Grayscale), not colorimetry, so
-    it cannot answer whether pixels are sRGB-encoded or scene-linear. The field
-    exists now because adding a nullable field later is free, while adding a
-    required one is a protocol version bump.
-
-    ``engine_type`` is diagnostic only. A host must never branch on it.
-    """
+    """``colorspace`` is reserved because the engine exposes channel layout, not colorimetry."""
     return {
         "value_type": value_type,
         "sources": sources,
@@ -260,16 +179,6 @@ def _descriptor(value_type: str, sources: list[dict[str, Any]], engine_type: str
 
 
 def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict[str, Any]:  # noqa: PLR0911
-    """Collapse any engine parameter value into one host descriptor.
-
-    Args:
-        value: The engine-side value. Artifact instance, string, bytes, list, or scalar.
-        declared_engine_type: The parameter's declared type name, when known. Used to
-            disambiguate bare strings, which carry no media type of their own.
-
-    Returns:
-        A descriptor whose ``value_type`` is always a member of VALUE_TYPES.
-    """
     engine_type = type(value).__name__
 
     if value is None:
@@ -308,43 +217,23 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
     return _normalize_artifact(value, declared_engine_type, engine_type)
 
 
-# The types that only mean something alongside a source. A host reaches for bytes when it sees
-# one of these, so a descriptor that claims one while carrying no source is a broken promise.
+# Media and file types require a source.
 _SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
 
 
 def _sourceless_descriptor(value_type: str, engine_type: str) -> dict[str, Any]:
-    """Assemble a descriptor that carries no source, downgrading any media or file claim to text.
-
-    Nothing here can point a host at bytes, so ``GTImage``, ``GTMovie`` and ``GTFile`` are not
-    honest answers: a declared media type describes what a parameter is *for*, not what this value
-    turned out to be. Prose on an image-declared parameter is still prose. ``GTText`` is the one
-    type that means something without a source, so that is what a host is told, keeping the
-    published rule that only GTText, GTNumber, GTBool and GTNull arrive sourceless.
-    """
+    """Downgrade sourceless media and file values to text."""
     return _descriptor(ValueType.TEXT if value_type in _SOURCED_VALUE_TYPES else value_type, [], engine_type)
 
 
 def _classify_locator_source(source: dict[str, Any], declared_value_type: str, engine_type: str) -> dict[str, Any]:
-    """Turn a confirmed locator source into a descriptor, letting a declared media type win over the extension."""
     if declared_value_type in {ValueType.IMAGE, ValueType.MOVIE}:
         return _descriptor(declared_value_type, [source], engine_type)
     return _descriptor(_value_type_for_extension(source["format"]), [source], engine_type)
 
 
 def _normalize_string(value: str, declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
-    """A bare string is either a locator or prose.
-
-    Only a genuine locator shape keeps a source and gets classified by extension: a URL, an
-    absolute path, a macro that actually resolved to one, or a relative path carrying an
-    extension. A stray slash or brace in prose ("3/4 cup", "render {frame} of the shot") proves
-    nothing about media type and must not manufacture a fake path.
-
-    An artifact-declared value keeps that declared type when it is locator-shaped, so
-    "/render/mix_final" on an audio parameter stays GTFile even though the extension is unknown.
-    With no locator shape there is no source to hand over, so the media claim would be empty and
-    collapses to text instead; see ``_sourceless_descriptor``.
-    """
+    """Only URLs, absolute paths, resolvable macros, and relative paths with extensions are locators."""
     declared_value_type = value_type_for_engine_type(declared_engine_type)
 
     if _HAS_BRACE_TOKEN.search(value):
@@ -352,10 +241,7 @@ def _normalize_string(value: str, declared_engine_type: str | None, engine_type:
         if macro_source is None:
             msg = "_HAS_BRACE_TOKEN matched but _resolve_macro found no brace token"
             raise AssertionError(msg)
-        # An unresolved macro (kind MACRO, not PATH) is still a real locator when it has an
-        # extension the engine can read ("{VAR}/plate.exr") or is absolute-shaped
-        # ("{VAR}/out" beginning with '/'); otherwise it is indistinguishable from prose that
-        # happens to contain a brace ("render {frame} of the shot") and must not keep a source.
+        # Keep unresolved macros only when their extension or absolute shape identifies a locator.
         resolved_to_path = macro_source["kind"] == SourceKind.PATH
         if resolved_to_path or macro_source["format"] is not None or _ABSOLUTE_PATH_PREFIX.match(value):
             return _classify_locator_source(macro_source, declared_value_type, engine_type)
@@ -364,10 +250,7 @@ def _normalize_string(value: str, declared_engine_type: str | None, engine_type:
     if value.startswith(("http://", "https://")) or _ABSOLUTE_PATH_PREFIX.match(value):
         return _classify_locator_source(_source_from_locator(value), declared_value_type, engine_type)
 
-    # A relative path still names a file when it carries an extension ("shots/plate.exr"), which
-    # is the ordinary form inside a Nuke script. A separator alone proves nothing, since "3/4 cup"
-    # has one, so an extension has to appear alongside it. This is the same extension test the
-    # macro branch above applies to an unresolved template.
+    # A relative locator needs both a separator and an extension to distinguish it from prose.
     if ("/" in value or "\\" in value) and _extension_of(value) is not None:
         return _classify_locator_source(_source_from_locator(value), declared_value_type, engine_type)
 
@@ -375,11 +258,7 @@ def _normalize_string(value: str, declared_engine_type: str | None, engine_type:
 
 
 def _normalize_sequence(items: list[Any], declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
-    """Flatten a list of values into one descriptor with many sources.
-
-    A still and an image sequence share a host type and differ only in source count,
-    so adding sequence support later does not add a value type.
-    """
+    """A sequence uses one value type and multiple sources."""
     if not items:
         return _descriptor(ValueType.NULL, [], engine_type)
 
@@ -424,12 +303,10 @@ def _normalize_artifact(value: Any, declared_engine_type: str | None, engine_typ
 
     if isinstance(inner_value, str) and inner_value:
         source = _source_from_locator(inner_value)
-        # An unrecognized artifact class still yields a usable locator; classify it
-        # by extension rather than reporting an opaque GTFile.
+        # Unknown artifact classes are classified by locator extension.
         if value_type == ValueType.FILE:
             value_type = _value_type_for_extension(source["format"])
-        # A class name that looks like neither a scalar nor an artifact resolves to text, and a
-        # text value must not arrive carrying a locator a host would try to open.
+        # Text values must not carry locators that a host would try to open.
         if value_type not in _SOURCED_VALUE_TYPES:
             return _sourceless_descriptor(value_type, engine_type)
         return _descriptor(value_type, [source], engine_type)
