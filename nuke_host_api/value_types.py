@@ -59,7 +59,6 @@ CONTROL_PARAM_TYPE = "parametercontroltype"
 # about which system a token belongs to.
 _HAS_BRACE_TOKEN = re.compile(r"\{[^{}]*\}")
 
-# Runs of hash glyphs, the frame-number convention Nuke reads natively.
 _HASH_RUN = re.compile(r"#+")
 
 # A leading '/', a Windows drive prefix ('C:\' or 'C:/'), or a UNC prefix ('\\server\share') --
@@ -209,7 +208,6 @@ def _resolve_macro(locator: str) -> dict[str, Any] | None:
 
 
 def _source_from_locator(locator: str) -> dict[str, Any]:
-    """Build a source entry from a macro template, URL, or path string."""
     macro_source = _resolve_macro(locator)
     if macro_source is not None:
         return macro_source
@@ -404,8 +402,6 @@ def _normalize_sequence(items: list[Any], declared_engine_type: str | None, engi
 
 
 def _normalize_artifact(value: Any, declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
-    """Normalize an artifact instance by its class name, then by its payload shape."""
-    # ListArtifact and friends expose their children on .value as a list.
     inner_value = getattr(value, "value", None)
     if isinstance(inner_value, (list, tuple)):
         merged = _normalize_sequence(list(inner_value), declared_engine_type, engine_type)

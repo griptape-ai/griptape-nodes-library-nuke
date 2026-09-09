@@ -1,10 +1,3 @@
-"""Tests for the value normalizer.
-
-Asserts on narrowed output rather than on "it did not raise". An earlier version of this
-layer silently produced zero parameters for every workflow while every call still reported
-success, which is the failure mode these tests exist to catch.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -160,7 +153,6 @@ def test_values_normalize_into_the_closed_set(value: Any, declared: str, expecte
 
 
 def test_every_descriptor_reports_a_member_of_the_closed_set() -> None:
-    """No input may produce a type a host has no case for."""
     inputs: list[Any] = [
         None,
         "",
@@ -214,7 +206,6 @@ def test_unknown_artifact_class_is_classified_by_extension() -> None:
 
 
 def test_locator_kinds_are_explicit() -> None:
-    """A host must never have to sniff whether a string is a URL or a path."""
     assert value_types.normalize_value(STATIC_URL, "str")["sources"][0]["kind"] == SourceKind.URL
     assert value_types.normalize_value("/mnt/show/plate.exr", "str")["sources"][0]["kind"] == SourceKind.PATH
     inline = value_types.normalize_value(ImageArtifact(value=b"\x89PNG", format="png", width=1, height=1))
@@ -223,7 +214,6 @@ def test_locator_kinds_are_explicit() -> None:
 
 
 def test_a_literal_windows_path_is_slash_normalized_without_going_through_a_macro() -> None:
-    """CLAUDE.md's forward-slash rule applies to a plain path string, not only a macro-resolved one."""
     descriptor = value_types.normalize_value("C:\\workspace\\outputs\\render.png", "str")
     source = descriptor["sources"][0]
     assert source["value"] == "C:/workspace/outputs/render.png"
@@ -231,7 +221,6 @@ def test_a_literal_windows_path_is_slash_normalized_without_going_through_a_macr
 
 
 def test_a_frame_list_is_one_image_with_many_sources() -> None:
-    """Sequences are source count, not a value type, so they cost no version bump."""
     frames = ListArtifact([ImageUrlArtifact(f"http://x/frame.{n:04d}.exr") for n in (1, 2, 3)])
     descriptor = value_types.normalize_value(frames, "ImageUrlArtifact")
     assert descriptor["value_type"] == ValueType.IMAGE
@@ -249,7 +238,6 @@ def test_an_empty_list_is_null_not_an_empty_image() -> None:
 
 
 def test_a_slash_alone_does_not_make_prose_a_file() -> None:
-    """A slash proves nothing about media type; without an extension the declared type wins, and no fake source is attached."""
     assert value_types.normalize_value("3/4 cup", "str")["value_type"] == ValueType.TEXT
     assert value_types.normalize_value("3/4 cup", "str")["sources"] == []
     assert value_types.normalize_value("aspect 16/9", "str")["value_type"] == ValueType.TEXT
@@ -280,7 +268,6 @@ def test_a_slash_alone_does_not_make_prose_a_file() -> None:
     ],
 )
 def test_locator_fallback_matrix(value: str, declared: str, expected_type: str, expect_source: bool) -> None:
-    """Only a genuine locator shape keeps a source: a URL, an absolute path, or a relative path carrying an extension."""
     descriptor = value_types.normalize_value(value, declared)
     assert descriptor["value_type"] == expected_type
     if expect_source:
@@ -350,7 +337,6 @@ def test_engine_type_is_carried_for_diagnostics() -> None:
 
 
 def test_descriptor_shape_is_stable_across_inputs() -> None:
-    """Every descriptor carries the same keys, so a host can parse one shape."""
     expected_top = {"value_type", "sources", "colorspace", "engine_type"}
     expected_source = {"kind", "value", "format", "width", "height", "byte_count", "is_pattern", "raw"}
     for value in [None, "prose", "/a/b.exr", b"x", ImageUrlArtifact(STATIC_URL), 1, True]:

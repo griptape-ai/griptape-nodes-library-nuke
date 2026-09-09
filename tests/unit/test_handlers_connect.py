@@ -1,5 +1,3 @@
-"""Tests for version negotiation and opening the event stream."""
-
 from __future__ import annotations
 
 import pytest
@@ -23,7 +21,6 @@ def _fake_engine(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _record_bridge_installs(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
-    """Stub the real install, which would subscribe this process to the engine's feed."""
     calls: list[bool] = []
     monkeypatch.setattr(execution_bridge, "ensure_installed", lambda: calls.append(True))
     return calls
@@ -69,7 +66,6 @@ def test_both_versions_are_reported() -> None:
 
 
 def test_an_empty_offer_assumes_the_current_version() -> None:
-    """Keeps a bare connectivity check working."""
     result = handle_connect(NukeConnectRequest())
     assert isinstance(result, NukeConnectResultSuccess)
 
@@ -88,7 +84,6 @@ def test_the_highest_mutual_version_wins() -> None:
 
 
 def test_identity_is_read_from_the_handshake_not_the_envelope() -> None:
-    """engine_id, session_id, and engine_name are populated on the handshake reply."""
     result = handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_id == "engine-xyz"

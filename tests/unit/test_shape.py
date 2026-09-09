@@ -1,10 +1,3 @@
-"""Tests for the shape projection.
-
-The parts that decide what a host sees: how the engine's workflow_shape is parsed, how
-parameters are narrowed, and which workflows are worth offering. No engine involved, because
-none of it issues a request.
-"""
-
 from __future__ import annotations
 
 import json
@@ -18,13 +11,10 @@ from tests.unit.host_api_fakes import SHAPE
 
 
 class TestWorkflowShape:
-    """The engine sends this field as a dict, a JSON string, or not at all."""
-
     def test_a_dict_passes_through(self) -> None:
         assert shape.workflow_shape({"workflow_shape": SHAPE}) == SHAPE
 
     def test_a_json_string_is_parsed(self) -> None:
-        """The case that silently produced zero parameters for every workflow."""
         assert shape.workflow_shape({"workflow_shape": json.dumps(SHAPE)}) == SHAPE
 
     @pytest.mark.parametrize("raw", [None, "", "   ", "not json at all", "[]", "123"])
@@ -36,16 +26,12 @@ class TestWorkflowShape:
 
 
 class TestDeclaredParameters:
-    """Parameters are the only workflow detail a host sees."""
-
     def test_control_parameters_are_dropped(self) -> None:
-        """exec_in and exec_out are execution wiring, not data."""
         names = {declared["parameter"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert "exec_out" not in names
         assert names == {"topic", "plate"}
 
     def test_node_and_parameter_are_split_out(self) -> None:
-        """run_workflow addresses inputs by the pair, so it cannot be a joined string."""
         declared = next(p for p in shape.declared_parameters(SHAPE["inputs"]) if p["parameter"] == "topic")
         assert declared["node"] == "Start Flow"
         assert declared["parameter"] == "topic"
@@ -67,8 +53,6 @@ class TestDeclaredParameters:
 
 
 class TestInputParameterIds:
-    """The allow-list execute checks a host's inputs against."""
-
     def test_only_input_side_data_parameters_are_listed(self) -> None:
         assert shape.input_parameter_ids({"workflow_shape": SHAPE}) == {
             ("Start Flow", "topic"),
