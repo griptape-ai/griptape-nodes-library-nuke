@@ -1212,15 +1212,17 @@ numerator a host already tracks per node; this notification, translated from the
 }
 ```
 
-Not one-shot, not monotonic, and not a participant count. For a serial control flow the engine
-emits this with every node the flow declares when the run starts, not only the nodes the run's
-control path will reach, so a graph with an untaken branch never resolves every node on this
-list and the ratio of `resolved` counts to this list's length can stay below 1.0 on a clean
-run. The engine emits it again with an empty list when the run finishes: keep the first
-non-empty list as the run's total, and do not read that later empty one as "zero nodes ran".
-For parallel resolution the set is genuinely dynamic, built as the engine's DAG builder
-discovers work, so the total can also grow mid-run; a fixed-size progress bar must handle the
-denominator increasing, not only the numerator catching up to it.
+Not one-shot and not a participant count. A run started through this protocol emits exactly
+two of these: every node the flow declares when the run starts, then an empty list when the
+run finishes. Keep the first non-empty list as the run's total, which does not change
+mid-run, and do not read that later empty one as "zero nodes ran".
+
+The total counts what the flow declares, not what the run's control path reaches, so a graph
+with an untaken branch never resolves every node on the list and the ratio of `resolved`
+counts to its length can stay below 1.0 on a clean run. A progress bar has to absorb that, and
+nothing else: the denominator does not increase. Execution mode does not change it either,
+since the engine emits the declared list with no mode check and SEQUENTIAL differs from
+PARALLEL only by how many nodes run at once.
 
 Both events for a run are dispatched by the engine before `NukeExecuteWorkflowRequest`'s own
 reply is written, so a plugin cannot wait for that reply before reading this notification for

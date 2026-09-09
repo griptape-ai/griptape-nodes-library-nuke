@@ -261,14 +261,18 @@ type without the host learning anything.
 
 `NukeExecutionNodesEvent` is the progress bar's other half. `NukeNodeStateEvent` with
 `state: "resolved"` is the numerator a host already has; this is the denominator, translated
-from the engine's own `InvolvedNodesEvent`. For a serial control flow the engine reports every
-node the flow declares when a run starts, not only the nodes the run's control path will
-reach, so a graph with an untaken branch never resolves every node on that list and the ratio
-of resolved counts to this list's length can stay below 1.0 on a clean run. The engine then
-reports an empty list again when the run finishes, so a host must keep the first non-empty
-list it sees as the run's total and must not read a later empty one as "zero nodes ran". For
-parallel resolution the set is genuinely dynamic, built as the engine's DAG builder discovers
-work, so the total can also grow mid-run.
+from the engine's own `InvolvedNodesEvent`. A run this protocol can start emits exactly two:
+every node the flow declares when the run starts, then an empty list when it finishes. So the
+total is fixed for the run, and a host keeps the first non-empty list as that total and must
+not read the later empty one as "zero nodes ran".
+
+The total counts what the flow declares, not what the run's control path reaches, so a graph
+with an untaken branch never resolves every node on the list and the ratio of resolved counts
+to its length can stay below 1.0 on a clean run. That is the only surprise a host absorbs.
+Execution mode changes nothing: the engine emits the declared list with no mode check, and
+SEQUENTIAL differs from PARALLEL only by clamping how many nodes run at once. The engine's one
+emitter that grows a set as its DAG builder discovers work is gated on single-node resolution,
+which this protocol has no verb for, so a host must not carry code for a growing denominator.
 
 Both events for a run are dispatched by the engine before `NukeExecuteWorkflowRequest`'s own
 reply is written, so a host cannot wait for that reply before reading this notification for a

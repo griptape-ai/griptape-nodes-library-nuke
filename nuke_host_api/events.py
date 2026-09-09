@@ -771,16 +771,26 @@ class NukeParameterValueEvent(AppPayload):
 class NukeExecutionNodesEvent(AppPayload):
     """The run's node set: the denominator a host pairs with NukeNodeStateEvent's numerator.
 
-    Translates the engine's InvolvedNodesEvent, which is not one-shot, not monotonic, and not
-    a participant count. For sequential execution the engine reports every node the flow
-    declares (`list(flow.nodes.keys())`) when a run starts, not only the nodes the run's
-    control path will reach, so a graph with an untaken branch never resolves every node on
-    this list and the ratio of NukeNodeStateEvent `resolved` counts to this list's length can
-    top out below 1.0 on a clean run. The engine then reports an empty list again when the run
-    finishes: a host must snapshot the first non-empty list as the run's total and must not
-    read that later empty one as "zero nodes ran". For parallel resolution the set is
-    genuinely dynamic, built as the engine's DAG builder discovers work, so the total can also
-    grow mid-run.
+    Translates the engine's InvolvedNodesEvent, which is not one-shot and not a participant
+    count. A run this protocol can start emits exactly two: every node the flow declares
+    (`list(flow.nodes.keys())`), then an empty list when the run finishes. So the total is
+    fixed for the run, and a host must snapshot the first non-empty list as that total and must
+    not read the later empty one as "zero nodes ran".
+
+    The total counts what the flow declares, not what the run's control path reaches, so a
+    graph with an untaken branch never resolves every node on the list and the ratio of
+    NukeNodeStateEvent `resolved` counts to the list's length can top out below 1.0 on a clean
+    run. That is the only surprise a host has to absorb.
+
+    Execution mode does not change any of this. ControlFlowMachine emits the declared list with
+    no mode check, and SEQUENTIAL differs from PARALLEL only by clamping max_nodes_in_parallel
+    to 1, so both modes report the same list. The engine does have an emitter that grows a set
+    as its DAG builder discovers work, but its call site is gated on
+    `flow_manager.global_single_node_resolution`, set only by resolve_singular_node, and this
+    protocol exposes no single-node-resolution verb: NukeExecuteWorkflowRequest sends
+    StartFlowRequest and nothing else. A host must not carry code for a denominator that grows,
+    because nothing it can ask for produces one. If a later verb resolves a single node, this
+    docstring is the place that has to change with it.
 
     Both the non-empty event and the terminating empty one are dispatched by the engine before
     NukeExecuteWorkflowRequest's own reply is written: FlowManager.start_flow queues the
