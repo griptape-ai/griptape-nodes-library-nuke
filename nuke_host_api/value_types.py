@@ -168,10 +168,15 @@ def _source_from_locator(locator: str) -> dict[str, Any]:
     }
 
 
-def _descriptor(value_type: str, sources: list[dict[str, Any]], engine_type: str) -> dict[str, Any]:
-    """``colorspace`` is reserved because the engine exposes channel layout, not colorimetry."""
+def _descriptor(value_type: str, sources: list[dict[str, Any]], engine_type: str, value: Any = None) -> dict[str, Any]:
+    """``colorspace`` is reserved because the engine exposes channel layout, not colorimetry.
+
+    ``value`` carries scalars, which have no locator to point at and are otherwise unreadable.
+    Sourced types leave it null: bytes stay in the engine and a path belongs in ``sources``.
+    """
     return {
         "value_type": value_type,
+        "value": value,
         "sources": sources,
         "colorspace": None,
         "engine_type": engine_type,
@@ -185,10 +190,10 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
         return _descriptor(ValueType.NULL, [], engine_type)
 
     if isinstance(value, bool):
-        return _descriptor(ValueType.BOOL, [], engine_type)
+        return _descriptor(ValueType.BOOL, [], engine_type, value)
 
     if isinstance(value, (int, float)):
-        return _descriptor(ValueType.NUMBER, [], engine_type)
+        return _descriptor(ValueType.NUMBER, [], engine_type, value)
 
     if isinstance(value, bytes):
         return _descriptor(
@@ -214,6 +219,9 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
     if isinstance(value, (list, tuple)):
         return _normalize_sequence(list(value), declared_engine_type, engine_type)
 
+    if isinstance(value, dict):
+        return _normalize_artifact_dict(value, declared_engine_type)
+
     return _normalize_artifact(value, declared_engine_type, engine_type)
 
 
@@ -221,9 +229,9 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
 _SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
 
 
-def _sourceless_descriptor(value_type: str, engine_type: str) -> dict[str, Any]:
+def _sourceless_descriptor(value_type: str, engine_type: str, value: Any = None) -> dict[str, Any]:
     """Downgrade sourceless media and file values to text."""
-    return _descriptor(ValueType.TEXT if value_type in _SOURCED_VALUE_TYPES else value_type, [], engine_type)
+    return _descriptor(ValueType.TEXT if value_type in _SOURCED_VALUE_TYPES else value_type, [], engine_type, value)
 
 
 def _classify_locator_source(source: dict[str, Any], declared_value_type: str, engine_type: str) -> dict[str, Any]:
@@ -245,7 +253,7 @@ def _normalize_string(value: str, declared_engine_type: str | None, engine_type:
         resolved_to_path = macro_source["kind"] == SourceKind.PATH
         if resolved_to_path or macro_source["format"] is not None or _ABSOLUTE_PATH_PREFIX.match(value):
             return _classify_locator_source(macro_source, declared_value_type, engine_type)
-        return _sourceless_descriptor(declared_value_type, engine_type)
+        return _sourceless_descriptor(declared_value_type, engine_type, value)
 
     if value.startswith(("http://", "https://")) or _ABSOLUTE_PATH_PREFIX.match(value):
         return _classify_locator_source(_source_from_locator(value), declared_value_type, engine_type)
@@ -254,7 +262,7 @@ def _normalize_string(value: str, declared_engine_type: str | None, engine_type:
     if ("/" in value or "\\" in value) and _extension_of(value) is not None:
         return _classify_locator_source(_source_from_locator(value), declared_value_type, engine_type)
 
-    return _sourceless_descriptor(declared_value_type, engine_type)
+    return _sourceless_descriptor(declared_value_type, engine_type, value)
 
 
 def _normalize_sequence(items: list[Any], declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
@@ -278,6 +286,21 @@ def _normalize_sequence(items: list[Any], declared_engine_type: str | None, engi
         logger.warning("Mixed host types in one list (%s); reporting GTFile.", sorted(set(value_types)))
         return _descriptor(ValueType.FILE, sources, engine_type)
     return _descriptor(value_types[0], sources, engine_type)
+
+
+def _normalize_artifact_dict(value: dict[str, Any], declared_engine_type: str | None) -> dict[str, Any]:
+    """Reads hand back serialized artifacts, where attribute access finds no locator at all.
+
+    Keyed by the dict's own ``type`` rather than the declared one, which is what the engine says
+    the value is. A dict that is not an artifact has no locator to find and stays text.
+    """
+    engine_type = str(value.get("type") or declared_engine_type or "dict")
+    inner_value = value.get("value")
+    if inner_value is None:
+        return _sourceless_descriptor(value_type_for_engine_type(engine_type), engine_type)
+
+    inner = normalize_value(inner_value, engine_type)
+    return _descriptor(inner["value_type"], inner["sources"], engine_type, inner["value"])
 
 
 def _normalize_artifact(value: Any, declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
@@ -308,7 +331,7 @@ def _normalize_artifact(value: Any, declared_engine_type: str | None, engine_typ
             value_type = _value_type_for_extension(source["format"])
         # Text values must not carry locators that a host would try to open.
         if value_type not in _SOURCED_VALUE_TYPES:
-            return _sourceless_descriptor(value_type, engine_type)
+            return _sourceless_descriptor(value_type, engine_type, inner_value)
         return _descriptor(value_type, [source], engine_type)
 
     return _sourceless_descriptor(ValueType.FILE, engine_type)

@@ -137,7 +137,7 @@ class TestGetParameterValues:
 
         assert isinstance(result, NukeGetParameterValuesResultSuccess)
         descriptor = result.outputs["End Flow"]["was_successful"]
-        assert set(descriptor) == {"value_type", "sources", "colorspace", "engine_type"}
+        assert set(descriptor) == {"value_type", "value", "sources", "colorspace", "engine_type"}
 
 
 # execute_responses() already sets up an idle flow with "wf1" loaded and its declared shape

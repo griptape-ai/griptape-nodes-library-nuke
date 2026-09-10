@@ -91,7 +91,7 @@ class TestLoadWorkflow:
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
-        keys = {"value_type", "sources", "colorspace", "engine_type"}
+        keys = {"value_type", "value", "sources", "colorspace", "engine_type"}
         assert set(result.input_values["Start Flow"]["topic"]) == keys
         assert set(result.inputs[0]["default"]) == keys
 
