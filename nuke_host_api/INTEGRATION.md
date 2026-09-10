@@ -479,6 +479,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "default": {
         "value_type": "GTText",
+        "value": "a quiet harbour at dusk",
         "sources": [],
         "colorspace": null,
         "engine_type": "str"
@@ -495,6 +496,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTBool",
       "default": {
         "value_type": "GTNull",
+        "value": null,
         "sources": [],
         "colorspace": null,
         "engine_type": "NoneType"
@@ -509,6 +511,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "default": {
         "value_type": "GTNull",
+        "value": null,
         "sources": [],
         "colorspace": null,
         "engine_type": "NoneType"
@@ -523,6 +526,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "default": {
         "value_type": "GTNull",
+        "value": null,
         "sources": [],
         "colorspace": null,
         "engine_type": "NoneType"
@@ -591,6 +595,7 @@ workflow whose inputs have been touched.
       "type": "GTText",
       "default": {
         "value_type": "GTText",
+        "value": "a quiet harbour at dusk",
         "sources": [],
         "colorspace": null,
         "engine_type": "str"
@@ -607,6 +612,7 @@ workflow whose inputs have been touched.
       "type": "GTBool",
       "default": {
         "value_type": "GTNull",
+        "value": null,
         "sources": [],
         "colorspace": null,
         "engine_type": "NoneType"
@@ -619,6 +625,7 @@ workflow whose inputs have been touched.
     "Start Flow": {
       "topic": {
         "value_type": "GTText",
+        "value": "[SUCCEEDED] the run reported no failures",
         "sources": [],
         "colorspace": null,
         "engine_type": "str"
@@ -629,6 +636,7 @@ workflow whose inputs have been touched.
     "End Flow": {
       "was_successful": {
         "value_type": "GTNull",
+        "value": null,
         "sources": [],
         "colorspace": null,
         "engine_type": "NoneType"
@@ -836,6 +844,7 @@ through one reader in the library, so they cannot disagree.
     "Start Flow": {
       "topic": {
         "value_type": "GTText",
+        "value": "a quiet harbour at dusk",
         "sources": [],
         "colorspace": null,
         "engine_type": "str"
@@ -846,18 +855,21 @@ through one reader in the library, so they cannot disagree.
     "End Flow": {
       "was_successful": {
         "value_type": "GTBool",
+        "value": true,
         "sources": [],
         "colorspace": null,
         "engine_type": "bool"
       },
       "result_details": {
         "value_type": "GTText",
+        "value": "[SUCCEEDED] the run reported no failures",
         "sources": [],
         "colorspace": null,
         "engine_type": "str"
       },
       "summary": {
         "value_type": "GTText",
+        "value": "the run wrote 1 image",
         "sources": [],
         "colorspace": null,
         "engine_type": "str"
@@ -1150,6 +1162,7 @@ collapse into these four notifications.
   "parameter_name": "was_successful",
   "value": {
     "value_type": "GTBool",
+    "value": true,
     "sources": [],
     "colorspace": null,
     "engine_type": "bool"
@@ -1226,6 +1239,7 @@ has this shape:
 ```json
 {
   "value_type": "GTImage",
+  "value": null,
   "sources": [
     {
       "kind": "path",
@@ -1246,6 +1260,7 @@ has this shape:
 | Field | Notes |
 |---|---|
 | `value_type` | The only field to switch on |
+| `value` | The value itself, for `GTText`, `GTNumber`, and `GTBool`. Null for `GTNull` and for every sourced type, where the locator is in `sources` |
 | `sources` | Zero or more locators. Multiple sources means a sequence |
 | `colorspace` | Always null in v1, reserved |
 | `engine_type` | Support diagnostics only. Will change; never branch on it |
@@ -1254,13 +1269,18 @@ has this shape:
 
 | `value_type` | Meaning |
 |---|---|
-| `GTImage` | One or more images. Multiple sources means a sequence |
-| `GTMovie` | A movie file |
-| `GTFile` | A file this protocol version does not classify, including audio |
-| `GTText` | A string. No sources |
-| `GTNumber` | An int or float. No sources |
-| `GTBool` | A bool. No sources |
-| `GTNull` | Unset or empty. No sources |
+| `GTImage` | One or more images. Multiple sources means a sequence. `value` null |
+| `GTMovie` | A movie file. `value` null |
+| `GTFile` | A file this protocol version does not classify, including audio. `value` null |
+| `GTText` | A string, in `value`. No sources |
+| `GTNumber` | An int or float, in `value`. No sources |
+| `GTBool` | A bool, in `value`. No sources |
+| `GTNull` | Unset or empty. No sources, `value` null |
+
+A value is in exactly one place: `value` for a scalar, `sources` for anything pointing at
+bytes. Nothing carries both, so a host never has to decide which one wins. A string that is
+not a locator, an unresolvable template included, reports as `GTText` and its text is readable
+in `value`.
 
 A sequence is one `GTImage` with several sources rather than its own type. Handle "many
 sources" from the start.

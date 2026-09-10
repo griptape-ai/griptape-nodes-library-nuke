@@ -337,10 +337,120 @@ def test_engine_type_is_carried_for_diagnostics() -> None:
 
 
 def test_descriptor_shape_is_stable_across_inputs() -> None:
-    expected_top = {"value_type", "sources", "colorspace", "engine_type"}
+    expected_top = {"value_type", "value", "sources", "colorspace", "engine_type"}
     expected_source = {"kind", "value", "format", "width", "height", "byte_count", "is_pattern", "raw"}
     for value in [None, "prose", "/a/b.exr", b"x", ImageUrlArtifact(STATIC_URL), 1, True]:
         descriptor = value_types.normalize_value(value)
         assert set(descriptor) == expected_top
         for source in descriptor["sources"]:
             assert set(source) == expected_source
+
+
+class TestSerializedArtifacts:
+    """A read hands back an artifact as a dict, where `getattr(value, "value")` finds nothing.
+
+    The engine answers GetParameterValueRequest for an artifact-typed parameter with
+    `{"type": "ImageUrlArtifact", "value": "..."}` rather than the artifact object, so a
+    normalizer that only reaches for attributes reports an image output as sourceless text
+    and the host has nothing to open.
+    """
+
+    SERIALIZED = {
+        "type": "ImageUrlArtifact",
+        "id": "5c8be9c5889b442689bb34db168ec903",
+        "reference": None,
+        "meta": {},
+        "name": "5c8be9c5889b442689bb34db168ec903",
+        "value": STATIC_URL,
+    }
+
+    def test_a_serialized_artifact_keeps_its_locator(self) -> None:
+        descriptor = value_types.normalize_value(self.SERIALIZED, "ImageUrlArtifact")
+
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert [source["value"] for source in descriptor["sources"]] == [STATIC_URL]
+
+    def test_the_dicts_own_type_is_reported(self) -> None:
+        """`engine_type` is diagnostic, and "dict" tells support nothing about the value."""
+        assert value_types.normalize_value(self.SERIALIZED)["engine_type"] == "ImageUrlArtifact"
+
+    def test_a_serialized_sequence_carries_every_frame(self) -> None:
+        frames = {
+            "type": "ImageSequenceArtifact",
+            "value": [f"/mnt/show/frame.{number:04d}.exr" for number in (1, 2, 3)],
+        }
+
+        descriptor = value_types.normalize_value(frames)
+
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert len(descriptor["sources"]) == 3
+
+    def test_a_dict_that_is_not_an_artifact_stays_sourceless_text(self) -> None:
+        descriptor = value_types.normalize_value({"width": 1920, "height": 1080})
+
+        assert descriptor["value_type"] == ValueType.TEXT
+        assert descriptor["sources"] == []
+
+    def test_an_artifact_serialized_without_a_value_is_sourceless(self) -> None:
+        descriptor = value_types.normalize_value({"type": "ImageUrlArtifact", "value": None})
+
+        assert descriptor["sources"] == []
+        assert descriptor["engine_type"] == "ImageUrlArtifact"
+
+
+class TestScalarValues:
+    """A scalar has no locator, so without this field a host cannot read it at all.
+
+    Reading one back is also what keeps a host from having to remember what it last sent:
+    `sources` answers for media, and this answers for everything else.
+    """
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (True, True),
+            (False, False),
+            (7, 7),
+            (1.5, 1.5),
+            ("[SUCCEEDED] no connection provided", "[SUCCEEDED] no connection provided"),
+            ("", ""),
+        ],
+    )
+    def test_a_scalar_is_carried(self, value: Any, expected: Any) -> None:
+        assert value_types.normalize_value(value)["value"] == expected
+
+    def test_unset_is_null(self) -> None:
+        descriptor = value_types.normalize_value(None)
+        assert descriptor["value_type"] == ValueType.NULL
+        assert descriptor["value"] is None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            STATIC_URL,
+            "/mnt/show/plate.exr",
+            ImageUrlArtifact(STATIC_URL),
+            ImageArtifact(value=b"\x89PNG", format="png", width=1, height=1),
+            ListArtifact([ImageUrlArtifact("http://x/a.png")]),
+            {"type": "ImageUrlArtifact", "value": STATIC_URL},
+        ],
+    )
+    def test_a_sourced_value_stays_null(self, value: Any) -> None:
+        """The locator belongs in `sources`. Two places to look for one value is one too many."""
+        descriptor = value_types.normalize_value(value)
+        assert descriptor["sources"]
+        assert descriptor["value"] is None
+
+    def test_prose_declared_as_media_keeps_its_text(self) -> None:
+        """Downgraded to GTText because it points at no bytes, and still readable as text."""
+        descriptor = value_types.normalize_value("not a path at all", "ImageUrlArtifact")
+
+        assert descriptor["value_type"] == ValueType.TEXT
+        assert descriptor["value"] == "not a path at all"
+
+    def test_an_unresolvable_macro_that_is_not_a_locator_keeps_its_template(self) -> None:
+        """Prose with a brace token is text, and the text is the only thing a host can show."""
+        descriptor = value_types.normalize_value("shot {SHOT} approved", "str")
+
+        assert descriptor["value_type"] == ValueType.TEXT
+        assert descriptor["value"] == "shot {SHOT} approved"
