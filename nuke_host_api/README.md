@@ -392,6 +392,7 @@ Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`,
 
 ```json
 {"value_type": "GTImage",
+ "value": null,
  "sources": [{"kind": "url|path|inline|macro", "value": "...", "format": "exr",
               "width": null, "height": null, "byte_count": null,
               "is_pattern": true, "raw": "{outputs}/render.{###}.exr"}],
@@ -430,6 +431,9 @@ Rules:
 
 - **Moves no bytes.** No downloads, no copies, no header sniffing. The engine writes
   wherever it writes; this layer makes the shape predictable.
+- **One place per value.** `value` carries scalars, `sources` carries locators, and nothing
+  carries both. A scalar has no locator to point at, so without `value` a host could read an
+  image output but not the string saying why a run failed.
 - **Does perform pure resolution.** Project macros resolve through
   `GetPathForMacroRequest`, which has no disk writes.
 - **Never guesses a format.** Unknown is `null`.
