@@ -27,13 +27,15 @@ const Values = (function () {
     return byNode;
   }
 
-  // A descriptor is what the engine holds; an input row needs the scalar behind it. Scalars carry
-  // the type and no value, so the text comes from the source locator when there is one.
+  // Prefer a source locator; scalars carry no source, so fall back to the descriptor's value.
   function fieldValueFrom(descriptor) {
     if (!descriptor || typeof descriptor !== "object") return undefined;
     const sources = Array.isArray(descriptor.sources) ? descriptor.sources : [];
     const first = sources.length ? sources[0] || {} : null;
     if (first && first.kind !== "inline" && first.value) return first.value;
+    if (descriptor.value !== null && descriptor.value !== undefined) {
+      return String(descriptor.value);
+    }
     return undefined;
   }
 

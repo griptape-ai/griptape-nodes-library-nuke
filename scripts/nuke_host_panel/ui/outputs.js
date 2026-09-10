@@ -6,13 +6,26 @@
   const { nukeNodePlan, paramKey } = Values;
   const { clock, copyButton, html, stateClass } = Ui;
 
-  function Preview({ valueType, url }) {
+  // Browsers load local files only from pages opened from disk.
+  function fileUrl(path) {
+    if (!path) return null;
+    const slashed = String(path).replace(/\\/g, "/");
+    const absolute = slashed.charAt(0) === "/" ? slashed : "/" + slashed;
+    return "file://" + encodeURI(absolute).replace(/#/g, "%23");
+  }
+
+  function Preview({ valueType, url, local }) {
     const [failed, setFailed] = useState(false);
     const tag = PREVIEWABLE[valueType];
     if (!tag || !url) return null;
     if (failed) {
       return html`<div class="muted">
-        Preview failed. The engine can reach this URL; this browser cannot.
+        ${
+          local
+            ? "Preview failed. A browser loads a local file only from a local page, so this needs " +
+              "index.html opened from disk rather than served."
+            : "Preview failed. The engine can reach this URL; this browser cannot."
+        }
       </div>`;
     }
     if (tag === "video") {
@@ -66,7 +79,11 @@
                     ? html`<div class="muted">
                         Frame padding: valid for a file knob, invalid for an open().
                       </div>`
-                    : null
+                    : html`<${Preview}
+                        valueType=${valueType}
+                        url=${fileUrl(source.value)}
+                        local
+                      />`
                 }
               `
             : null
@@ -138,11 +155,15 @@
               : html`
                   ${
                     scalar
-                      ? html`<div class="flat muted">
+                      ? html`<div class="flat mono">
                           ${
                           valueType === "GTNull"
-                            ? "Unset."
-                            : "The descriptor carries the type, not the value."
+                            ? html`<span class="muted">Unset.</span>`
+                            : descriptor.value === null || descriptor.value === undefined
+                              ? html`<span class="muted">No value reported.</span>`
+                              : descriptor.value === ""
+                                ? html`<span class="muted">Empty.</span>`
+                                : String(descriptor.value)
                         }
                         </div>`
                       : null
