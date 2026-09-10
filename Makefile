@@ -108,6 +108,14 @@ test/unit: ## Run unit tests.
 test/integration: ## Run integration tests. Nuke-gated tests skip cleanly if NUKE_EXECUTABLE is unset.
 	@uv run pytest tests/integration
 
+.PHONY: test/integration/host-api
+test/integration/host-api: ## Smoke the host API against a running engine (needs local_socket enabled).
+	@uv run pytest tests/integration/test_host_api.py -v -rs
+
+.PHONY: host-api/dashboard
+host-api/dashboard: ## Open the browser host panel (needs websocket_direct enabled).
+	@python3 -c "import pathlib, webbrowser; webbrowser.open(pathlib.Path('scripts/nuke_host_panel/index.html').resolve().as_uri())"
+
 .PHONY: check
 check: check/format check/lint check/types check/json ## Run all checks.
 

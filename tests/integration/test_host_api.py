@@ -1,0 +1,421 @@
+"""Live host API smoke tests over a real engine's local socket."""
+
+from __future__ import annotations
+
+import os
+import sys
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, NodeState, Verb
+from tests.integration.host_api_client import (
+    HostClient,
+    detail_of,
+    discover,
+    engines_registry_path,
+    result_of,
+    running_engine,
+    socket_path_for,
+    succeeded,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from tests.integration.host_api_client import Engine
+
+ENGINE = running_engine()
+NAMED_WORKFLOW = os.environ.get("GRIPTAPE_NODES_SMOKE_WORKFLOW")
+NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "30"))
+
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="local_socket is a named pipe on Windows, which this harness does not open",
+    ),
+    pytest.mark.skipif(
+        ENGINE is None,
+        reason=(
+            f"No running engine found. Checked {engines_registry_path()} for engine ids and "
+            f"looked for a live socket per id. Start an engine with the local_socket IPC "
+            f"driver enabled; see nuke_host_api/INTEGRATION.md."
+        ),
+    ),
+]
+
+
+@pytest.fixture(scope="module")
+def engine() -> Engine:
+    assert ENGINE is not None
+    return ENGINE
+
+
+@pytest.fixture
+def client(engine: Engine) -> Iterator[HostClient]:
+    """Connect before each test and cancel any execution during teardown."""
+    with HostClient(socket_path=engine.socket_path) as connected:
+        handshake = connected.request(
+            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+        )
+        assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
+        try:
+            yield connected
+        finally:
+            # Drain first. The engine writes every frame to every client, so leaving a
+            # backlog unread risks filling the socket buffer, and a client the engine cannot
+            # write to is dropped from its broadcast set and stops receiving replies too.
+            connected.drain(0.5)
+            state = connected.request(Verb.GET_EXECUTION_STATE)
+            if succeeded(state) and result_of(state).get("running"):
+                connected.request(Verb.CANCEL_EXECUTION)
+
+
+def _runnable_workflows(client: HostClient) -> list[dict[str, Any]]:
+    reply = client.request(Verb.LIST_WORKFLOWS, {"runnable_only": True})
+    assert succeeded(reply), f"list workflows failed: {detail_of(reply)}"
+    return [entry for entry in result_of(reply).get("workflows", []) if entry.get("runnable")]
+
+
+def _smoke_workflow_id(client: HostClient) -> str:
+    workflows = _runnable_workflows(client)
+    if NAMED_WORKFLOW:
+        if not any(entry["id"] == NAMED_WORKFLOW for entry in workflows):
+            pytest.skip(
+                f"GRIPTAPE_NODES_SMOKE_WORKFLOW={NAMED_WORKFLOW!r} is not registered or not "
+                f"runnable. Runnable: {[entry['id'] for entry in workflows]}"
+            )
+        return NAMED_WORKFLOW
+    if not workflows:
+        pytest.skip(
+            "No runnable workflow is registered, so nothing can be executed. Register one "
+            "with a Start Flow and End Flow pair. THE EXECUTION PATH WAS NOT TESTED."
+        )
+    return str(workflows[0]["id"])
+
+
+def _load_smoke_workflow(client: HostClient) -> dict[str, Any]:
+    """Load explicitly because execute runs the current graph without loading."""
+    workflow_id = _smoke_workflow_id(client)
+    reply = client.request(Verb.LOAD_WORKFLOW, {"workflow_id": workflow_id})
+    assert succeeded(reply), f"load failed: {detail_of(reply)}"
+    body = result_of(reply)
+    assert body["workflow_id"] == workflow_id
+    return body
+
+
+class TestDiscovery:
+    def test_the_registry_lists_engines_and_resolves_a_socket_path_per_engine(self) -> None:
+        engines = discover()
+        assert engines, f"no engines in {engines_registry_path()}"
+        for entry in engines:
+            assert entry.id
+            assert entry.socket_path == socket_path_for(entry.id)
+        assert len([entry for entry in engines if entry.is_default]) <= 1
+
+    def test_a_running_engine_is_identified_by_its_socket_existing(self, engine: Engine) -> None:
+        assert engine.running
+        assert engine.name, "an engine needs a label a host can show an artist"
+
+
+class TestConnect:
+    def test_connect_negotiates_a_version_and_returns_the_closed_type_set(
+        self, client: HostClient, engine: Engine
+    ) -> None:
+        reply = client.request(
+            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+        )
+        assert succeeded(reply), f"connect failed: {detail_of(reply)}"
+        body = result_of(reply)
+
+        assert body["protocol_version"] == PROTOCOL_VERSION
+        assert set(body["value_types"]) == set(VALUE_TYPES), (
+            "the engine's advertised type set must match this build's closed set"
+        )
+        assert body["engine_version"] and body["engine_version"] != "unknown"
+        assert body["library_version"] != "unknown", "library_version is read from the shipped manifest"
+        assert body["event_topic"]
+        assert body["engine_id"] == engine.id, "engine_id must survive the wire, matching engine discovery's id"
+        assert isinstance(body["session_id"], str), "session_id must be present even when empty"
+        assert body["engine_name"] == engine.name, "engine_name must survive the wire, matching discovery's name"
+
+    def test_an_unsupported_protocol_version_is_refused_and_names_the_window(self, client: HostClient) -> None:
+        reply = client.request(Verb.CONNECT, {"client_protocol_versions": [99]})
+        assert not succeeded(reply)
+        assert result_of(reply)["supported_protocol_versions"], "a refusal must tell a host what would work"
+
+    def test_an_unknown_request_field_is_ignored(self, client: HostClient) -> None:
+        """Additive change safety, verified rather than asserted in a doc.
+
+        Adding a field must not bump the protocol version, which only holds if an engine
+        predating a field tolerates receiving it.
+        """
+        reply = client.request(
+            Verb.CONNECT,
+            {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
+        )
+        assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
+
+
+class TestDescribe:
+    def test_listed_workflows_carry_an_id_and_a_label(self, client: HostClient) -> None:
+        reply = client.request(Verb.LIST_WORKFLOWS, {"runnable_only": False})
+        assert succeeded(reply), f"list workflows failed: {detail_of(reply)}"
+        workflows = result_of(reply).get("workflows", [])
+        if not workflows:
+            pytest.skip("this engine has no workflows registered, which is a valid state for an empty workspace")
+        for entry in workflows:
+            assert entry["id"] and entry["name"]
+            if not entry["runnable"]:
+                assert entry["unavailable_reason"], "an unrunnable entry must say why"
+
+    def test_every_declared_parameter_is_completely_described(self, client: HostClient) -> None:
+        """A host builds knobs from this, so every field it indexes must be present.
+
+        This is the assertion the mocked suite cannot make: real parameters come from a real
+        workflow_shape, which arrives as a JSON string for some workflows and is absent for
+        others.
+        """
+        workflow_id = _smoke_workflow_id(client)
+        reply = client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": workflow_id})
+        assert succeeded(reply), f"describe failed: {detail_of(reply)}"
+        body = result_of(reply)
+
+        parameters = body["inputs"] + body["outputs"]
+        assert parameters, f"workflow {workflow_id!r} was listed runnable but declares no parameters"
+        for declared in parameters:
+            assert declared["node"] and declared["parameter"]
+            assert declared["name"] == f"{declared['node']}.{declared['parameter']}"
+            assert declared["type"] in VALUE_TYPES, (
+                f"{declared['name']} escaped the closed set with {declared['type']!r}"
+            )
+            assert declared["default"]["value_type"] in VALUE_TYPES, f"{declared['name']} default is not a descriptor"
+            assert isinstance(declared["tooltip"], str)
+            assert isinstance(declared["settable"], bool)
+
+    def test_no_control_flow_parameter_is_exposed(self, client: HostClient) -> None:
+        workflow_id = _smoke_workflow_id(client)
+        body = result_of(client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": workflow_id}))
+        names = [declared["parameter"] for declared in body["inputs"] + body["outputs"]]
+        assert not [name for name in names if name in {"exec_in", "exec_out"}], (
+            f"control flow wiring leaked into the host surface: {names}"
+        )
+
+    def test_an_unknown_workflow_id_fails_cleanly(self, client: HostClient) -> None:
+        reply = client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": "does-not-exist"})
+        assert not succeeded(reply)
+        assert detail_of(reply), "a failure must carry a message an artist can read"
+
+
+class TestLoad:
+    def test_loading_returns_declarations_and_current_values_in_one_reply(self, client: HostClient) -> None:
+        """The reason the verb exists: one round trip is enough to build and initialize knobs.
+
+        Also the assertion the mocked suite cannot make, since these values come off a real
+        graph the engine actually built rather than a fake's canned answer.
+        """
+        body = _load_smoke_workflow(client)
+
+        assert body["name"]
+        assert body["inputs"] or body["outputs"], "a runnable workflow declares parameters"
+        for declared in body["inputs"]:
+            value = body["input_values"].get(declared["node"], {}).get(declared["parameter"])
+            assert value is not None, f"{declared['name']} was declared but no value came back for it"
+            assert value["value_type"] in VALUE_TYPES
+        assert body["unavailable"] == [], f"every declared parameter should have answered: {body['unavailable']}"
+
+    def test_what_load_declares_is_what_describe_declares(self, client: HostClient) -> None:
+        """Two verbs publishing the same parameters must not disagree about them."""
+        workflow_id = _smoke_workflow_id(client)
+        described = result_of(client.request(Verb.DESCRIBE_WORKFLOW, {"workflow_id": workflow_id}))
+        loaded = _load_smoke_workflow(client)
+
+        for side in ("inputs", "outputs"):
+            assert [declared["name"] for declared in loaded[side]] == [
+                declared["name"] for declared in described[side]
+            ], f"load and describe disagree about {side}"
+
+    def test_what_load_reads_is_what_the_bulk_read_verb_reads(self, client: HostClient) -> None:
+        """Both go through one reader, so a host may cache either and get the same answer."""
+        loaded = _load_smoke_workflow(client)
+        read = result_of(client.request(Verb.GET_PARAMETER_VALUES))
+
+        assert loaded["input_values"] == read["inputs"]
+        assert loaded["output_values"] == read["outputs"]
+
+    def test_an_unknown_workflow_id_fails_without_disturbing_what_is_loaded(self, client: HostClient) -> None:
+        """Loading clears all object state, so a refusal must happen before it does."""
+        loaded = _load_smoke_workflow(client)
+
+        reply = client.request(Verb.LOAD_WORKFLOW, {"workflow_id": "does-not-exist"})
+        assert not succeeded(reply)
+        assert detail_of(reply), "a failure must carry a message an artist can read"
+
+        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
+        assert state["workflow_id"] == loaded["workflow_id"], "a refused load discarded the loaded graph"
+
+    def test_a_request_naming_neither_a_workflow_nor_a_file_is_refused(self, client: HostClient) -> None:
+        reply = client.request(Verb.LOAD_WORKFLOW, {})
+        assert not succeeded(reply)
+        assert detail_of(reply)
+
+
+class TestExecute:
+    def test_a_workflow_runs_and_pushes_node_state_without_being_polled(self, client: HostClient) -> None:
+        """The one test that proves push works on this transport.
+
+        Notifications are collected without sending a single request, so a pass cannot be
+        explained by polling. local_socket has no subscribe step and the engine's fan-out
+        ignores topics for it, so either events arrive unsolicited or the push path is broken.
+
+        The fixture has already connected, which is what installs the bridge.
+        """
+        workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        started = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
+        assert succeeded(started), f"execute failed: {detail_of(started)}"
+        assert result_of(started)["rejected_inputs"] == [], "no inputs were sent, so none may be rejected"
+
+        client.drain(NOTIFICATION_WINDOW_S)
+
+        node_events = client.of_type("NukeNodeStateEvent")
+        assert node_events, (
+            f"no NukeNodeStateEvent arrived in {NOTIFICATION_WINDOW_S}s. Either the execution "
+            f"bridge is not installed or push does not reach a local_socket client."
+        )
+        seen = {event.body["state"] for event in node_events}
+        assert seen <= {NodeState.UNRESOLVED, NodeState.RUNNING, NodeState.RESOLVED, NodeState.FAILED}, (
+            f"a node state escaped the closed set: {seen}"
+        )
+        failures = [event.body for event in node_events if event.body["state"] == NodeState.FAILED]
+        assert not failures, f"the workflow reported node failures: {failures}"
+
+    def test_streamed_parameter_values_are_already_normalized(self, client: HostClient) -> None:
+        """Values on the live path must use the same descriptor shape as describe.
+
+        Also asserts execution wiring stays off the stream. The engine streams a value update
+        for exec_in like any other parameter, and a host that received it would be told
+        control flow is GTText, contradicting describe_workflow which never lists it.
+        """
+        workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
+        client.drain(NOTIFICATION_WINDOW_S)
+
+        value_events = client.of_type("NukeParameterValueEvent")
+        assert value_events, "no NukeParameterValueEvent arrived, so the value path is untested"
+        for event in value_events:
+            descriptor = event.body["value"]
+            assert descriptor["value_type"] in VALUE_TYPES, (
+                f"{event.body['node_name']}.{event.body['parameter_name']} "
+                f"escaped the closed set with {descriptor['value_type']!r}"
+            )
+            assert "sources" in descriptor
+            assert "engine_type" in descriptor
+
+        streamed = {f"{event.body['node_name']}.{event.body['parameter_name']}" for event in value_events}
+        wiring = {name for name in streamed if name.rsplit(".", 1)[-1] in {"exec_in", "exec_out"}}
+        assert not wiring, f"execution wiring reached the host as parameter values: {sorted(wiring)}"
+
+    def test_declared_outputs_are_readable_after_a_run(self, client: HostClient) -> None:
+        """The recovery path, and the only definition of outputs in this protocol.
+
+        What it returns must be the parameters describe promised, not whichever node control flow
+        happened to end on.
+        """
+        loaded = _load_smoke_workflow(client)
+        workflow_id = loaded["workflow_id"]
+        assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
+        client.drain(NOTIFICATION_WINDOW_S)
+
+        reply = client.request(Verb.GET_PARAMETER_VALUES, {"sections": ["outputs"]})
+        assert succeeded(reply), f"reading parameter values failed: {detail_of(reply)}"
+        body = result_of(reply)
+        assert body["workflow_id"] == workflow_id
+
+        promised = {declared["node"] for declared in loaded["outputs"]}
+        assert promised <= set(body["outputs"]), (
+            f"describe promised outputs on {sorted(promised)} but parameter values returned {sorted(body['outputs'])}"
+        )
+        for parameters in body["outputs"].values():
+            for descriptor in parameters.values():
+                assert descriptor["value_type"] in VALUE_TYPES
+        assert body["unavailable"] == [], f"every promised output should have answered: {body['unavailable']}"
+
+    def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
+        """Serial execution is what makes the missing engine-side execution id survivable.
+
+        The first execute is sent without waiting: its reply lands when the run ends, and the
+        point is to be mid-run. Skips rather than fails when the first run finishes too fast to
+        race, since that is a property of the chosen workflow and not of the guard.
+        """
+        workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
+
+        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
+        if not state.get("running"):
+            pytest.skip(f"workflow {workflow_id!r} finished before a second execute could race it")
+
+        second = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
+        assert not succeeded(second), "a second run must be refused, not allowed to displace the first"
+        assert "already executing" in detail_of(second).lower()
+
+    def test_no_workflow_id_runs_whatever_is_loaded(self, client: HostClient) -> None:
+        """A host driving a graph it did not load itself has no id to send."""
+        workflow_id = _load_smoke_workflow(client)["workflow_id"]
+
+        reply = client.request(Verb.EXECUTE_WORKFLOW, {})
+        assert succeeded(reply), f"execute without an id failed: {detail_of(reply)}"
+        assert result_of(reply)["workflow_id"] == workflow_id, "the reply must name what actually ran"
+
+    def test_a_workflow_id_other_than_the_loaded_one_is_refused(self, client: HostClient) -> None:
+        """Execute loads nothing, so the alternative is silently running the wrong workflow."""
+        _load_smoke_workflow(client)
+
+        reply = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": "some-other-workflow"})
+        assert not succeeded(reply)
+        assert "NukeLoadWorkflowRequest" in detail_of(reply), "a refusal must say what to do next"
+
+    def test_an_undeclared_input_is_rejected_and_never_reaches_the_graph(self, client: HostClient) -> None:
+        """The engine would set a parameter on any node, and this transport authenticates nobody."""
+        workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        reply = client.request(
+            Verb.EXECUTE_WORKFLOW,
+            {"workflow_id": workflow_id, "inputs": {"No Such Node": {"api_key": "stolen"}}},
+        )
+        assert succeeded(reply), f"execute failed for a reason other than the bad input: {detail_of(reply)}"
+        rejected = result_of(reply)["rejected_inputs"]
+        assert rejected == [
+            {
+                "node": "No Such Node",
+                "parameter": "api_key",
+                "reason": "Not a declared input parameter of this workflow.",
+            }
+        ]
+
+    def test_a_declared_input_is_applied(self, client: HostClient) -> None:
+        loaded = _load_smoke_workflow(client)
+        workflow_id = loaded["workflow_id"]
+        text_parameters = [
+            declared for declared in loaded["inputs"] if declared["type"] == "GTText" and declared["settable"]
+        ]
+        if not text_parameters:
+            pytest.skip(f"workflow {workflow_id!r} has no settable text input to drive")
+
+        declared = text_parameters[0]
+        reply = client.request(
+            Verb.EXECUTE_WORKFLOW,
+            {"workflow_id": workflow_id, "inputs": {declared["node"]: {declared["parameter"]: "nuke smoke test"}}},
+        )
+        assert succeeded(reply), f"execute failed: {detail_of(reply)}"
+        body = result_of(reply)
+        assert {"node": declared["node"], "parameter": declared["parameter"]} in body["applied_inputs"]
+        assert body["rejected_inputs"] == []
+
+
+class TestCancel:
+    def test_cancel_is_refused_when_nothing_is_running(self, client: HostClient) -> None:
+        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
+        if state.get("running"):
+            pytest.skip("something is already running, so an idle cancel cannot be tested")
+
+        reply = client.request(Verb.CANCEL_EXECUTION)
+        assert not succeeded(reply), "cancelling nothing must fail rather than silently succeed"
