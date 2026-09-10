@@ -9,8 +9,7 @@
     const described = st.describedProject;
     const chosen = st.projects.find((project) => project.id === st.projectChoice);
     const listedCurrent = st.projects.find((project) => project.current);
-    // Open on the current project rather than on nothing, so the closed select names what the engine
-    // is on. The choice stays empty until a pick, because picking is what previews.
+    // Show the current project until the user picks one to preview.
     const shown = st.projectChoice || (listedCurrent ? listedCurrent.id : "");
     const switchable = chosen && chosen.available && !chosen.current && !st.runActive;
 
@@ -104,9 +103,6 @@
                       >
                         Switch and reconnect
                       </button>
-                      <span class="muted">
-                        ${chosen && chosen.current ? "Already current." : "Drops cached ids."}
-                      </span>
                     </div>
                   </div>
                 `
@@ -139,7 +135,6 @@
             </button>
           </div>
           ${st.projectNote ? html`<div class="muted">${st.projectNote}</div>` : null}
-          <p class="note">Refused while a run is in flight.</p>
         </div>
       </div>
     `;

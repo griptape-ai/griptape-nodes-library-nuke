@@ -142,7 +142,6 @@ a {
   white-space: nowrap;
 }
 
-/* header */
 .header {
   align-items: center;
   background: linear-gradient(#333, #292929);
@@ -195,7 +194,6 @@ a {
   }
 }
 
-/* banner */
 .banner {
   border-left: 3px solid;
   display: flex;
@@ -219,7 +217,6 @@ a {
   display: block;
 }
 
-/* workspace */
 .workspace {
   display: grid;
   flex: 1 1 auto;
@@ -300,7 +297,6 @@ a {
   padding-top: 7px;
 }
 
-/* parameter rows */
 .field {
   align-items: center;
   display: grid;
@@ -319,7 +315,6 @@ a {
   min-width: 54px;
 }
 
-/* chips and badges */
 .badge {
   background: #3a3a3a;
   border: 1px solid var(--line);
@@ -372,7 +367,6 @@ a {
   color: #c4a6e8;
 }
 
-/* progress */
 .bar {
   background: var(--sunken);
   border: 1px solid var(--line);
@@ -424,7 +418,6 @@ a {
   background: #a06fd0;
 }
 
-/* outputs */
 .out {
   background: var(--sunken);
   border: 1px solid var(--line);
@@ -480,7 +473,6 @@ details.plan .call {
   font-size: 10px;
 }
 
-/* rows */
 .item {
   align-items: center;
   border: 1px solid var(--line);
@@ -509,7 +501,6 @@ details.plan .call {
   opacity: 0.55;
 }
 
-/* drawer */
 .drawer {
   background: var(--panel);
   border-top: 1px solid var(--line);

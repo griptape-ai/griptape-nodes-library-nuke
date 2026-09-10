@@ -1,5 +1,3 @@
-// Everything a host author needs and a panel user never opens: the connection, the raw event
-// stream, and the frames on the wire.
 (function () {
   const { useMemo, useState } = preactHooks;
   const { NOTIFICATION } = Protocol;
@@ -18,10 +16,6 @@
       <div class="cols2">
         <div>
           <div class="sub">engine</div>
-          <p class="note">
-            The host and port are a host preference, never discovered: the engine's own registry
-            files carry no compatibility promise.
-          </p>
           <div class="field" style="margin-top: 6px">
             <label>engine</label>
             <input
@@ -67,11 +61,6 @@
               Drop the socket
             </button>
           </div>
-          <div class="muted">
-            Drop it under a live run: notifications sent while disconnected are gone, and the resync
-            is what has to make up for it.
-          </div>
-
           <table style="margin-top: 8px">
             <tbody>
               <tr>
@@ -146,11 +135,6 @@
 
         <div>
           <div class="sub">resync</div>
-          <p class="note">
-            One sequence for first connect, reconnect, and page reload. Order is load-bearing:
-            subscribe before requesting, or the reply is published to a topic this connection is not
-            listening on.
-          </p>
           ${
             !st.resyncSteps.length
               ? html`<div class="empty">Nothing has run yet.</div>`
@@ -179,8 +163,7 @@
           }
           <div class="sub" style="margin-top: 10px">stored locally</div>
           <div class="muted">
-            Engine URL, client name, last workflow, and parameter values, per engine id. None of it
-            is protocol.
+            Engine URL, client name, last workflow, and parameter values per engine id.
           </div>
           <div class="stack" style="margin-top: 4px">
             <button
@@ -214,11 +197,6 @@
 
     return html`
       <div>
-        <p class="note">
-          Nothing here was requested: every row arrived on the event topic, and the request counter
-          stops moving while the feed fills. A run started anywhere on this engine appears here.
-          "elsewhere" is inferred, since the protocol carries no execution id.
-        </p>
         <div class="stats" style="margin: 8px 0">
           <${Stat}
             label="stream"

@@ -1,11 +1,9 @@
-// Value descriptor handling. Pure: no state, no socket.
 const Values = (function () {
   const { isScalar } = Protocol;
 
   const paramKey = (node, parameter) => node + "." + parameter;
 
-  // {node: {parameter: descriptor}} flattened to the "node.parameter" keys the panel indexes by.
-  // Load and the bulk read verb both answer in the nested shape.
+  // Convert the nested wire shape to keys used by panel state.
   function flattenValues(byNode, live) {
     const flat = {};
     Object.keys(byNode || {}).forEach((node) => {
@@ -39,9 +37,7 @@ const Values = (function () {
     return undefined;
   }
 
-  // What a value would become in the DAG. Built from the descriptor's value_type, never from the
-  // parameter's declared type: a parameter declared as an unmapped artifact class reports GTFile
-  // before a value exists and may arrive as an image.
+  // Use value_type because unmapped artifact parameters may produce a different runtime type.
   function nukeNodePlan(descriptor) {
     if (!descriptor || typeof descriptor !== "object") return [];
     const valueType = descriptor.value_type || "?";

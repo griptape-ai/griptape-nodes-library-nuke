@@ -1,14 +1,5 @@
 <!doctype html>
-<!--
-Browser host panel for the Nuke host API. Shell only: markup, styles, and the load order below,
-which is also the layering: nothing earlier in the list reaches for anything later.
-
-Plain scripts rather than ES modules, so this opens straight off the filesystem by double-click. A
-file:// page cannot import a module from a sibling file, and a build step is not worth a panel.
-
-Read README.md in this directory for the file map. The contract is nuke_host_api/INTEGRATION.md;
-nothing here is a contract.
--->
+<!-- Plain scripts must load in dependency order; file:// pages cannot import sibling ES modules. -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -18,28 +9,20 @@ nothing here is a contract.
   <body>
     <div id="app" class="booting">Loading...</div>
     <script>
-      // Preact and htm come off a CDN. Without this, a machine with no network access would show
-      // nothing at all and look broken rather than offline.
       window.__bootTimer = setTimeout(function () {
         var root = document.getElementById("app");
         if (!root || root.dataset.rendered) return;
         root.innerHTML =
           '<div class="bootfail"><b>The panel did not start.</b>' +
-          "<p>Most likely preact and htm could not be fetched from unpkg.com: this page has no " +
-          "build step, so it loads them over the network. The engine connection itself is local " +
-          "and unaffected.</p>" +
-          "<p>Without internet access, save the three files below next to this one and change " +
-          "their script tags to point at the local copies. Check the browser console for anything " +
-          "else.</p></div>";
+          "<p>Preact or htm may have failed to load from unpkg.com. Check network access and the " +
+          "browser console, or use local copies.</p></div>";
       }, 8000);
     </script>
 
-    <!-- rendering library -->
     <script src="https://unpkg.com/preact@10.23.1/dist/preact.umd.js"></script>
     <script src="https://unpkg.com/preact@10.23.1/hooks/dist/hooks.umd.js"></script>
     <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
 
-    <!-- the part a plugin reimplements -->
     <script src="./protocol.js"></script>
     <script src="./config.js"></script>
     <script src="./store.js"></script>
@@ -49,7 +32,6 @@ nothing here is a contract.
     <script src="./actions.js"></script>
     <script src="./session.js"></script>
 
-    <!-- presentation -->
     <script src="./ui/common.js"></script>
     <script src="./ui/project.js"></script>
     <script src="./ui/workflow.js"></script>

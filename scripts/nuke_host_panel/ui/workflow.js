@@ -1,5 +1,4 @@
-// A menu, not a browser: no ids on screen. Picking describes, which changes nothing. Loading is a
-// second press, because it clears the engine.
+// Selecting describes a workflow without loading it; loading clears engine object state.
 (function () {
   const { guard, setState } = Store;
   const { doDescribe, doLoad } = Actions;
@@ -40,7 +39,7 @@
             !st.session
               ? html`<div class="empty">Waiting for an engine.</div>`
               : !described
-                ? html`<div class="empty">Picking one describes it. Nothing is loaded.</div>`
+                ? html`<div class="empty">No workflow selected.</div>`
                 : html`
                     ${
                       described.description
@@ -100,17 +99,12 @@
                 Load file
               </button>
             </div>
-            <div class="muted">
-              A file is imported and registered first, and the reply names the id it resolved to.
-              One selector or the other, never both.
-            </div>
           </div>
 
           ${
             blocked.length
               ? html`<div class="split">
                   <div class="sub">not offered</div>
-                  <!-- Reported rather than hidden: an absence carries no reason. -->
                   ${blocked.map(
                     (workflow) => html`
                       <div class="stale">

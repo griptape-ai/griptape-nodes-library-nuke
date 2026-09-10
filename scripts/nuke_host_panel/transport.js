@@ -1,8 +1,3 @@
-// Transport. The part a real plugin reimplements: one socket, request/reply correlation, and a
-// message pump that dispatches notifications while requests are still outstanding.
-//
-// Nothing here knows about panes or engine semantics. It reports frames to the store for the wire
-// log and hands notifications to whatever handler was registered.
 const Transport = (function () {
   const { FRAME_LOG_LIMIT, REPLY_TOPIC, REQUEST_TIMEOUT_MS } = Config;
   const { setState, state } = Store;
@@ -46,18 +41,16 @@ const Transport = (function () {
     sendFrame({ type: "subscribe", topic });
   }
 
-  // Correlated by request_id, never by arrival order: notifications share this socket and arrive
-  // interleaved.
+  // Correlate by request_id because notifications interleave with replies.
   function newRequestId() {
     return Math.random().toString(16).slice(2) + Date.now().toString(16);
   }
 
-  // Registering the reply is separate from sending the frame, because a batch registers several
-  // replies and sends one frame.
+  // Batch requests register several replies before sending one frame.
   function trackReply(requestId, requestType, timeoutMs) {
     const budget = timeoutMs === undefined ? REQUEST_TIMEOUT_MS : timeoutMs;
     return new Promise((resolve, reject) => {
-      // A budget of 0 means none: execute's reply waits out the whole run.
+      // Zero disables the timeout for execute requests that span a run.
       const timer = budget
         ? setTimeout(() => {
             pending.delete(requestId);
@@ -111,10 +104,8 @@ const Transport = (function () {
     return waiting;
   }
 
-  // Several verbs in one round trip. The engine fans the batch out on ingest, so each inner request
-  // keeps its own request_id and its reply arrives as a normal result frame; there is no batched
-  // reply to wait for. EventRequestBatch is the engine's own wire envelope, not part of this
-  // protocol, so its shape can change without a version bump.
+  // Inner batch requests keep independent ids and receive ordinary result frames.
+  // EventRequestBatch belongs to the engine wire format, not this versioned protocol.
   function requestBatch(entries, timeoutMs) {
     const requests = [];
     const waiting = entries.map((entry) => {
@@ -132,8 +123,7 @@ const Transport = (function () {
     return Promise.all(waiting);
   }
 
-  // A client that reads until it finds its own reply, discarding the rest, silently drops every
-  // notification. One pump owns the socket.
+  // Dispatch every socket frame; scanning only for a reply would drop interleaved notifications.
   function onMessage(event) {
     let frame;
     try {
@@ -166,8 +156,7 @@ const Transport = (function () {
       waiting.resolve(payload);
       return;
     }
-    // Anything else is the engine's own traffic. Binding to it would take on the engine's release
-    // cadence, which is the problem this protocol exists to avoid.
+    // Ignore uncorrelated engine traffic to avoid depending on internal wire formats.
   }
 
   function openSocket(url) {
