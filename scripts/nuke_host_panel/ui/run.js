@@ -1,5 +1,4 @@
-// Resolved node states over the run's node set. The ratio can top out below 1.0 on a clean run: the
-// total counts what a flow declares, and an untaken branch never resolves.
+// Untaken branches can keep the resolved-node ratio below 1.0 after a clean run.
 (function () {
   const { EXECUTION_STATES, KNOWN_NODE_STATES } = Protocol;
   const { html, stateClass } = Ui;
@@ -69,7 +68,7 @@
                   ${
                     !denominator && st.runActive
                       ? html`<div class="muted">
-                          No total yet. A flow whose start node is also its end node emits none.
+                          No total reported; single-node flows emit none.
                         </div>`
                       : null
                   }
@@ -96,9 +95,8 @@
                           `,
                         )}
                           <p class="note">
-                            The terminal event reports <code>completed</code> either way: it fires
-                            on a clean run and an errored one and carries no outcome. A live node
-                            state event is the only place a failure appears.
+                            Node failures appear only in live state events; terminal events still
+                            report <code>completed</code>.
                           </p>
                         </div>`
                       : null

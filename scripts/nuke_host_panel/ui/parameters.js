@@ -1,5 +1,3 @@
-// One row per declared input, widget chosen from its host type. That is the point of the
-// declaration: the panel is generated, not written per workflow.
 (function () {
   const { KNOWN_VALUE_TYPES, isMedia } = Protocol;
   const { guard, persist, setState } = Store;
@@ -10,8 +8,6 @@
   function Field({ param, value, locked }) {
     const key = paramKey(param.node, param.parameter);
     const set = (v) => setField(param, v);
-    // settable false means the engine will refuse a value for this parameter, ever. locked means a
-    // run is in flight.
     const readOnly = param.settable === false;
     const disabled = readOnly || locked;
 
@@ -133,21 +129,12 @@
 
                   ${
                     st.runActive
-                      ? html`<div class="muted">
-                          Locked during a run: the scheduler decides when a node reads a parameter,
-                          so a value set now cannot be told apart from one that landed late.
-                        </div>`
+                      ? html`<div class="muted">Locked during a run.</div>`
                       : null
                   }
                   ${
                     st.restored
-                      ? html`<div class="muted">
-                          ${
-                          st.restored +
-                          " value(s) came from local memory: a scalar descriptor carries the type and not " +
-                          "the value, so the engine cannot report those back."
-                        }
-                        </div>`
+                      ? html`<div class="muted">${st.restored} value(s) restored locally.</div>`
                       : null
                   }
                   ${

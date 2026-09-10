@@ -1,22 +1,19 @@
-// This host's own choices. None of it is protocol: another host may pick differently.
 const Config = (function () {
   const REPLY_TOPIC = "nuke-host-browser/reply";
 
   const REQUEST_TIMEOUT_MS = 60000;
-  // The first request gets a shorter budget: its usual failure is a library that is not installed,
-  // and the engine answers an unhandled request type with silence.
+  // Missing request handlers fail silently, so connect uses a shorter timeout.
   const CONNECT_TIMEOUT_MS = 12000;
-  // Execute replies when the run ends, and a render is as long as it is. 0 means no budget.
+  // Execute replies after the run; zero disables its timeout.
   const EXECUTE_TIMEOUT_MS = 0;
 
   // Trailing parameter values follow the terminal event, so outputs are read after a grace period.
   const DRAIN_GRACE_MS = 800;
 
-  // Backoff, not a tight loop: the panel may open long before an engine exists.
   const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 15000, 30000];
-  // One request per keystroke would be one round trip per keystroke, so writes coalesce.
+  // Coalesce edits to avoid one round trip per keystroke.
   const WRITE_THROUGH_DEBOUNCE_MS = 400;
-  // Delivery is fire and forget with no replay. One batched tick covers a dropped frame.
+  // Polling covers dropped fire-and-forget events, which have no replay.
   const POLL_TICK_MS = 2500;
 
   const FRAME_LOG_LIMIT = 400;

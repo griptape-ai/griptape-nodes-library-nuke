@@ -1,5 +1,3 @@
-// Shared presentation helpers, and the namespace the pane files below fill in.
-// Everything from here down is presentation only.
 const Panes = {};
 
 const Ui = (function () {
@@ -15,8 +13,7 @@ const Ui = (function () {
     return state();
   }
 
-  // An unknown state gets its own class rather than no class: a new member of an enum must be
-  // visible, not invisible.
+  // Give unknown enum values a visible fallback style.
   const stateClass = (value, known) => (known.indexOf(value) === -1 ? "unknown" : value);
 
   const clock = (ms) => new Date(ms).toTimeString().slice(0, 8);
