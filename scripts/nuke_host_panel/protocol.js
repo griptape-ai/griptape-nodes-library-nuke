@@ -1,5 +1,4 @@
-// The frozen surface: everything a host may name on the wire, and nothing else.
-// Mirrors nuke_host_api/protocol.py. A name that is not here is not part of the contract.
+// Mirrors the public names in nuke_host_api/protocol.py.
 const Protocol = (function () {
   const VERB = {
     CONNECT: "NukeConnectRequest",
@@ -44,7 +43,6 @@ const Protocol = (function () {
   const MEDIA_TYPES = ["GTImage", "GTMovie", "GTFile"];
   const PREVIEWABLE = { GTImage: "img", GTMovie: "video" };
 
-  // GOOD and FLAWED are usable. UNUSABLE and MISSING are not.
   const USABLE_PROJECT_STATUSES = ["GOOD", "FLAWED"];
   const usableProject = (status) => USABLE_PROJECT_STATUSES.indexOf(status) !== -1;
 

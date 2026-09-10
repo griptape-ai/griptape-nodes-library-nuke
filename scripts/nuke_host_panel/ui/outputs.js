@@ -10,7 +10,6 @@
     const [failed, setFailed] = useState(false);
     const tag = PREVIEWABLE[valueType];
     if (!tag || !url) return null;
-    // A URL the engine can reach is not necessarily one this browser can reach.
     if (failed) {
       return html`<div class="muted">
         Preview failed. The engine can reach this URL; this browser cannot.
@@ -28,7 +27,6 @@
       <div class="src">
         <div class="stack">
           <span class="badge">${kind}</span>
-          <!-- format is reported only when known, never guessed. -->
           <span class="muted">${source.format || "format unknown"}</span>
           ${
             source.width && source.height
@@ -84,7 +82,6 @@
         ${
           kind === "macro"
             ? html`
-                <!-- Not a path. Opening it turns a config error into a mysterious file error. -->
                 <div class="stack">
                   <span class="badge bad">UNRESOLVED</span>
                   <span class="mono">${source.value || source.raw || ""}</span>
@@ -221,15 +218,6 @@
                     />
                   `,
                 )
-          }
-          ${
-            declared.length
-              ? html`<p class="note">
-                  Outputs are the end-flow parameters the workflow declared, not whichever node
-                  control flow finished on. No terminal event carries them, so
-                  <code>NukeGetParameterValuesRequest</code> is what reads them.
-                </p>`
-              : null
           }
         </div>
       </div>

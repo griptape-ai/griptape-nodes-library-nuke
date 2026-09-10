@@ -1,7 +1,4 @@
-// Notification ingestion: engine push in, panel state out.
-//
-// Imports no actions. The terminal case needs work this module has no business owning (stop
-// polling, read outputs, close the run log entry), so main.js registers that as a hook.
+// main.js registers terminal actions here to avoid an Actions dependency.
 const Events = (function () {
   const { NOTIFICATION, isTerminal } = Protocol;
   const { LIVE_FEED_LIMIT } = Config;
@@ -25,8 +22,7 @@ const Events = (function () {
       else nodeStates[index] = entry;
       patch.nodeStates = nodeStates;
     } else if (payloadType === NOTIFICATION.PARAMETER_VALUE) {
-      // The engine pushes both sides, so route by what the loaded workflow declared rather than
-      // assuming every streamed value is an output.
+      // Route streamed values using the loaded declaration; the engine pushes inputs and outputs.
       const key = paramKey(body.node_name, body.parameter_name);
       const declaredInput = ((state().loaded && state().loaded.inputs) || []).some(
         (param) => paramKey(param.node, param.parameter) === key,
@@ -35,8 +31,8 @@ const Events = (function () {
       patch[target] = Object.assign({}, state()[target]);
       patch[target][key] = { value: body.value, live: true };
     } else if (payloadType === NOTIFICATION.EXECUTION_NODES) {
-      // One non-empty list per flow the engine starts, so arrival order is what tells the run's
-      // total from a subflow's. The empty list marks top-level completion.
+      // The first non-empty list is the run total; later lists are subflows. Empty ends the top
+      // flow.
       const involved = Array.isArray(body.involved_nodes) ? body.involved_nodes : [];
       patch.executionNodeSets = state().executionNodeSets.concat([involved]);
       if (involved.length && state().runTotal === null) patch.runTotal = involved;
@@ -54,13 +50,10 @@ const Events = (function () {
     if (payloadType === NOTIFICATION.EXECUTION_STATE && isTerminal(body.state)) {
       hooks.onTerminal(body);
     }
-    // An unknown Nuke* notification is logged and ignored rather than treated as fatal.
+    // Ignore unknown Nuke notifications after logging them.
   }
 
-  /* --------------------------------------------------------------------- the feed */
-
-  // Origin is inferred from whether this panel sent the run request: the protocol carries no
-  // execution id to attribute an event with.
+  // The protocol has no execution id, so origin is inferred from local run requests.
   function noteRunActivity(startedHere) {
     if (state().runActive) return;
     setState({
@@ -72,8 +65,7 @@ const Events = (function () {
     });
   }
 
-  // Only events that mean work is starting arm a foreign run, so a terminal event or a trailing
-  // value cannot re-arm a run that just finished.
+  // Only start events arm a foreign run; terminal or trailing values must not re-arm one.
   function armsAForeignRun(payloadType, body) {
     if (payloadType === NOTIFICATION.NODE_STATE) {
       return body.state === "running" || body.state === "unresolved";

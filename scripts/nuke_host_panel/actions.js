@@ -1,7 +1,3 @@
-// Everything the panel asks the engine to do, plus the run log it keeps for itself.
-//
-// One module per concern would be smaller files and more of them; these all read and write the same
-// loaded-workflow state, so they live together and are grouped by section below.
 const Actions = (function () {
   const { VERB } = Protocol;
   const { DRAIN_GRACE_MS, EXECUTE_TIMEOUT_MS, HISTORY_LIMIT, POLL_TICK_MS, WRITE_THROUGH_DEBOUNCE_MS } =
@@ -11,12 +7,7 @@ const Actions = (function () {
   const { noteRunActivity } = Events;
   const { fieldValueFrom, flattenValues, paramKey } = Values;
 
-  /* ---------------------------------------------------------------- input seeding */
-
-  // Seed from input_values, the graph's current values, not from a descriptor's default, which is the
-  // workflow author's value. Where the graph reports nothing, the last local value beats an empty
-  // field: a scalar descriptor carries its type and not its value, so the engine cannot report one
-  // back even when it holds it.
+  // Prefer graph values, then local values when scalar descriptors omit their values.
   function seedFields(declared, inputValues, workflowId) {
     const previous = remembered().fields[workflowId] || {};
     const fields = {};
@@ -35,11 +26,8 @@ const Actions = (function () {
     return { fields, restored };
   }
 
-  /* -------------------------------------------------------------------- workflows */
-
   async function doList() {
-    // runnable_only false on purpose: the unavailable entries carry the reason, and an absence does
-    // not.
+    // Include unavailable workflows so their reasons remain visible.
     const reply = await request(VERB.LIST_WORKFLOWS, { runnable_only: false });
     if (!succeeded(reply)) {
       banner("bad", "Listing workflows failed.", detailOf(reply));
@@ -48,8 +36,6 @@ const Actions = (function () {
     setState({ workflows: (reply.result && reply.result.workflows) || [] });
   }
 
-  // Reads the registry and changes nothing, so this is safe on selection: show what a workflow
-  // declares before committing to the destructive load.
   async function doDescribe(workflowId) {
     const reply = await request(VERB.DESCRIBE_WORKFLOW, { workflow_id: workflowId });
     if (!succeeded(reply)) {
@@ -61,9 +47,7 @@ const Actions = (function () {
     remember({ lastWorkflowId: workflowId });
   }
 
-  // The only verb that changes what is loaded, and required before execute, the value verbs, or
-  // execution state can answer for the workflow a host means. Destructive: the engine clears all
-  // object state, including a graph opened elsewhere on the same engine.
+  // Loading clears all engine object state, including graphs opened elsewhere.
   async function doLoad(payload) {
     const holding = state().loaded;
     const described = state().described;
@@ -82,8 +66,7 @@ const Actions = (function () {
 
     const reply = await request(VERB.LOAD_WORKFLOW, payload);
     if (!succeeded(reply)) {
-      // Branch on engine_state_cleared, never on the reason text. False means the values on screen
-      // still match what the engine holds and a retry is free.
+      // Trust engine_state_cleared rather than parsing the reason text.
       const cleared = Boolean(reply.result && reply.result.engine_state_cleared);
       if (cleared) setState({ loaded: null, fields: {}, inputValues: {} });
       banner(
@@ -128,15 +111,12 @@ const Actions = (function () {
             (entry) =>
               entry.section + " " + paramKey(entry.node, entry.parameter) + ": " + entry.reason,
           )
-          .join(" | ") + ". Reported rather than omitted: unset and unreadable differ.",
+          .join(" | "),
       );
     }
   }
 
-  /* ----------------------------------------------------------------------- values */
-
-  // Addressed as {node: {parameter: value}}, using the node and parameter the declaration reported.
-  // A subset is passed when writing through a single edit.
+  // The wire shape is {node: {parameter: value}}; single edits pass a subset.
   function collectInputs(subset) {
     const inputs = {};
     const declared = subset || (state().loaded && state().loaded.inputs) || [];
@@ -154,9 +134,7 @@ const Actions = (function () {
     return inputs;
   }
 
-  // A rejection is not a failure of the request, and it is the worst failure mode here: the engine
-  // keeps the value it already had, so the run produces plausible output computed from an input
-  // nobody set.
+  // Rejected inputs retain their previous engine values even when the request succeeds.
   function reportRejections(title, result, ranAnyway) {
     const rejected = (result && result.rejected_inputs) || [];
     if (!rejected.length) return false;
@@ -192,8 +170,7 @@ const Actions = (function () {
     await doReadValues(["inputs"]);
   }
 
-  // The recovery path for values: read after a run, and after a reconnect that missed every
-  // notification. Loaded-state-addressed, so it names no workflow.
+  // Reads recover values after runs and notification gaps.
   async function doReadValues(sections) {
     const reply = await request(VERB.GET_PARAMETER_VALUES, { sections: sections || [] });
     if (!succeeded(reply)) {
@@ -203,16 +180,13 @@ const Actions = (function () {
     const result = reply.result || {};
     const read = result.requested_sections || [];
     const patch = {};
-    // requested_sections tells "not asked for" from "asked for, got nothing", so a section that was
-    // not read keeps whatever was on screen.
+    // Preserve sections absent from requested_sections; an empty requested section clears it.
     if (read.indexOf("inputs") !== -1) patch.inputValues = flattenValues(result.inputs, false);
     if (read.indexOf("outputs") !== -1) patch.outputValues = flattenValues(result.outputs, false);
     setState(patch);
   }
 
-  // An edit that only lives in the panel is an edit the engine does not have, so writes go through,
-  // coalesced. Refused mid-run by design: the scheduler decides when a node reads a parameter, so a
-  // value set during a run cannot be told apart from one that landed late.
+  // Coalesce writes and refuse them mid-run because node-read timing is indeterminate.
   const writeTimers = new Map();
 
   function setField(param, value) {
@@ -233,8 +207,6 @@ const Actions = (function () {
     );
   }
 
-  /* -------------------------------------------------------------------- execution */
-
   async function doRun() {
     if (!state().loaded || state().runActive) return;
     setState({
@@ -248,14 +220,11 @@ const Actions = (function () {
     });
     noteRunActivity(true);
 
-    // Both before the request, not after it: execute's reply lands when the run ends, so a run log
-    // entry opened after it would be closed by the terminal event before it existed, and a poll
-    // started after it would find the run already over.
+    // Open logging and polling before execute; its reply arrives after terminal events.
     openRun();
     startPolling();
 
-    // Sending the loaded id turns a graph swapped out from under this panel into a refusal instead
-    // of a run of the wrong thing.
+    // Supplying the loaded id rejects a graph swapped out by another client.
     const reply = await request(
       VERB.EXECUTE_WORKFLOW,
       {
@@ -280,14 +249,11 @@ const Actions = (function () {
   async function doCancel() {
     const reply = await request(VERB.CANCEL_EXECUTION, {});
     if (succeeded(reply)) {
-      // Not confirmation that execution stopped: the terminal state arrives as a notification.
       banner("warn", "Cancel accepted.", "Waiting for the terminal notification.");
     } else {
       banner("warn", "Cancel refused.", detailOf(reply));
     }
   }
-
-  /* ------------------------------------------------------------- backstop polling */
 
   let pollTimer = null;
 
@@ -298,8 +264,7 @@ const Actions = (function () {
     }
   }
 
-  // Not the progress mechanism: the events are. This is the backstop for delivery that is fire and
-  // forget with no replay, and it reads two verbs in one frame.
+  // Events report progress; polling recovers fire-and-forget events with no replay.
   function startPolling() {
     stopPolling();
     pollTimer = setInterval(() => {
@@ -320,8 +285,7 @@ const Actions = (function () {
 
     if (succeeded(stateReply)) {
       const result = stateReply.result || {};
-      // involved_nodes here is derived from the flow's declared nodes rather than from event
-      // history, so it does not depend on which events arrived.
+      // Poll totals come from declared nodes and do not depend on event delivery.
       const patch = {
         pollSummary:
           "running " +
@@ -335,7 +299,6 @@ const Actions = (function () {
         patch.runTotal = result.involved_nodes;
       }
       if (result.running === false && state().runActive) {
-        // A terminal event that never arrived would otherwise leave the panel locked.
         patch.runActive = false;
         patch.runEndedAt = Date.now();
         setTimeout(() => closeRun(null), DRAIN_GRACE_MS);
@@ -347,10 +310,7 @@ const Actions = (function () {
     }
   }
 
-  /* ----------------------------------------------------------------- the run log */
-  //
-  // In memory for this connection only: a run's outputs point at files, and a remembered path is a
-  // path something else may have overwritten.
+  // History is connection-local because output paths may be overwritten.
 
   let runSeq = 0;
 
@@ -377,14 +337,12 @@ const Actions = (function () {
     });
   }
 
-  // A refused run is not a run. The entry is opened before the request, because the reply is the
-  // last thing to arrive, so a refusal has to take it back out.
+  // Remove the provisional entry when execute refuses the run.
   function discardRun() {
     setState({ history: state().history.filter((run) => run.state !== "running") });
   }
 
-  // Failures are copied off the node states: the terminal event carries no outcome, and no later
-  // read recovers one.
+  // Node-state events are the only recoverable source of failure details.
   function closeRun(terminal) {
     const history = state().history.slice();
     const entry = history.find((run) => run.state === "running");
@@ -408,8 +366,7 @@ const Actions = (function () {
     }
   }
 
-  // Registered as the terminal-event hook. Outputs are not on the terminal event and never will be,
-  // so they are read here, which is the same call a reconnect makes. One code path.
+  // Terminal events omit outputs, so read them after trailing values arrive.
   function finishRun(terminal) {
     stopPolling();
     if (state().loaded) {
@@ -418,7 +375,6 @@ const Actions = (function () {
     setTimeout(() => closeRun(terminal), DRAIN_GRACE_MS + 250);
   }
 
-  // Not a protocol feature. It restores the values a past run used, then takes the ordinary run path.
   function doRerun(entry) {
     const loaded = state().loaded;
     if (!loaded || loaded.workflow_id !== entry.workflowId) return;
@@ -427,10 +383,7 @@ const Actions = (function () {
     guard(doRun)();
   }
 
-  /* --------------------------------------------------------------------- projects */
-  //
-  // Workflows are registered per workspace and a project decides the workspace, so the workflow list
-  // is a list for whichever project the engine is on.
+  // Workflow registration follows the current project's workspace.
 
   async function doListProjects() {
     const reply = await request(VERB.LIST_PROJECTS, {
@@ -446,15 +399,13 @@ const Actions = (function () {
   async function doReadCurrentProject() {
     const reply = await request(VERB.GET_CURRENT_PROJECT, {});
     if (!succeeded(reply)) {
-      // A failure means no current project at all, which the engine treats as different from being
-      // on the system defaults.
+      // No current project differs from the system-default project.
       setState({ currentProject: null, projectNote: "no current project: " + detailOf(reply) });
       return;
     }
     setState({ currentProject: reply.result || {}, projectNote: "" });
   }
 
-  // Reads a project's workspace and validation without activating it.
   async function doDescribeProject(projectId) {
     setState({ projectChoice: projectId });
     if (!projectId) {
@@ -469,8 +420,7 @@ const Actions = (function () {
     setState({ describedProject: reply.result || {}, projectNote: "" });
   }
 
-  // Can re-register every workflow and reload every library, this one included, which tears down the
-  // handlers answering this request and the bridge pushing its events.
+  // Switching may reload this library and tear down its request and event handlers.
   async function doSetProject(projectId) {
     const target =
       projectId === null
@@ -504,13 +454,8 @@ const Actions = (function () {
     banner(
       "warn",
       "Switched to " + target + ". Reconnecting.",
-      "workspace_changed " +
-        (reply.result || {}).workspace_changed +
-        ". Reconnecting either way: the engine reloads libraries on a decision it reports no field " +
-        "for, and a reload stops every notification without an error.",
+      "workspace_changed " + (reply.result || {}).workspace_changed + ".",
     );
-    // Reconnect rather than disconnect: the resync sequence re-reads the project, the workflow list,
-    // and whatever is loaded.
     setState({ autoConnect: true, connectAttempts: 0 });
     closeSocket(4002, "project switch");
   }

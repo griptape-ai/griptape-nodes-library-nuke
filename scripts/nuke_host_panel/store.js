@@ -1,8 +1,3 @@
-// One store, because the socket mutates state from callbacks that are outside any component.
-// Renders are coalesced to one per frame: a burst of parameter value events in the same
-// millisecond would otherwise render once each.
-//
-// Framework-free on purpose. ui/common.js turns the listener API below into a Preact hook.
 const Store = (function () {
   const { DEFAULT_CLIENT_NAME, DEFAULT_WS_URL, SETTINGS_KEY } = Config;
 
@@ -22,7 +17,6 @@ const Store = (function () {
 
   const store = {
     state: {
-      // connection
       wsUrl: saved.wsUrl || DEFAULT_WS_URL,
       clientName: saved.clientName || DEFAULT_CLIENT_NAME,
       socket: "disconnected",
@@ -33,28 +27,23 @@ const Store = (function () {
       reconnects: 0,
       nextAttemptAt: null,
       resyncSteps: [],
-      // projects
       projects: [],
       currentProject: null,
       describedProject: null,
       projectChoice: "",
-      // On by default: the current project is usually the system defaults, and a switch list that
-      // omits it cannot show what the engine is on.
+      // Include system defaults so the list can show the current project.
       includeSystemBuiltins: saved.includeSystemBuiltins !== false,
       projectNote: "",
-      // workflows
       workflows: [],
       described: null,
       loaded: null,
       loadFilePath: "",
       restored: 0,
-      // values
       fields: {},
       writeThrough: saved.writeThrough !== false,
       inputValues: {},
       outputValues: {},
       lastSet: null,
-      // execution
       execution: null,
       nodeStates: [],
       executionNodeSets: [],
@@ -67,7 +56,6 @@ const Store = (function () {
       pollSummary: "",
       history: [],
       viewingRun: null,
-      // instrumentation
       banner: null,
       notifications: [],
       feed: [],
@@ -76,7 +64,6 @@ const Store = (function () {
       requestsSent: 0,
       requestsDuringRun: 0,
       lastEventAt: null,
-      // ui
       drawerOpen: Boolean(saved.drawerOpen),
       drawerTab: saved.drawerTab || "connection",
       engines: saved.engines && typeof saved.engines === "object" ? saved.engines : {},
@@ -86,6 +73,7 @@ const Store = (function () {
 
   const state = () => store.state;
 
+  // Coalesce event bursts into one render per animation frame.
   function setState(patch) {
     Object.assign(store.state, patch);
     if (scheduled) return;
@@ -105,8 +93,7 @@ const Store = (function () {
     setState({ banner: { kind, title, text } });
   }
 
-  // Every action goes through this, so a rejected promise becomes a message rather than a silent
-  // console error.
+  // Convert rejected promises into visible errors.
   function guard(fn) {
     return async () => {
       try {
@@ -116,8 +103,6 @@ const Store = (function () {
       }
     };
   }
-
-  /* ------------------------------------------------------------------ preferences */
 
   function persist() {
     const st = store.state;
@@ -139,9 +124,7 @@ const Store = (function () {
     }
   }
 
-  // Preferences are per engine: two engines have two sets of workflows, and a workflow id from one
-  // means nothing on the other. engine_id is empty on an engine that has not set one, so the URL is
-  // the fallback key.
+  // Key preferences by engine id, falling back to URL when the id is empty.
   function engineKey() {
     return (store.state.session || {}).engine_id || store.state.wsUrl;
   }
