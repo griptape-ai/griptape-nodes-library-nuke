@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 from griptape_nodes.retained_mode.events.app_events import (
     GetEngineNameRequest,
@@ -7,11 +9,18 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionRequest,
 )
 
-from nuke_host_api import execution_bridge
+from nuke_host_api import execution_bridge, host_claim
 from nuke_host_api.events import NukeConnectRequest, NukeConnectResultFailure, NukeConnectResultSuccess
 from nuke_host_api.handlers import handle_connect
 from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES
 from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, use_engine
+
+
+@pytest.fixture(autouse=True)
+def _released_claim() -> Iterator[None]:
+    host_claim.release()
+    yield
+    host_claim.release()
 
 
 @pytest.fixture(autouse=True)
@@ -122,3 +131,65 @@ async def test_a_refused_name_lookup_reports_an_empty_name_not_a_failed_connect(
     result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_name == ""
+
+
+async def test_a_connect_reports_the_host_it_claimed_the_engine_for() -> None:
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    assert isinstance(result, NukeConnectResultSuccess)
+    assert result.host_client_name == "Nuke shot_040"
+    assert result.host_connected_at > 0
+    assert result.displaced_client_name == ""
+
+
+async def test_a_second_host_is_refused_and_told_who_has_the_engine() -> None:
+    """Two Nuke sessions on one engine is the symptom this claim exists to report."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert isinstance(result, NukeConnectResultFailure)
+    assert result.host_client_name == "Nuke shot_040"
+    assert result.host_connected_at > 0
+    assert "force=true" in str(result.result_details)
+
+
+async def test_a_refused_second_host_still_learns_the_support_window() -> None:
+    """A host must be able to read one failure shape, whichever refusal it got."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert isinstance(result, NukeConnectResultFailure)
+    assert result.supported_protocol_versions
+
+
+async def test_a_version_refusal_names_no_host() -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99], client_name="Nuke shot_112"))
+    assert isinstance(result, NukeConnectResultFailure)
+    assert result.host_client_name == ""
+
+
+async def test_an_unsupported_version_does_not_take_the_claim() -> None:
+    """Negotiation runs first, so a host that cannot speak the version claims nothing."""
+    await handle_connect(NukeConnectRequest(client_protocol_versions=[99], client_name="Nuke shot_112"))
+    assert host_claim.held() is None
+
+
+async def test_the_same_host_reconnects_without_forcing() -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    assert isinstance(result, NukeConnectResultSuccess)
+    assert result.displaced_client_name == ""
+
+
+async def test_force_takes_over_and_names_the_host_it_displaced() -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112", force=True))
+    assert isinstance(result, NukeConnectResultSuccess)
+    assert result.host_client_name == "Nuke shot_112"
+    assert result.displaced_client_name == "Nuke shot_040"
+
+
+async def test_a_refused_second_host_does_not_install_the_event_bridge(
+    _record_bridge_installs: list[bool],
+) -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert _record_bridge_installs == [True]

@@ -15,6 +15,7 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from nuke_host_api import library_version
 from nuke_host_api.execution_bridge import uninstall as uninstall_host_api_bridge
 from nuke_host_api.handlers import ROUTES
+from nuke_host_api.host_claim import release as release_host_claim
 from nuke_host_api.protocol import PROTOCOL_VERSION
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 from publish_gizmo.nuke_publish_options import get_nuke_publish_options
@@ -66,6 +67,8 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
     def before_library_unregistered(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
         # The engine does not deregister execution listeners on reload.
         uninstall_host_api_bridge()
+        # A reload forces every host to reconnect, so the old claim names nobody.
+        release_host_claim()
         # A reload may replace the manifest without restarting the process.
         library_version.reset()
 
