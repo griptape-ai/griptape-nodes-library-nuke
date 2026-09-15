@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, NodeState, Verb
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause, NodeState, Notification, Verb
 from tests.integration.host_api_client import (
     HostClient,
     detail_of,
@@ -188,6 +188,17 @@ class TestConnect:
             assert succeeded(forced), f"a forced connect failed: {detail_of(forced)}"
             assert result_of(forced)["displaced_client_name"] == "smoke test"
             assert result_of(forced)["host_client_name"] == "second smoke host"
+
+            client.drain(2)
+            asked = [
+                event
+                for event in client.of_type(Notification.HOST_DISCONNECT)
+                if event.body.get("client_name") == "smoke test"
+            ]
+            assert asked, "a displaced host must be asked to disconnect, since nothing can close its socket"
+            assert asked[-1].body["replaced_by"] == "second smoke host"
+            assert asked[-1].body["cause"] == DisconnectCause.CLAIM_TAKEN
+            assert asked[-1].body["reason"]
         finally:
             # Every later test's fixture connects as the smoke host, and the engine outlives this test.
             client.request(

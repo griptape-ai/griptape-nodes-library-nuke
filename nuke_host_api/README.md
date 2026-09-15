@@ -26,6 +26,7 @@ nuke_host_api/
   library_version.py               the shipped version, read from the manifest
   execution_bridge.py                engine execution events -> host notifications
   host_claim.py                    which host this engine reports itself driven by
+  notify.py                        the one path that publishes a notification to a host
   value_types.py                   value normalizer
 tests/unit/
   test_protocol.py                 verb/notification names resolve to real payload classes
@@ -39,6 +40,7 @@ tests/unit/
   test_handlers_routes.py          every declared verb is routed exactly once
   test_handlers_connect.py         negotiation, event stream gating
   test_host_claim.py               claim grant, reconnect, refusal, takeover
+  test_notify.py                   a payload leaves as an AppEvent on the IPC path
   test_handlers_workflows.py       discovery and parameter publication
   test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
@@ -126,10 +128,16 @@ every request that the editor and every other driver would not carry anyway. The
 "is someone else here", which is the question a host asks before it starts, not an access
 control this layer can honestly offer.
 
-`force` displaces a name, not a connection. Nothing here can close another host's socket or drop
-its subscription, so the displaced host keeps its feed and keeps working, and learns it lost the
-claim only on its next connect. Hence `displaced_client_name` on the reply: the host that forced
-is the one that can tell its artist somebody else is still driving.
+`force` cannot close the other socket, so it publishes `NukeHostDisconnectEvent` naming the
+displaced host, and that host closes its own. The engine's transport keeps each connection in
+Rust: `websocket_direct` mints a connection id per client and holds its sender, but the Python
+message callback receives only the payload and the driver name, and `RustIPCManager` exposes no
+close for one connection. `stop_all` would take down the driver and every client, the editor
+included. So a cooperative stand-down is the strongest kick available from here, and it is also
+the one a plugin wants: a socket that simply closes is indistinguishable from an engine crash,
+while this carries a `cause` to branch on and a `reason` to show an artist. `replaced_by` names
+who took it. A host that ignores the event keeps working, which is why the claim is described as
+reported rather than enforced.
 
 A claim never goes stale on its own. The transport gives Python no disconnect signal, which is
 also why the event bridge latches on instead of counting connections, so a crashed Nuke session
@@ -621,9 +629,10 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 - **Audio lands in `GTFile`.** v1 covers images and movies. Promoting it to `GTAudio` is a
   version bump, so decide deliberately rather than by omission.
 - **The host claim reports a conflict, it does not prevent one.** It is checked at connect and
-  nowhere else, `force` displaces a name rather than a connection, a crashed host's claim never
-  expires, and two hosts sending one `client_name` both connect. Anything stronger needs host
-  identity on every request and a disconnect signal the transport does not give Python.
+  nowhere else, a displaced host is asked to leave rather than disconnected, a crashed host's
+  claim never expires, and two hosts sending one `client_name` both connect. A real kick needs
+  the app's transport to hand Python a connection id and a way to close one; today it hands
+  neither, and no disconnect signal either.
 - **No execution identity.** The engine carries no execution id through its
   execution events, so nothing here can correlate concurrent executions. This layer
   deliberately does not paper over it with local state; the fix belongs in the engine.

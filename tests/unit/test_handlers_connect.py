@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from griptape_nodes.retained_mode.events.app_events import (
@@ -9,10 +10,10 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionRequest,
 )
 
-from nuke_host_api import execution_bridge, host_claim
+from nuke_host_api import execution_bridge, host_claim, notify
 from nuke_host_api.events import NukeConnectRequest, NukeConnectResultFailure, NukeConnectResultSuccess
 from nuke_host_api.handlers import handle_connect
-from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause
 from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, use_engine
 
 
@@ -21,6 +22,13 @@ def _released_claim() -> Iterator[None]:
     host_claim.release()
     yield
     host_claim.release()
+
+
+@pytest.fixture(autouse=True)
+def _published(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    published: list[Any] = []
+    monkeypatch.setattr(notify, "publish", published.append)
+    return published
 
 
 @pytest.fixture(autouse=True)
@@ -193,3 +201,35 @@ async def test_a_refused_second_host_does_not_install_the_event_bridge(
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
     assert _record_bridge_installs == [True]
+
+
+async def test_a_takeover_asks_the_displaced_host_to_disconnect(_published: list[Any]) -> None:
+    """The transport cannot close another host's socket, so the host has to close its own.
+
+    Without this the displaced host learns nothing until its next connect, and keeps driving a
+    graph the new host is also driving.
+    """
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_112", force=True))
+
+    assert len(_published) == 1
+    event = _published[0]
+    assert event.client_name == "Nuke shot_040"
+    assert event.replaced_by == "Nuke shot_112"
+    assert event.cause == DisconnectCause.CLAIM_TAKEN
+    assert "Nuke shot_112" in event.reason
+
+
+async def test_nothing_is_asked_to_disconnect_when_no_host_was_displaced(_published: list[Any]) -> None:
+    """A first connect, a reconnect, and a forced connect onto a free engine displace nobody."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040", force=True))
+    assert _published == []
+
+
+async def test_a_refused_connect_asks_nobody_to_disconnect(_published: list[Any]) -> None:
+    """A host that could not get in must not be able to push another host off."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert _published == []

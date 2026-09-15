@@ -5,7 +5,7 @@ const Events = (function () {
   const { setState, state } = Store;
   const { paramKey } = Values;
 
-  const hooks = { onTerminal: () => {} };
+  const hooks = { onTerminal: () => {}, onHostDisconnect: () => {} };
 
   function setEventHooks(next) {
     Object.assign(hooks, next);
@@ -50,7 +50,17 @@ const Events = (function () {
     if (payloadType === NOTIFICATION.EXECUTION_STATE && isTerminal(body.state)) {
       hooks.onTerminal(body);
     }
+    // Every host on the shared topic sees this one, so only the named host acts on it.
+    if (payloadType === NOTIFICATION.HOST_DISCONNECT && addressesThisHost(body)) {
+      hooks.onHostDisconnect(body);
+    }
     // Ignore unknown Nuke notifications after logging them.
+  }
+
+  // Compare against the name the engine echoed, which is this host's own name trimmed.
+  function addressesThisHost(body) {
+    const claimed = (state().session || {}).host_client_name || state().clientName.trim();
+    return Boolean(body.client_name) && body.client_name === claimed;
   }
 
   // The protocol has no execution id, so origin is inferred from local run requests.
@@ -119,6 +129,9 @@ const Events = (function () {
       const involved = Array.isArray(body.involved_nodes) ? body.involved_nodes : [];
       if (!involved.length) return "empty list, the top-level run finished";
       return involved.length + " node(s)  " + involved.join(", ");
+    }
+    if (payloadType === NOTIFICATION.HOST_DISCONNECT) {
+      return (body.cause || "?") + "  " + (body.client_name || "?") + " -> " + (body.replaced_by || "-");
     }
     return JSON.stringify(body).slice(0, 120);
   }

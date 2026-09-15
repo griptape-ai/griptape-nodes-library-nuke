@@ -17,6 +17,7 @@ The protocol contract is `protocol.py` and `INTEGRATION.md`, not this panel.
 | --- | --- |
 | Connect and recover state | `NukeConnectRequest`, `NukeGetExecutionStateRequest` |
 | Take the host claim from another host | `NukeConnectRequest` with `force` |
+| Stand down when the engine asks | `NukeHostDisconnectEvent` |
 | Read the current project | `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest` |
 | Preview and switch projects | `NukeDescribeProjectRequest`, `NukeSetCurrentProjectRequest` |
 | List, describe, and load workflows | `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest` |

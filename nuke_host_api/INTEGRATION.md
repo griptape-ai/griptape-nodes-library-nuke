@@ -28,12 +28,13 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent`, `NukeHostDisconnectEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `running`, `completed`, `failed`, `cancelled` |
+| Disconnect causes | `claim_taken` |
 
 Binding rules:
 
@@ -376,11 +377,13 @@ other verbs answer without it.
 `force: true` is the way past. Three limits on what that means:
 
 - **The claim is checked at connect and nowhere else.** No other verb carries host identity, so
-  a host that never connects, or one that was displaced by a `force` and kept its socket open,
-  can still load, execute, and set values. The claim reports a conflict; it does not prevent one.
-- **`force` displaces a name, not a connection.** The engine cannot close another host's socket
-  or cancel its subscription, so the displaced host keeps receiving notifications and its
-  requests keep working. It learns nothing until its next connect.
+  a host that never connects, or one that ignores the disconnect notification below, can still
+  load, execute, and set values. The claim reports a conflict; it does not prevent one.
+- **`force` cannot close the other socket.** The engine's transport keeps its connections in
+  Rust and hands this library no way to address or close one, so a takeover publishes
+  [`NukeHostDisconnectEvent`](#nukehostdisconnectevent) naming the displaced host and that host
+  closes its own socket. Handle it, or a displaced host keeps its feed and keeps working, and
+  learns nothing until its next connect.
 - **A claim outlives the host that took it.** The transport gives this library no disconnect
   signal, so a crashed Nuke session leaves its name on the engine until the library reloads or
   the engine restarts. `force` is the only escape, which is why the refusal says so.
@@ -1250,7 +1253,8 @@ Preview a project's workspace and validation before activating it with
 ## Notifications
 
 Pushed without a request, labelled with `event_topic`. Nine engine execution event types
-collapse into these four notifications.
+collapse into four of these; `NukeHostDisconnectEvent` comes from this library rather than from
+an engine event.
 
 ### NukeNodeStateEvent
 
@@ -1350,6 +1354,41 @@ length. A flow whose start is also its end emits no non-empty list.
 Events may arrive before `NukeExecuteWorkflowRequest` returns. Subscribe to `event_topic` before
 executing. If an event is missed while a run is live,
 `NukeGetExecutionStateRequest` returns the top-level `involved_nodes` list.
+
+### NukeHostDisconnectEvent
+
+The engine asking one host to close its own connection. Published when a `force` connect takes
+the claim, and reserved for whatever else makes an engine want a host gone.
+
+| Field | Type | Notes |
+|---|---|---|
+| `client_name` | `str` | The host that must act. Compare it to the `host_client_name` the connect reply echoed, not to the raw string sent |
+| `cause` | `str` | `claim_taken`. Ignore an unknown value rather than treating it as fatal |
+| `reason` | `str` | Written for display to an artist |
+| `replaced_by` | `str` | The host that took the claim. Empty for a cause that is not a takeover |
+
+```json
+{
+  "client_name": "Nuke 16.0v7 shot_040 dan",
+  "cause": "claim_taken",
+  "reason": "Nuke 16.0v7 shot_112 amy connected with force and is the host this engine now reports. Disconnect, and connect again with force to take it back.",
+  "replaced_by": "Nuke 16.0v7 shot_112 amy"
+}
+```
+
+**This is a deliberate close, not a crash.** It exists so a host can tell the two apart and show
+an artist why the connection went away, which a closed socket alone cannot say.
+
+On receipt, when `client_name` is this host: stop polling, close the socket, and show `reason`.
+Do not reconnect automatically. An immediate reconnect without `force` is refused by the new
+holder's claim, and one with `force` starts a takeover war between two hosts that both
+reconnect. Reconnecting is the artist's decision.
+
+It reaches a host on the shared `event_topic`, with every limit that implies: it is fire and
+forget, never replayed, and seen by every subscriber. So a host that missed it, or ignored it,
+keeps working, and two hosts sending one `client_name` both stand down. Nothing here can close
+a connection ([Connecting](#nukeconnectrequest)), which is why compliance is the host's to
+implement.
 
 ## Value descriptors
 

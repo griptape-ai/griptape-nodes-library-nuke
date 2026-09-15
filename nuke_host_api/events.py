@@ -336,6 +336,17 @@ class NukeDescribeProjectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFai
 
 @dataclass
 @PayloadRegistry.register
+class NukeHostDisconnectEvent(AppPayload):
+    """Every host on the shared topic sees this, so it names the one that must act."""
+
+    client_name: str
+    cause: str
+    reason: str
+    replaced_by: str = ""
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeNodeStateEvent(AppPayload):
     node_name: str
     state: str

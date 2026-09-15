@@ -42,14 +42,20 @@ const Session = (function () {
 
   function onSocketClosed(event) {
     const wasConnected = state().session !== null;
+    const standingDown = state().standingDown;
     stopPolling();
     setState({
-      socket: "disconnected" + (event && event.code ? " (" + event.code + ")" : ""),
+      // A stand-down is deliberate, so it must not read like the close code of a crash.
+      socket: standingDown
+        ? "stood down"
+        : "disconnected" + (event && event.code ? " (" + event.code + ")" : ""),
       session: null,
       subscribed: { reply: false, events: false },
       runActive: false,
+      standingDown: false,
     });
-    if (wasConnected) {
+    // Standing down already explained itself, and its banner must survive this close.
+    if (wasConnected && !standingDown) {
       setState({ reconnects: state().reconnects + 1 });
       banner(
         "warn",
@@ -58,6 +64,19 @@ const Session = (function () {
       );
     }
     scheduleReconnect();
+  }
+
+  // The engine cannot close this socket, so a displaced host closes its own.
+  function standDown(body) {
+    stopPolling();
+    cancelReconnect();
+    setState({ autoConnect: false, standingDown: true, heldBy: body.replaced_by || null });
+    closeSocket(1000, "displaced by another host");
+    banner(
+      "warn",
+      "The engine asked this host to disconnect.",
+      (body.reason || "Another host took this engine.") + " Take over to claim it back.",
+    );
   }
 
   function noteStep(label, outcome, detail) {
@@ -276,6 +295,7 @@ const Session = (function () {
     resync,
     doConnect,
     doTakeOver,
+    standDown,
     doDisconnect,
     doDropSocket,
     cancelReconnect,

@@ -3,15 +3,21 @@ from __future__ import annotations
 import logging
 import time
 
-from nuke_host_api import execution_bridge, host_claim, library_version
+from nuke_host_api import execution_bridge, host_claim, library_version, notify
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.engine import engine_id, engine_name, engine_version, event_topic, session_id
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
     NukeConnectResultSuccess,
+    NukeHostDisconnectEvent,
 )
-from nuke_host_api.protocol import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS, VALUE_TYPES
+from nuke_host_api.protocol import (
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    VALUE_TYPES,
+    DisconnectCause,
+)
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -58,6 +64,18 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
 
     if attempt.displaced:
         logger.warning("Nuke host API: %s took the host claim from %s", client, attempt.displaced)
+        # The transport cannot close another host's socket, so the displaced host is asked to.
+        notify.publish(
+            NukeHostDisconnectEvent(
+                client_name=attempt.displaced,
+                cause=DisconnectCause.CLAIM_TAKEN,
+                reason=(
+                    f"{client} connected with force and is the host this engine now reports. "
+                    f"Disconnect, and connect again with force to take it back."
+                ),
+                replaced_by=client,
+            )
+        )
 
     # The bridge is engine-global, so defer its cost until a host needs notifications.
     execution_bridge.ensure_installed()
