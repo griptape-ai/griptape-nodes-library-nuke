@@ -5,6 +5,8 @@ from griptape_nodes.retained_mode.events.execution_events import (
     CancelFlowResultSuccess,
     StartFlowRequest,
     StartFlowResultSuccess,
+    UnresolveFlowRequest,
+    UnresolveFlowResultSuccess,
 )
 
 from nuke_host_api import engine, parameter_values, shape
@@ -96,6 +98,21 @@ async def handle_execute_workflow(
             workflow_id=loaded_id,
         )
 
+    # Running a resolved graph resolves nothing, so a failed unresolve would report a run that
+    # returned the previous run's values.
+    if request.unresolve_first:
+        unresolved = await engine.request(UnresolveFlowRequest(flow_name=flow_name), UnresolveFlowResultSuccess)
+        if unresolved.value is None:
+            return failure(
+                NukeExecuteWorkflowResultFailure,
+                attempted=attempted,
+                because=(
+                    "the engine would not unresolve the flow, so the run would have reused "
+                    f"resolved values. {unresolved.details}"
+                ),
+                workflow_id=loaded_id,
+            )
+
     started = await engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
     if started.value is None:
         return failure(
@@ -110,7 +127,7 @@ async def handle_execute_workflow(
         state=ExecutionState.COMPLETED,
         applied_inputs=applied,
         rejected_inputs=rejected,
-        result_details=f"Ran workflow '{loaded_id}'.",
+        result_details=f"Ran workflow '{loaded_id}'{' from unresolved' if request.unresolve_first else ''}.",
     )
 
 
