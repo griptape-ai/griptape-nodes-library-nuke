@@ -104,6 +104,23 @@ def _load_smoke_workflow(client: HostClient) -> dict[str, Any]:
     return body
 
 
+def _run_and_collect(client: HostClient, payload: dict[str, Any]) -> set[str]:
+    """Execute once and return the nodes that reported resolved during that execution.
+
+    Notifications land while the execute reply is being waited for, so the accumulated list is
+    marked first; the drain afterwards only catches what trails the reply.
+    """
+    mark = len(client.notifications)
+    reply = client.request(Verb.EXECUTE_WORKFLOW, payload)
+    assert succeeded(reply), f"execute failed: {detail_of(reply)}"
+    client.drain(NOTIFICATION_WINDOW_S)
+    return {
+        event.body["node_name"]
+        for event in client.notifications[mark:]
+        if event.type == "NukeNodeStateEvent" and event.body["state"] == NodeState.RESOLVED
+    }
+
+
 class TestDiscovery:
     def test_the_registry_lists_engines_and_resolves_a_socket_path_per_engine(self) -> None:
         engines = discover()
@@ -390,6 +407,21 @@ class TestExecute:
                 "reason": "Not a declared input parameter of this workflow.",
             }
         ]
+
+    def test_a_resolved_graph_runs_again_when_the_flow_is_unresolved_first(self, client: HostClient) -> None:
+        """The wire path for the field. What it does to resolution is `test_execution_rerun.py`.
+
+        Asserted against the first run's own nodes rather than against what a plain re-run does,
+        which is engine caching policy this library does not own.
+        """
+        workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        first = _run_and_collect(client, {"workflow_id": workflow_id})
+        if not first:
+            pytest.skip(f"workflow {workflow_id!r} resolved no nodes, so a rerun proves nothing")
+
+        again = _run_and_collect(client, {"workflow_id": workflow_id, "unresolve_first": True})
+
+        assert again == first, "an unresolved flow must rerun the nodes the first run ran"
 
     def test_a_declared_input_is_applied(self, client: HostClient) -> None:
         loaded = _load_smoke_workflow(client)

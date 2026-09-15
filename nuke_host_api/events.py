@@ -122,6 +122,8 @@ class NukeExecuteWorkflowRequest(RequestPayload):
 
     workflow_id: str = ""
     inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # A fully resolved graph runs nothing, so an unchanged re-run needs the whole flow unresolved.
+    unresolve_first: bool = False
 
 
 @dataclass
