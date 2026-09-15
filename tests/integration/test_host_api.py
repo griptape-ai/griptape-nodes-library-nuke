@@ -171,7 +171,11 @@ class TestConnect:
         """
         reply = client.request(
             Verb.CONNECT,
-            {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
+            {
+                "client_protocol_versions": [PROTOCOL_VERSION],
+                "client_name": "smoke test",
+                "field_from_a_future_version": "ignore me",
+            },
         )
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
 

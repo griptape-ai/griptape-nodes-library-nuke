@@ -274,9 +274,16 @@ const Session = (function () {
     if (!isOpen()) {
       await doConnect();
       // The claim may have been free by then, leaving nothing to take.
-      if (state().session) return;
+      if (state().session) {
+        setState({ autoConnect: true });
+        return;
+      }
+      // doConnect() failed to open a socket; resync() below would throw instead of refusing.
+      if (!isOpen()) return;
     }
-    await resync({ force: true });
+    const tookOver = await resync({ force: true });
+    // Taking over is an explicit reconnect, so retry goes back on whatever turned it off.
+    if (tookOver) setState({ autoConnect: true });
   }
 
   function doDisconnect() {

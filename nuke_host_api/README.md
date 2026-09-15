@@ -24,7 +24,7 @@ nuke_host_api/
   parameter_values.py              reading a loaded workflow's values, shared by load and values
   dispatch.py                      handler calling convention: request guard, failure wording
   library_version.py               the shipped version, read from the manifest
-  execution_bridge.py                engine execution events -> host notifications
+  execution_bridge.py              engine execution events -> host notifications
   host_claim.py                    which host this engine reports itself driven by
   notify.py                        the one path that publishes a notification to a host
   value_types.py                   value normalizer

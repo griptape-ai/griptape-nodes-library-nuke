@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from griptape_nodes.retained_mode.events.base_events import AppEvent
 from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowCancelledEvent,
     ControlFlowResolvedEvent,
@@ -19,6 +18,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
+from nuke_host_api import notify
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
@@ -87,7 +87,7 @@ class ExecutionBridge:
         self,
         payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent | NukeExecutionNodesEvent,
     ) -> None:
-        GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
+        notify.publish(payload)
 
     def _emit_node_state(self, node_name: str, state: str, detail: str = "") -> None:
         self._emit(NukeNodeStateEvent(node_name=node_name, state=state, detail=detail))

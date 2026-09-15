@@ -57,10 +57,10 @@ const Events = (function () {
     // Ignore unknown Nuke notifications after logging them.
   }
 
-  // Compare against the name the engine echoed, which is this host's own name trimmed.
+  // Compare against the name the engine echoed, per INTEGRATION.md, not the raw field text.
   function addressesThisHost(body) {
-    const claimed = (state().session || {}).host_client_name || state().clientName.trim();
-    return Boolean(body.client_name) && body.client_name === claimed;
+    const claimed = (state().session || {}).host_client_name;
+    return Boolean(body.client_name) && Boolean(claimed) && body.client_name === claimed;
   }
 
   // The protocol has no execution id, so origin is inferred from local run requests.
