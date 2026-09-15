@@ -148,7 +148,7 @@ def publish_canary_bundle(
     register_result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(library_json)))
     assert isinstance(register_result, RegisterLibraryFromFileResultSuccess), register_result
 
-    library_json = _materialize_canary_library(workspace.parent / "canary_library")
+    library_json = materialize_canary_library(workspace.parent / "canary_library")
     register_result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(library_json)))
     assert isinstance(register_result, RegisterLibraryFromFileResultSuccess), register_result
 
@@ -161,12 +161,12 @@ def publish_canary_bundle(
     )
     assert isinstance(flow_result, CreateFlowResultSuccess), flow_result
 
-    _create_node("NukeStartFlow", "Nuke Start Flow", flow_result.flow_name)
-    _create_node("CanaryNode", "Canary", flow_result.flow_name)
-    _create_node("NukeEndFlow", "Nuke End Flow", flow_result.flow_name)
+    create_node("NukeStartFlow", "Nuke Start Flow", flow_result.flow_name)
+    create_node("CanaryNode", "Canary", flow_result.flow_name)
+    create_node("NukeEndFlow", "Nuke End Flow", flow_result.flow_name)
 
-    _connect("Nuke Start Flow", "exec_out", "Canary", "exec_in")
-    _connect("Canary", "exec_out", "Nuke End Flow", "exec_in")
+    connect("Nuke Start Flow", "exec_out", "Canary", "exec_in")
+    connect("Canary", "exec_out", "Nuke End Flow", "exec_in")
 
     # NukeEndFlow only exposes its own default outputs (was_successful, result_details);
     # a custom output must be added explicitly for extract_workflow_shape() to surface it.
@@ -182,7 +182,7 @@ def publish_canary_bundle(
         )
     )
     assert add_param_result.succeeded(), add_param_result
-    _connect("Canary", "output_path", "Nuke End Flow", "output_path")
+    connect("Canary", "output_path", "Nuke End Flow", "output_path")
 
     # The same output path again, but carried inside an artifact rather than as a bare string.
     add_artifact_param_result = GriptapeNodes.handle_request(
@@ -197,7 +197,7 @@ def publish_canary_bundle(
         )
     )
     assert add_artifact_param_result.succeeded(), add_artifact_param_result
-    _connect("Canary", "image_url_artifact", "Nuke End Flow", "image_url_artifact")
+    connect("Canary", "image_url_artifact", "Nuke End Flow", "image_url_artifact")
 
     for macro_name in _MACRO_OUTPUTS:
         add_macro_param_result = GriptapeNodes.handle_request(
@@ -212,7 +212,7 @@ def publish_canary_bundle(
             )
         )
         assert add_macro_param_result.succeeded(), add_macro_param_result
-        _connect("Canary", macro_name, "Nuke End Flow", macro_name)
+        connect("Canary", macro_name, "Nuke End Flow", macro_name)
 
     # Saving rekeys the unsaved entry to a path-derived registry key, so that -- not WORKFLOW_NAME
     # -- is what the publisher must be handed.
@@ -241,7 +241,7 @@ def publish_canary_bundle(
     )
 
 
-def _materialize_canary_library(target_dir: Path) -> Path:
+def materialize_canary_library(target_dir: Path) -> Path:
     """Copy fixtures/canary/canary_library into a tmp dir, pinned to the running engine version.
 
     The committed schema is named so the engine's discovery glob cannot see it (see
@@ -259,7 +259,7 @@ def _materialize_canary_library(target_dir: Path) -> Path:
     return target_dir / MATERIALIZED_SCHEMA_NAME
 
 
-def _create_node(node_type: str, node_name: str, flow_name: str) -> None:
+def create_node(node_type: str, node_name: str, flow_name: str) -> None:
     result = GriptapeNodes.handle_request(
         CreateNodeRequest(
             node_type=node_type,
@@ -270,7 +270,7 @@ def _create_node(node_type: str, node_name: str, flow_name: str) -> None:
     assert isinstance(result, CreateNodeResultSuccess), result
 
 
-def _connect(source_node: str, source_param: str, target_node: str, target_param: str) -> None:
+def connect(source_node: str, source_param: str, target_node: str, target_param: str) -> None:
     result = GriptapeNodes.handle_request(
         CreateConnectionRequest(
             source_node_name=source_node,

@@ -230,6 +230,8 @@ const Actions = (function () {
       {
         workflow_id: state().loaded.workflow_id,
         inputs: collectInputs(),
+        // A graph left resolved by the previous run resolves nothing without this.
+        unresolve_first: state().unresolveFirst,
       },
       EXECUTE_TIMEOUT_MS,
     );

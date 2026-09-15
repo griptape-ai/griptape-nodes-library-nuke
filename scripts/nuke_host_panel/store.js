@@ -41,6 +41,8 @@ const Store = (function () {
       restored: 0,
       fields: {},
       writeThrough: saved.writeThrough !== false,
+      // Off by default: unresolving discards every cached node in the flow.
+      unresolveFirst: saved.unresolveFirst === true,
       inputValues: {},
       outputValues: {},
       lastSet: null,
@@ -114,6 +116,7 @@ const Store = (function () {
           clientName: st.clientName,
           includeSystemBuiltins: st.includeSystemBuiltins,
           writeThrough: st.writeThrough,
+          unresolveFirst: st.unresolveFirst,
           drawerOpen: st.drawerOpen,
           drawerTab: st.drawerTab,
           engines: st.engines,
