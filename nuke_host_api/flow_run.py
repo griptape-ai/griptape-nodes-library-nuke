@@ -12,7 +12,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     StartFlowResultSuccess,
 )
 
-from nuke_host_api import engine, execution_bridge, run_outcome
+from nuke_host_api import engine, notify, run_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -82,4 +82,4 @@ async def _run(flow_name: str, workflow_id: str) -> None:
         # A run left open would hold every later editor run's verdict.
         if failure is not None and not raised:
             logger.error("Nuke host API: %s", failure)
-        execution_bridge.publish(run_outcome.conclude(failure, workflow_id))
+        notify.publish(run_outcome.conclude(failure, workflow_id))

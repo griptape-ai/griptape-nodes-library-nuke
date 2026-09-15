@@ -76,11 +76,13 @@ def test_forcing_the_same_name_is_a_reconnect_not_a_takeover() -> None:
     assert host_claim.claim("Nuke shot_040", force=True).displaced == ""
 
 
-def test_a_reconnect_refreshes_when_the_holder_was_last_seen() -> None:
+def test_a_reconnect_refreshes_when_the_holder_was_last_seen(monkeypatch: pytest.MonkeyPatch) -> None:
     """The timestamp is the last handshake, which is the only host contact this layer sees."""
+    times = iter([100.0, 200.0])
+    monkeypatch.setattr(host_claim.time, "time", lambda: next(times))
     first = host_claim.claim("Nuke shot_040")
     second = host_claim.claim("Nuke shot_040")
-    assert second.holder.connected_at >= first.holder.connected_at
+    assert second.holder.connected_at > first.holder.connected_at
 
 
 def test_releasing_frees_the_engine_for_any_host() -> None:

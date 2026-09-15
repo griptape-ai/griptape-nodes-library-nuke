@@ -23,7 +23,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     ParameterValueUpdateEvent,
 )
 
-from nuke_host_api import execution_bridge, run_outcome
+from nuke_host_api import execution_bridge, notify, run_outcome
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
@@ -78,7 +78,10 @@ class FakeEngine:
 @pytest.fixture
 def event_manager(monkeypatch: pytest.MonkeyPatch) -> FakeEventManager:
     manager = FakeEventManager()
-    monkeypatch.setattr(execution_bridge, "GriptapeNodes", FakeEngine(manager))
+    fake_engine = FakeEngine(manager)
+    monkeypatch.setattr(execution_bridge, "GriptapeNodes", fake_engine)
+    # _emit routes through notify.publish, which reads its own GriptapeNodes binding.
+    monkeypatch.setattr(notify, "GriptapeNodes", fake_engine)
     return manager
 
 

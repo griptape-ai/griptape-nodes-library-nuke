@@ -17,7 +17,7 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 
-from nuke_host_api import engine, execution_bridge, flow_run, run_outcome
+from nuke_host_api import engine, flow_run, notify, run_outcome
 from nuke_host_api.protocol import ExecutionState
 from tests.detached_run import settled
 from tests.unit.host_api_fakes import IDLE_FLOW, use_engine
@@ -32,7 +32,7 @@ IDLE = {
 @pytest.fixture
 def _published(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     published: list[Any] = []
-    monkeypatch.setattr(execution_bridge, "publish", published.append)
+    monkeypatch.setattr(notify, "publish", published.append)
     return published
 
 
