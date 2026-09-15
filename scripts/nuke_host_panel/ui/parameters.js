@@ -106,6 +106,17 @@
                       />
                       write through
                     </label>
+                    <label title="Unresolve the flow first so an unchanged graph runs again">
+                      <input
+                        type="checkbox"
+                        checked=${st.unresolveFirst}
+                        onChange=${(e) => {
+                          setState({ unresolveFirst: e.target.checked });
+                          persist();
+                        }}
+                      />
+                      fresh run
+                    </label>
                     ${
                       st.writeThrough
                         ? null

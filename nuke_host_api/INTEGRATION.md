@@ -700,10 +700,26 @@ first `NukeNodeStateEvent` or `NukeExecutionNodesEvent`, or polls
 |---|---|---|---|
 | `workflow_id` | `str` | `""` | Optional. Empty runs whatever is loaded. Set, it must be the loaded workflow or the request is refused |
 | `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values |
+| `unresolve_first` | `bool` | `false` | Unresolve every node in the flow before starting, so nodes left resolved by an earlier run compute again instead of being reused |
 
 Send `workflow_id` if the host tracks what it loaded. It costs nothing and turns a graph
 swapped out from under the host, by an editor user or another tool, into a refusal instead of a
 run of the wrong workflow. Leave it empty to drive a graph the host did not load itself.
+
+An unchanged re-run needs `unresolve_first`. Control flow unresolves each control node as it
+enters it, so those run every time, but a data node that is already resolved is reused rather
+than computed again. A run leaves every node resolved, so the second execution of the same
+inputs produces the previous run's values from every generative node upstream of the control
+chain. Set `unresolve_first` when the artist asks for another take: the same prompt is expected
+to produce a different image, and a host has no input to nudge.
+
+Leave it `false` when the host has just set inputs. Setting a parameter already unresolves that
+node and everything downstream, so the run recomputes what the change reached and reuses the
+rest; unresolving first pays for every generation in the flow again.
+
+The unresolve pushes no notifications and clears no values, so the knobs a host is showing keep
+the previous run's values until the new ones arrive. An engine that refuses the unresolve fails
+the request instead of starting a run that would hand those same values back.
 
 | `NukeExecuteWorkflowResultSuccess` field | Type | Notes |
 |---|---|---|

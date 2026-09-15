@@ -22,6 +22,8 @@ from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateResultSuccess,
     StartFlowRequest,
     StartFlowResultSuccess,
+    UnresolveFlowRequest,
+    UnresolveFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowRequest,
@@ -161,6 +163,7 @@ def execute_responses(overrides: dict[type, Any] | None = None) -> dict[type, An
         ),
         GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
         StartFlowRequest: StartFlowResultSuccess(result_details="started"),
+        UnresolveFlowRequest: UnresolveFlowResultSuccess(result_details="unresolved"),
         GetEngineVersionRequest: ENGINE_VERSION,
     }
     responses.update(overrides or {})

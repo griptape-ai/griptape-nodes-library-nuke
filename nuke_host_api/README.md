@@ -43,6 +43,9 @@ tests/unit/
   test_handlers_values.py          section selection, unavailable reporting, normalization, set-value allow-list
   test_handlers_projects.py        project narrowing, running-engine refusal, workspace-change detection
   test_execution_bridge.py         subscription symmetry, event translation
+tests/integration/
+  test_execution_rerun.py          resolved-node reuse and unresolve_first, real engine in-process
+  test_host_api.py                 live smoke suite over a running engine's socket
 ```
 
 `protocol.py` is the file to read first and the file to change most carefully. It is
@@ -164,7 +167,8 @@ so notifications publish live and other verbs still answer, including the refusa
 execute's own reply lands at the end of the run, so it reports a run that already happened; a
 host gives it no request timeout and reads progress from notifications.
 
-Six engine requests plus one per input forwarded to the engine, and none of them loads.
+Six engine requests plus one per input forwarded to the engine, plus one when
+`unresolve_first` is set, and none of them loads.
 `SetParameterValueRequest` applies each declared input to the loaded start node and
 `StartFlowRequest` executes, so running a workflow does not rebuild the graph whose knobs a host
 has just been setting. The rest is preflight: what the engine is running, what it has loaded,
@@ -180,6 +184,16 @@ an editor user opened has to do. Set, it must be the loaded workflow, and a mism
 refused: honouring it would put loading back inside execute, and ignoring it would run a
 workflow the host did not ask for while reporting success. A host that tracks what it loaded
 should send it, because that turns a graph swapped out from under it into a refusal.
+
+`unresolve_first` is how a host re-runs a graph it did not change. Control flow unresolves each
+control node as it enters it, but a resolved data node is reused, so a second run of the same
+inputs hands back the previous run's values from every generative node feeding the chain. Editor
+users work around that by editing a prompt to dirty a node; a host has no knob to nudge, so it
+sends `UnresolveFlowRequest` for the top-level flow before starting. Opt-in rather than the
+default because unresolving discards every cached node in the flow, and a host that set one input
+should pay for that subgraph only, which setting the parameter already arranged. A refused
+unresolve fails the request rather than starting a run whose outputs would be the previous run's.
+`tests/integration/test_execution_rerun.py` pins both halves against a real engine in-process.
 
 `NukeExecuteWorkflowResultSuccess` reports `applied_inputs` and `rejected_inputs`, because a
 silently dropped input is worse than a failed execution: the workflow produces plausible

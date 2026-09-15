@@ -17,6 +17,8 @@ from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateResultSuccess,
     StartFlowRequest,
     StartFlowResultFailure,
+    UnresolveFlowRequest,
+    UnresolveFlowResultFailure,
 )
 from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowRequest,
@@ -374,6 +376,55 @@ class TestExecuteWorkflow:
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "validation failed" in str(result.result_details)
+
+
+class TestUnresolveFirst:
+    """A resolved graph resolves nothing when it runs, so an unchanged re-run produces nothing.
+
+    Its own field rather than the default because unresolving the whole flow throws away every
+    cached node, and an artist who changed one knob should pay for that subgraph only.
+    """
+
+    async def test_the_whole_flow_is_unresolved_before_the_run_starts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        request_types = [type(request) for request in engine.requests]
+        assert request_types.index(UnresolveFlowRequest) < request_types.index(StartFlowRequest)
+        unresolved = next(r for r in engine.requests if isinstance(r, UnresolveFlowRequest))
+        assert unresolved.flow_name == "main", "the top-level flow is the one that reruns"
+
+    async def test_nothing_is_unresolved_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Every execution would otherwise recompute a graph a host only wanted to extend."""
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert not any(isinstance(request, UnresolveFlowRequest) for request in engine.requests)
+
+    async def test_a_refused_unresolve_stops_the_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Starting anyway reports a run whose outputs are the previous run's values."""
+        engine = use_engine(
+            monkeypatch,
+            execute_responses({UnresolveFlowRequest: UnresolveFlowResultFailure(result_details="no such flow")}),
+        )
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert "no such flow" in str(result.result_details), "the engine's own reason must reach the host"
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+
+    async def test_it_costs_one_engine_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert len(engine.requests) == 7, "the six a plain execution costs, plus the unresolve"
 
 
 class TestGetExecutionState:
