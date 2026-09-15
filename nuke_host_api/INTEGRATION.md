@@ -74,21 +74,21 @@ read does on a host's behalf.
 
 ## Connecting
 
-This section and [Transport limits](#transport-limits) are read from the engine's own
-`websocket_direct` implementation, at the engine floor this library declares
-(`griptape-nodes-engine>=0.99.0`). No test in this repo exercises that transport: the live
-smoke suite (`make test/integration/host-api`) drives `local_socket` instead. Treat config
-keys, accepted paths, handshake behaviour, control frames, and queueing below as documented
-engine behaviour rather than as behaviour this library pins.
+This section and [Transport limits](#transport-limits) are read from the app layer's own
+`websocket_direct` implementation (the `griptape-nodes` app package, v0.97.0 and later; the
+transport is served by the app's Rust IPC manager, not by `griptape-nodes-engine`). The live
+smoke suite (`make test/integration/host-api`) drives `local_socket` instead, and only the
+config below is exercised by hand. Treat accepted paths, handshake behaviour, control frames,
+and queueing as documented app behaviour rather than as behaviour this library pins.
 
 A host connects over `websocket_direct`, a WebSocket server the engine binds on loopback.
-The engine has two other IPC drivers and neither is the one to build a plugin on:
-`websocket_api` is its outbound link to the hosted service and accepts no local
+There are two other transports and neither is the one to build a plugin on:
+`websocket_api` is the outbound link to the hosted service and accepts no local
 connections, and `local_socket` (Unix socket, named pipe on Windows) fans every frame out
 to every client with no topic routing, drops a slow reader permanently, and serializes that
 fan-out under one lock.
 
-### 1. Enable the driver, once per machine
+### 1. Enable the transport, once per machine
 
 `websocket_direct` ships disabled. Add it to the engine config at
 `$XDG_CONFIG_HOME/griptape_nodes/griptape_nodes_config.json` (`~/.config` on macOS and
@@ -96,21 +96,26 @@ Linux unless overridden), then restart the engine:
 
 ```json
 {
-  "ipc_drivers": [
-    { "name": "websocket_api", "driver_type": "websocket_api", "enabled": true },
-    { "name": "websocket_direct", "driver_type": "websocket_direct", "enabled": true,
-      "host": "127.0.0.1", "port": 18125 }
-  ]
+  "transports": {
+    "websocket_direct": { "enabled": true, "host": "127.0.0.1", "port": 18125 }
+  }
 }
 ```
 
-Leave `websocket_api` enabled. It is the engine's link to the hosted service, and dropping
-it from the list disables it.
+Transports are keyed by name, and one the config omits keeps its default, so naming
+`websocket_direct` alone leaves `websocket_api` and `local_socket` as they were.
+`websocket_api` defaults to enabled whenever a cloud credential is present, and an
+`enabled: true` it cannot authenticate is refused rather than honoured.
 
 `host` and `port` are the defaults, spelled out because a second engine on one machine
 needs a second port: the engine refuses to start when the port is already bound. Keep
 `host` on loopback. There is no TLS and no auth handshake, so anything that can reach the
 port can drive the engine, and a routable bind address publishes that to the network.
+
+A field name the transport does not define is dropped and logged on its own, and a known
+field with an unusable value disables that transport instead of falling back to its default.
+Either way the engine starts and the port is simply not there, so check the engine log rather
+than reading a failed connection as a host bug.
 
 Do **not** try to read this config over the wire. A host has no connection yet, so
 `GetConfigValueRequest` cannot answer where to connect.
