@@ -18,6 +18,8 @@ from griptape_nodes.retained_mode.events.payload_registry import PayloadRegistry
 class NukeConnectRequest(RequestPayload):
     client_protocol_versions: list[int] = field(default_factory=list)
     client_name: str = ""
+    # A claim is keyed on client_name, so a takeover is the only way past another host.
+    force: bool = False
 
 
 @dataclass
@@ -34,12 +36,19 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     engine_id: str = ""
     session_id: str = ""
     engine_name: str = ""
+    host_client_name: str = ""
+    host_connected_at: float = 0.0
+    displaced_client_name: str = ""
 
 
 @dataclass
 @PayloadRegistry.register
 class NukeConnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """Host fields name the claim that refused this connect, empty on a version refusal."""
+
     supported_protocol_versions: list[int]
+    host_client_name: str = ""
+    host_connected_at: float = 0.0
 
 
 @dataclass

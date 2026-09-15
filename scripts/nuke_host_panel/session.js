@@ -3,7 +3,7 @@ const Session = (function () {
   const { CLIENT_PROTOCOL_VERSIONS, VERB } = Protocol;
   const { CONNECT_TIMEOUT_MS, RECONNECT_BACKOFF_MS, REPLY_TOPIC } = Config;
   const { banner, guard, remembered, setState, state } = Store;
-  const { closeSocket, detailOf, openSocket, request, subscribe, succeeded } = Transport;
+  const { closeSocket, detailOf, isOpen, openSocket, request, subscribe, succeeded } = Transport;
   const { noteRunActivity } = Events;
   const {
     doDescribe,
@@ -67,7 +67,8 @@ const Session = (function () {
   }
 
   // Subscribe before requesting so replies are not lost. Read the project before its workflow list.
-  async function resync() {
+  async function resync(options) {
+    const force = Boolean(options && options.force);
     setState({ resyncSteps: [] });
 
     subscribe(REPLY_TOPIC);
@@ -81,6 +82,7 @@ const Session = (function () {
         {
           client_protocol_versions: CLIENT_PROTOCOL_VERSIONS,
           client_name: state().clientName.trim() || "browser host",
+          force,
         },
         CONNECT_TIMEOUT_MS,
       );
@@ -100,7 +102,19 @@ const Session = (function () {
     }
 
     if (!succeeded(reply)) {
-      const supported = (reply.result && reply.result.supported_protocol_versions) || [];
+      const refusal = reply.result || {};
+      // A held engine is refused by name; nothing else in this reply says which refusal it was.
+      if (refusal.host_client_name) {
+        noteStep("claim the engine", "bad", "held by " + refusal.host_client_name);
+        setState({ socket: "held", heldBy: refusal.host_client_name });
+        banner(
+          "warn",
+          "Another host is driving this engine.",
+          detailOf(reply) + " Take over from the connection drawer.",
+        );
+        return false;
+      }
+      const supported = refusal.supported_protocol_versions || [];
       noteStep(
         "negotiate a protocol version",
         "bad",
@@ -117,12 +131,29 @@ const Session = (function () {
 
     const result = reply.result || {};
     // engine_version is display-only; branch only on negotiated protocol_version.
-    setState({ socket: "connected", session: result, banner: null, connectAttempts: 0 });
+    setState({
+      socket: "connected",
+      session: result,
+      banner: null,
+      connectAttempts: 0,
+      heldBy: null,
+    });
     noteStep(
       "negotiate a protocol version",
       "ok",
       "version " + result.protocol_version + ", engine " + (result.engine_name || "unnamed"),
     );
+    // A displaced host keeps its socket and its feed, so say so rather than reporting a clean claim.
+    if (result.displaced_client_name) {
+      noteStep("claim the engine", "warn", "took it from " + result.displaced_client_name);
+      banner(
+        "warn",
+        "Took the engine from " + result.displaced_client_name + ".",
+        "That host is still connected and can still drive this engine.",
+      );
+    } else {
+      noteStep("claim the engine", "ok", result.host_client_name || "");
+    }
 
     // event_topic is not derivable; without it notifications fail silently.
     if (result.event_topic) {
@@ -219,6 +250,16 @@ const Session = (function () {
     await resync();
   }
 
+  // A refused claim leaves the socket open, so a takeover is one more handshake on it.
+  async function doTakeOver() {
+    if (!isOpen()) {
+      await doConnect();
+      // The claim may have been free by then, leaving nothing to take.
+      if (state().session) return;
+    }
+    await resync({ force: true });
+  }
+
   function doDisconnect() {
     setState({ autoConnect: false });
     cancelReconnect();
@@ -234,6 +275,7 @@ const Session = (function () {
     onSocketClosed,
     resync,
     doConnect,
+    doTakeOver,
     doDisconnect,
     doDropSocket,
     cancelReconnect,

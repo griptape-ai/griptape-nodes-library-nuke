@@ -24,7 +24,8 @@ nuke_host_api/
   parameter_values.py              reading a loaded workflow's values, shared by load and values
   dispatch.py                      handler calling convention: request guard, failure wording
   library_version.py               the shipped version, read from the manifest
-  execution_bridge.py              engine execution events -> host notifications
+  execution_bridge.py                engine execution events -> host notifications
+  host_claim.py                    which host this engine reports itself driven by
   value_types.py                   value normalizer
 tests/unit/
   test_protocol.py                 verb/notification names resolve to real payload classes
@@ -37,6 +38,7 @@ tests/unit/
   test_library_version.py          manifest read and reload reset
   test_handlers_routes.py          every declared verb is routed exactly once
   test_handlers_connect.py         negotiation, event stream gating
+  test_host_claim.py               claim grant, reconnect, refusal, takeover
   test_handlers_workflows.py       discovery and parameter publication
   test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
@@ -104,6 +106,37 @@ a host holds the `websocket_direct` URL as its own setting, defaulted to
 `ws://127.0.0.1:18125/`, and a completed handshake is the liveness check. The engine's
 `engines.json` is app-layer internal and deliberately not part of what a host reads. See
 `INTEGRATION.md`.
+
+**One host at a time, reported rather than enforced.** The first connect claims the engine
+under its `client_name`; a connect under a different name is refused, naming the holder and the
+time it handshaked, and `force` takes the claim over. Two Nuke sessions driving one engine used
+to be silent, and each would load workflows out from under the other. Four decisions make that
+survivable rather than pretend it is solved.
+
+The claim is keyed on `client_name`, so the same name always reconnects. A host has to
+re-handshake after a dropped socket and after every successful `NukeSetCurrentProjectRequest`,
+and a claim it could not reclaim would turn its own reconnect into a conflict with itself. The
+cost is that two sessions sending an identical name both connect unwarned, so a host is told to
+put something per-session in the name. A host-minted `client_id` would fix that and is additive
+when a plugin needs it.
+
+It is checked at connect and nowhere else. No other verb carries host identity, and the
+transport authenticates nothing, so a claim cannot gate a load or an execute without a token on
+every request that the editor and every other driver would not carry anyway. The claim answers
+"is someone else here", which is the question a host asks before it starts, not an access
+control this layer can honestly offer.
+
+`force` displaces a name, not a connection. Nothing here can close another host's socket or drop
+its subscription, so the displaced host keeps its feed and keeps working, and learns it lost the
+claim only on its next connect. Hence `displaced_client_name` on the reply: the host that forced
+is the one that can tell its artist somebody else is still driving.
+
+A claim never goes stale on its own. The transport gives Python no disconnect signal, which is
+also why the event bridge latches on instead of counting connections, so a crashed Nuke session
+leaves its name on the engine until the library reloads (`before_library_unregistered` releases
+it) or the engine restarts. The alternative, an idle window refreshed by last-seen traffic, would
+be refreshed by the editor's requests too, so it would report a dead host as live. `force` is the
+escape, and the refusal message says so.
 
 ### 2. Load a workflow
 
@@ -587,6 +620,10 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 
 - **Audio lands in `GTFile`.** v1 covers images and movies. Promoting it to `GTAudio` is a
   version bump, so decide deliberately rather than by omission.
+- **The host claim reports a conflict, it does not prevent one.** It is checked at connect and
+  nowhere else, `force` displaces a name rather than a connection, a crashed host's claim never
+  expires, and two hosts sending one `client_name` both connect. Anything stronger needs host
+  identity on every request and a disconnect signal the transport does not give Python.
 - **No execution identity.** The engine carries no execution id through its
   execution events, so nothing here can correlate concurrent executions. This layer
   deliberately does not paper over it with local state; the fix belongs in the engine.

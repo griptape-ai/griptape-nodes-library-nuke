@@ -16,6 +16,7 @@ The protocol contract is `protocol.py` and `INTEGRATION.md`, not this panel.
 | Step | Verbs |
 | --- | --- |
 | Connect and recover state | `NukeConnectRequest`, `NukeGetExecutionStateRequest` |
+| Take the host claim from another host | `NukeConnectRequest` with `force` |
 | Read the current project | `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest` |
 | Preview and switch projects | `NukeDescribeProjectRequest`, `NukeSetCurrentProjectRequest` |
 | List, describe, and load workflows | `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest` |
@@ -37,7 +38,7 @@ The Events drawer shows progress, node-state, and value notifications.
 | `transport.js` | Socket, request correlation, message dispatch, and wire log |
 | `events.js` | Notification ingestion and event feed |
 | `actions.js` | Workflow, value, execution, and project requests |
-| `session.js` | Connection, resync, and reconnect handling |
+| `session.js` | Connection, resync, host claim takeover, and reconnect handling |
 | `main.js` | Transport, event, action, and UI wiring |
 | `ui/*` | Panel presentation |
 

@@ -185,6 +185,26 @@ Topic routing narrows the stream; it does not make the stream yours.
 So the discard rule stands: drop any frame whose `request_id` is not one this host sent and
 whose `payload_type` does not begin with `Nuke`.
 
+### 5. Deciding whether this is the engine to drive
+
+A host that offers a list of engines has to fill it in from three places, because no one verb
+answers all of it.
+
+| Question | Where the answer is |
+|---|---|
+| Which engines exist | Nowhere on this protocol. A host has no connection at discovery time, so it holds the URL as configuration ([step 2](#2-open-the-connection)) and a completed handshake is the liveness check |
+| Which engine is this, and is it busy | `NukeConnectResultSuccess` for id, name, version, and session, then `NukeGetExecutionStateRequest` for what is running |
+| Is a Nuke session already driving it | `NukeConnectResultSuccess.host_client_name`, and the claim refusal a second host gets |
+
+The engine's own `EngineHeartbeatRequest` answers the middle row in one round trip, carrying
+`engine_id`, `engine_name`, `engine_version`, `session_id`, `has_active_flow`,
+`current_workflow`, `workflow_file_path`, `engine_os`, and `orchestrator_engine_id`. It reaches
+any transport this library does not have to be installed for, which makes it the cheapest poll
+for an engine picker. It is engine vocabulary rather than part of the [bound
+surface](#bound-surface), so it changes on the engine's release cadence and the binding rules
+above do not protect a host that reads it. What it cannot answer is the third row: nothing
+engine-side models "a Nuke session has this one", which is what the claim on connect is for.
+
 ## Frame formats
 
 One JSON object per WebSocket text message. No newline framing, no length prefix: the
@@ -221,7 +241,7 @@ somewhere this host is not listening.
     "request_type": "NukeConnectRequest",
     "request": {
       "client_protocol_versions": [1],
-      "client_name": "Nuke 16.0v7"
+      "client_name": "Nuke 16.0v7 shot_040 dan"
     },
     "request_id": "9f2c...",
     "response_topic": "nuke/reply"
@@ -333,7 +353,8 @@ other verbs answer without it.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `client_protocol_versions` | `list[int]` | `[]` | Every version the host can speak. Empty means "assume current" |
-| `client_name` | `str` | `""` | Free text for logs and support tickets |
+| `client_name` | `str` | `""` | Names this host, in logs and to whoever connects next. Also the claim key, so make it distinctive |
+| `force` | `bool` | `false` | Take the claim from another host. Only after the artist confirms the refusal below |
 
 | `NukeConnectResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -346,6 +367,28 @@ other verbs answer without it.
 | `engine_id` | `str` | The engine's own id. Empty when the engine has not set one |
 | `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open |
 | `engine_name` | `str` | Human-readable. Empty when the engine could not report one |
+| `host_client_name` | `str` | The host this engine now names, which is this host's `client_name` trimmed, or `unnamed host` when it sent none |
+| `host_connected_at` | `float` | Epoch seconds of this handshake |
+| `displaced_client_name` | `str` | The host a `force` took the claim from. Empty unless this connect took one over. Show it: an artist elsewhere is still driving this engine |
+
+**One host at a time, advisorily.** The first `NukeConnectRequest` claims the engine under its
+`client_name`. A later connect under a different name is refused and told who holds it, and
+`force: true` is the way past. Three limits on what that means:
+
+- **The claim is checked at connect and nowhere else.** No other verb carries host identity, so
+  a host that never connects, or one that was displaced by a `force` and kept its socket open,
+  can still load, execute, and set values. The claim reports a conflict; it does not prevent one.
+- **`force` displaces a name, not a connection.** The engine cannot close another host's socket
+  or cancel its subscription, so the displaced host keeps receiving notifications and its
+  requests keep working. It learns nothing until its next connect.
+- **A claim outlives the host that took it.** The transport gives this library no disconnect
+  signal, so a crashed Nuke session leaves its name on the engine until the library reloads or
+  the engine restarts. `force` is the only escape, which is why the refusal says so.
+
+The same name always reconnects, since a host has to re-handshake after a dropped socket and
+after every successful `NukeSetCurrentProjectRequest`. Two Nuke sessions sending an identical
+`client_name` therefore both connect and neither is warned, so put something per-session in it:
+the script name, the user, the pid.
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
@@ -364,21 +407,45 @@ yet.
   "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool", "GTNull"],
   "engine_id": "a69c283e-...",
   "session_id": "50c24f47-...",
-  "engine_name": "Dan's workstation"
+  "engine_name": "Dan's workstation",
+  "host_client_name": "Nuke 16.0v7 shot_040 dan",
+  "host_connected_at": 1763596991.183,
+  "displaced_client_name": ""
 }
 ```
 
-`NukeConnectResultFailure` carries `supported_protocol_versions` and a message naming the
-window, suitable for display to a user:
+`NukeConnectResultFailure` covers two refusals, told apart by `host_client_name`. A version
+refusal names the window and no host:
 
 ```json
 {
   "supported_protocol_versions": [1],
+  "host_client_name": "",
+  "host_connected_at": 0.0,
   "result_details": {
     "result_details": [
       {
         "level": 40,
         "message": "Attempted to connect a host speaking protocol version(s) [99]. Failed because this library supports [1]. Update the host plugin, or install a library version that still supports it."
+      }
+    ]
+  }
+}
+```
+
+A claim refusal names the holder, and is the one to put in front of the artist with a
+"connect anyway" action that re-sends with `force: true`:
+
+```json
+{
+  "supported_protocol_versions": [1],
+  "host_client_name": "Nuke 16.0v7 shot_040 dan",
+  "host_connected_at": 1763596991.183,
+  "result_details": {
+    "result_details": [
+      {
+        "level": 40,
+        "message": "Attempted to connect Nuke 16.0v7 shot_112 amy. Failed because Nuke 16.0v7 shot_040 dan connected to this engine at 2025-11-19 15:03:11 and is the host it reports. Send force=true to become that host instead. The other host is not disconnected, keeps its own event subscription, and can still drive this engine."
       }
     ]
   }

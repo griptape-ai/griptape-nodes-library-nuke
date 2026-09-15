@@ -56,7 +56,9 @@ def client(engine: Engine) -> Iterator[HostClient]:
     """Connect before each test and cancel any execution during teardown."""
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
-            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+            Verb.CONNECT,
+            # Force, because a panel or an idle Nuke session may still hold the claim.
+            {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
         )
         assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
         try:
@@ -172,6 +174,26 @@ class TestConnect:
             {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
         )
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
+
+    def test_a_second_host_is_refused_until_it_forces_the_claim(self, client: HostClient) -> None:
+        """The claim is process state, so only a live engine shows it surviving between requests."""
+        second = {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "second smoke host"}
+        try:
+            refused = client.request(Verb.CONNECT, second)
+            assert not succeeded(refused), "a second host must not connect silently"
+            assert result_of(refused)["host_client_name"] == "smoke test"
+            assert result_of(refused)["host_connected_at"] > 0
+
+            forced = client.request(Verb.CONNECT, {**second, "force": True})
+            assert succeeded(forced), f"a forced connect failed: {detail_of(forced)}"
+            assert result_of(forced)["displaced_client_name"] == "smoke test"
+            assert result_of(forced)["host_client_name"] == "second smoke host"
+        finally:
+            # Every later test's fixture connects as the smoke host, and the engine outlives this test.
+            client.request(
+                Verb.CONNECT,
+                {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
+            )
 
 
 class TestDescribe:
