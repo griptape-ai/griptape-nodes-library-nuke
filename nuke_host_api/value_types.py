@@ -21,7 +21,11 @@ from nuke_host_api.protocol import SourceKind, ValueType
 logger = logging.getLogger("griptape_nodes")
 
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "exr", "tif", "tiff", "webp", "dpx", "tga", "hdr"})
-VIDEO_EXTENSIONS = frozenset({"mp4", "mov", "avi", "mkv", "webm", "m4v"})
+# MXF is deliberately absent: it also wraps audio-only essence, so it stays GTFile unless a
+# declared movie type says otherwise.
+VIDEO_EXTENSIONS = frozenset(
+    {"mp4", "mov", "avi", "mkv", "webm", "m4v", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"}
+)
 
 # Control parameters carry no data and are omitted from descriptions and events.
 CONTROL_PARAM_TYPE = "parametercontroltype"
@@ -41,6 +45,7 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
     # Both engine sequence names map to an image with multiple sources.
     "ImageSequenceArtifact": ValueType.IMAGE,
     "Sequence": ValueType.IMAGE,
+    "VideoArtifact": ValueType.MOVIE,
     "VideoUrlArtifact": ValueType.MOVIE,
     "str": ValueType.TEXT,
     "string": ValueType.TEXT,
