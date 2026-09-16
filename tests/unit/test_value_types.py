@@ -186,11 +186,9 @@ class TestNumericTypes:
             (7, None, ValueType.INT),
             (23.976, "float", ValueType.FLOAT),
             (23.976, None, ValueType.FLOAT),
-            # A float parameter the engine happens to hold a whole number in is still a float
-            # parameter, and its next value may be 0.5.
+            # Preserve a Double_Knob for later fractional values.
             (4, "float", ValueType.FLOAT),
-            # An int parameter holding a float reports what it holds: reporting GTInt would
-            # invite the host to truncate.
+            # Do not truncate a runtime float to match its int declaration.
             (0.5, "int", ValueType.FLOAT),
         ],
     )
@@ -200,7 +198,6 @@ class TestNumericTypes:
         assert value_types.normalize_value(value, declared)["value_type"] == expected
 
     def test_a_list_of_ints_and_floats_is_one_float_rather_than_a_conflict(self) -> None:
-        """Mixed media degrades to GTFile; mixed numbers are one numeric knob."""
         assert value_types.normalize_value([1, 2.5], "list[float]")["value_type"] == ValueType.FLOAT
 
 

@@ -127,7 +127,7 @@ const Actions = (function () {
       if (isNumeric(param.type)) {
         value = Number(raw);
         if (Number.isNaN(value)) return;
-        // GTInt is an Int_Knob on a real host, which would truncate 1.5 without saying so.
+        // Mirror Int_Knob truncation in the browser host.
         if (param.type === "GTInt") value = Math.trunc(value);
       }
       if (!inputs[param.node]) inputs[param.node] = {};

@@ -71,7 +71,7 @@ def value_type_for_engine_type(engine_type: str | None) -> str:
 
 
 def _numeric_value_type(value: int | float, declared_engine_type: str | None) -> str:
-    """A float declaration outranks an int value, so a knob built for 0.5 survives holding 4."""
+    """A float declaration preserves a Double_Knob for later fractional values."""
     if isinstance(value, float) or value_type_for_engine_type(declared_engine_type) == ValueType.FLOAT:
         return ValueType.FLOAT
     return ValueType.INT

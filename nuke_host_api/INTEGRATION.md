@@ -1301,12 +1301,6 @@ has this shape:
 | `GTBool` | A bool, in `value`. No sources |
 | `GTNull` | Unset or empty. No sources, `value` null |
 
-Int and float are separate types because Nuke's knobs are: a Double_Knob cannot be built from a
-type that says only "a number", and an Int_Knob truncates. A parameter declaring `float` always
-reports `GTFloat`, even while it holds a whole number, so a knob built from `type` survives the
-next value. The reverse is not guaranteed: a parameter declaring `int` reports `GTFloat` for a
-value that is genuinely a float, rather than announcing an int a host would truncate.
-
 A value is in exactly one place: `value` for a scalar, `sources` for anything pointing at
 bytes. Nothing carries both, so a host never has to decide which one wins. A string that is
 not a locator, an unresolvable template included, reports as `GTText` and its text is readable
