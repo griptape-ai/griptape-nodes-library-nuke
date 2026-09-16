@@ -198,7 +198,12 @@ class TestNumericTypes:
         assert value_types.normalize_value(value, declared)["value_type"] == expected
 
     def test_a_list_of_ints_and_floats_is_one_float_rather_than_a_conflict(self) -> None:
-        assert value_types.normalize_value([1, 2.5], "list[float]")["value_type"] == ValueType.FLOAT
+        # A float declaration would type both items FLOAT before the merge, so the mixed set this
+        # covers needs an int declaration or none at all.
+        descriptor = value_types.normalize_value([1, 2.5], "list[int]")
+        assert descriptor["value_type"] == ValueType.FLOAT
+        assert descriptor["sources"] == []
+        assert value_types.normalize_value([1, 2.5])["value_type"] == ValueType.FLOAT
 
 
 def test_format_is_never_guessed() -> None:

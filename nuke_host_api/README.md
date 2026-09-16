@@ -478,11 +478,6 @@ additive change safety is real rather than aspirational.
 Bumps: removing or renaming a verb, event, field, host type, or source kind, or changing
 the meaning of one.
 
-Splitting `GTNumber` into `GTInt` and `GTFloat` at version 1 is an exception to the rule above,
-taken because no contract snapshot is recorded and no plugin binary ships that vocabulary.
-Negotiating both would require a per-connection value-type table and two normalizers, for a client
-that rebuilds weekly. After a snapshot ships, a value type changes only with a version bump.
-
 `SUPPORTED_PROTOCOL_VERSIONS` is the support window. Studios keep plugin binaries in
 service for years, so entries leave on a stated schedule.
 
