@@ -81,7 +81,6 @@ class TestDeclaredParameters:
         assert all(entry["choices"] == [] for entry in declared)
 
     def test_a_parameter_the_author_hid_is_reported_hidden(self) -> None:
-        """Reported rather than dropped: a host still has to be able to set one."""
         section = {
             "Start Flow": {
                 "counter": {"type": "int", "ui_options": {"hide": True}},
@@ -94,7 +93,6 @@ class TestDeclaredParameters:
         assert hidden == {"counter": True, "topic": False}
 
     def test_a_parameter_hidden_only_in_the_editors_property_panel_is_not_hidden(self) -> None:
-        """`hide_property` leaves a connectable port, which a host building knobs cannot mirror."""
         section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "ui_options": {"hide_property": True}}}}
 
         assert shape.declared_parameters(section)[0]["hidden"] is False

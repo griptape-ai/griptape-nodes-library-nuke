@@ -457,15 +457,11 @@ repopulate a dropdown while the graph holds an older value, so a value outside `
 read back, and setting one the engine rejects is reported in `rejected_inputs`. Multi-select
 parameters report no choices.
 
-`hidden` reports what the author did, not what a host must do. A hidden parameter is still
-declared, still readable, and still settable, so it is reported rather than dropped: a workflow can
-carry one deliberately for a host to drive, and omitting it here would leave no way to address it.
-Build it as a hidden or advanced knob, or leave it off the panel and set it programmatically.
+A hidden parameter is still declared, readable, and settable. Build it as a hidden or advanced
+knob, or leave it off the panel and set it programmatically.
 
-`hidden` covers the editor's whole-parameter flag only. A parameter the author hid from the
-editor's property panel while leaving its port connectable reports `hidden: false`, because a knob
-is the only way a host can expose a parameter at all, so there is nothing for that state to mean
-here.
+`hidden` excludes `hide_property`, which hides the editor's value widget but leaves its port
+connectable. Such a parameter reports `hidden: false` because a knob cannot represent that state.
 
 Every field is always present. A parameter the engine gave no metadata for reports a `null`
 default, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
