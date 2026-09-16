@@ -51,8 +51,8 @@ def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
         ("ImageUrlArtifact", ValueType.IMAGE),
         ("VideoUrlArtifact", ValueType.MOVIE),
         ("str", ValueType.TEXT),
-        ("int", ValueType.NUMBER),
-        ("float", ValueType.NUMBER),
+        ("int", ValueType.INT),
+        ("float", ValueType.FLOAT),
         ("bool", ValueType.BOOL),
         # An image sequence is an image with many sources, under either name in use for one.
         ("Sequence", ValueType.IMAGE),
@@ -61,7 +61,7 @@ def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
         # the mapping table or the Artifact suffix test.
         ("list[ImageUrlArtifact]", ValueType.IMAGE),
         ("list[VideoUrlArtifact]", ValueType.MOVIE),
-        ("list[int]", ValueType.NUMBER),
+        ("list[int]", ValueType.INT),
         ("list[str]", ValueType.TEXT),
         ("list[AudioUrlArtifact]", ValueType.FILE),
         # A wildcard parameter declares only that it accepts anything, so the most permissive
@@ -119,7 +119,7 @@ def test_a_parameter_whose_declared_type_carries_no_media_information_may_narrow
     Nothing at describe time can know a GenericArtifact holds a jpg, because no value exists
     yet, and throwing that away once one does would be worse than the mismatch. So the
     narrowing is documented rather than removed, and pinned here: it must stay inside the
-    sourced types and never become GTText, GTNumber or GTBool. That is the mismatch that
+    sourced types and never become GTText, GTInt, GTFloat or GTBool. That is the mismatch that
     actually breaks a host, because it makes it build a text field for media.
     """
     assert value_types.value_type_for_engine_type(declared) == ValueType.FILE
@@ -142,8 +142,8 @@ def test_a_parameter_whose_declared_type_carries_no_media_information_may_narrow
         (BlobArtifact(value=b"\x00\x01"), "BlobArtifact", ValueType.FILE),
         (None, "ImageUrlArtifact", ValueType.NULL),
         (True, "bool", ValueType.BOOL),
-        (23.976, "float", ValueType.NUMBER),
-        (7, "int", ValueType.NUMBER),
+        (23.976, "float", ValueType.FLOAT),
+        (7, "int", ValueType.INT),
     ],
 )
 def test_values_normalize_into_the_closed_set(value: Any, declared: str, expected: str) -> None:
@@ -173,7 +173,35 @@ def test_every_descriptor_reports_a_member_of_the_closed_set() -> None:
 def test_bool_is_not_reported_as_a_number() -> None:
     """bool is a subclass of int in Python, so order of checks matters."""
     assert value_types.normalize_value(True)["value_type"] == ValueType.BOOL
-    assert value_types.normalize_value(1)["value_type"] == ValueType.NUMBER
+    assert value_types.normalize_value(1)["value_type"] == ValueType.INT
+
+
+class TestNumericTypes:
+    """Nuke builds a different knob for each, and truncating a float to an Int_Knob loses the value."""
+
+    @pytest.mark.parametrize(
+        ("value", "declared", "expected"),
+        [
+            (7, "int", ValueType.INT),
+            (7, None, ValueType.INT),
+            (23.976, "float", ValueType.FLOAT),
+            (23.976, None, ValueType.FLOAT),
+            # A float parameter the engine happens to hold a whole number in is still a float
+            # parameter, and its next value may be 0.5.
+            (4, "float", ValueType.FLOAT),
+            # An int parameter holding a float reports what it holds: reporting GTInt would
+            # invite the host to truncate.
+            (0.5, "int", ValueType.FLOAT),
+        ],
+    )
+    def test_a_number_is_typed_from_its_value_and_its_declaration(
+        self, value: Any, declared: str | None, expected: str
+    ) -> None:
+        assert value_types.normalize_value(value, declared)["value_type"] == expected
+
+    def test_a_list_of_ints_and_floats_is_one_float_rather_than_a_conflict(self) -> None:
+        """Mixed media degrades to GTFile; mixed numbers are one numeric knob."""
+        assert value_types.normalize_value([1, 2.5], "list[float]")["value_type"] == ValueType.FLOAT
 
 
 def test_format_is_never_guessed() -> None:
@@ -277,7 +305,7 @@ def test_locator_fallback_matrix(value: str, declared: str, expected_type: str, 
         assert descriptor["sources"] == []
 
 
-SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.NUMBER, ValueType.BOOL, ValueType.NULL}
+SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.INT, ValueType.FLOAT, ValueType.BOOL, ValueType.NULL}
 
 
 @pytest.mark.parametrize(
@@ -306,7 +334,7 @@ SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.NUMBER, ValueType.BOOL, Valu
 def test_a_media_or_file_type_never_arrives_without_a_source(value: Any, declared: str | None) -> None:
     """GTImage, GTMovie and GTFile promise a host somewhere to get bytes, so they must carry a source.
 
-    Both docs publish the inverse rule too: only GTText, GTNumber, GTBool and GTNull arrive
+    Both docs publish the inverse rule too: only GTText, GTInt, GTFloat, GTBool and GTNull arrive
     sourceless. A declared media type describes what a parameter is for, not what a value turned out
     to be, so prose on an image parameter must not be announced as an image a host can open.
     """

@@ -1,5 +1,5 @@
 const Actions = (function () {
-  const { VERB } = Protocol;
+  const { VERB, isNumeric } = Protocol;
   const { DRAIN_GRACE_MS, EXECUTE_TIMEOUT_MS, HISTORY_LIMIT, POLL_TICK_MS, WRITE_THROUGH_DEBOUNCE_MS } =
     Config;
   const { banner, guard, remembered, rememberFields, remember, setState, state } = Store;
@@ -124,9 +124,11 @@ const Actions = (function () {
       const raw = state().fields[paramKey(param.node, param.parameter)];
       if (raw === undefined || raw === "") return;
       let value = raw;
-      if (param.type === "GTNumber") {
+      if (isNumeric(param.type)) {
         value = Number(raw);
         if (Number.isNaN(value)) return;
+        // GTInt is an Int_Knob on a real host, which would truncate 1.5 without saying so.
+        if (param.type === "GTInt") value = Math.trunc(value);
       }
       if (!inputs[param.node]) inputs[param.node] = {};
       inputs[param.node][param.parameter] = value;

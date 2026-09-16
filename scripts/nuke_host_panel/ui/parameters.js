@@ -1,5 +1,5 @@
 (function () {
-  const { KNOWN_VALUE_TYPES, isMedia } = Protocol;
+  const { KNOWN_VALUE_TYPES, isMedia, isNumeric } = Protocol;
   const { guard, persist, setState } = Store;
   const { doCancel, doReadValues, doRun, doSetValues, setField } = Actions;
   const { paramKey } = Values;
@@ -19,10 +19,10 @@
         checked=${value === true}
         onChange=${(e) => set(e.target.checked)}
       />`;
-    } else if (param.type === "GTNumber") {
+    } else if (isNumeric(param.type)) {
       widget = html`<input
         type="number"
-        step="any"
+        step=${param.type === "GTInt" ? "1" : "any"}
         disabled=${disabled}
         value=${value === undefined ? "" : value}
         onInput=${(e) => set(e.target.value)}

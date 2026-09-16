@@ -29,7 +29,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
-| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`, `GTBool`, `GTNull` |
+| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool`, `GTNull` |
 | Source kinds | `path`, `url`, `inline`, `macro` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
@@ -361,7 +361,7 @@ yet.
   "engine_version": "0.99.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
-  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTNumber", "GTBool", "GTNull"],
+  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool", "GTNull"],
   "engine_id": "a69c283e-...",
   "session_id": "50c24f47-...",
   "engine_name": "Dan's workstation"
@@ -436,7 +436,7 @@ Parameter descriptor fields:
 | `node` | Node name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `name` | Pre-joined `node.parameter` label for display |
-| `type` | Always one of the seven value types |
+| `type` | Always one of the eight value types |
 | `default` | The workflow author's default, as a value descriptor. Initialize the knob to this |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
@@ -457,6 +457,8 @@ direction only, by narrowing:
 | A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
 | A wildcard (`any`, `all`) | `GTText` | anything |
+| `float` | `GTFloat` | `GTFloat`, whatever the value holds: a float parameter the engine happens to hold `4` in is still a float parameter |
+| `int` | `GTInt` | `GTInt`, or `GTFloat` when the engine hands over a float, because reporting `GTInt` would invite a host to truncate it |
 
 Two overrides apply to every parameter, whatever it declares:
 
@@ -1281,7 +1283,7 @@ has this shape:
 | Field | Notes |
 |---|---|
 | `value_type` | The only field to switch on |
-| `value` | The value itself, for `GTText`, `GTNumber`, and `GTBool`. Null for `GTNull` and for every sourced type, where the locator is in `sources` |
+| `value` | The value itself, for `GTText`, `GTInt`, `GTFloat`, and `GTBool`. Null for `GTNull` and for every sourced type, where the locator is in `sources` |
 | `sources` | Zero or more locators. Multiple sources means a sequence |
 | `colorspace` | Always null in v1, reserved |
 | `engine_type` | Support diagnostics only. Will change; never branch on it |
@@ -1294,9 +1296,16 @@ has this shape:
 | `GTMovie` | A movie file. `value` null |
 | `GTFile` | A file this protocol version does not classify, including audio. `value` null |
 | `GTText` | A string, in `value`. No sources |
-| `GTNumber` | An int or float, in `value`. No sources |
+| `GTInt` | A whole number, in `value`. No sources. An Int_Knob on the host side |
+| `GTFloat` | A real number, in `value`. No sources. A Double_Knob on the host side. JSON writes `4.0` as `4`, so read the type rather than the literal |
 | `GTBool` | A bool, in `value`. No sources |
 | `GTNull` | Unset or empty. No sources, `value` null |
+
+Int and float are separate types because Nuke's knobs are: a Double_Knob cannot be built from a
+type that says only "a number", and an Int_Knob truncates. A parameter declaring `float` always
+reports `GTFloat`, even while it holds a whole number, so a knob built from `type` survives the
+next value. The reverse is not guaranteed: a parameter declaring `int` reports `GTFloat` for a
+value that is genuinely a float, rather than announcing an int a host would truncate.
 
 A value is in exactly one place: `value` for a scalar, `sources` for anything pointing at
 bytes. Nothing carries both, so a host never has to decide which one wins. A string that is

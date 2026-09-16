@@ -401,7 +401,7 @@ engine's instruction that execution event listeners stay cheap and non-blocking.
 
 ## Value contract
 
-Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`,
+Closed set, eight members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
 `GTBool`, `GTNull`.
 
 ```json
@@ -422,7 +422,7 @@ types the Nuke library already consumes are not in the SDK at all: `ThreeDUrlArt
 `BlobArtifact`, and `GenericArtifact` are structurally identical, all carrying a single
 `value`, so the class name is the only discriminator.
 
-14 representative shapes, all landing in the seven-member set:
+14 representative shapes, all landing in the eight-member set:
 
 ```
 GTImage    <- ImageUrlArtifact, static server URL          [url/png]
@@ -461,6 +461,10 @@ Rules:
   `GTText`, whatever the parameter declared, so `GTImage`, `GTMovie`, and `GTFile` never arrive
   with an empty `sources`.
 - **Sequences are source count, not a host type**, so sequence support costs no version bump.
+- **Int and float are separate types**, because Nuke's Int_Knob and Double_Knob are separate
+  knobs and a knob built from "a number" is neither. A `float` declaration outranks a whole
+  number sitting in it, so a knob built from `type` survives the next value; an `int`
+  declaration does not outrank a real float value, which would be truncated silently.
 - **`engine_type` is diagnostic only** and must never be branched on.
 
 ## Versioning
@@ -473,6 +477,12 @@ additive change safety is real rather than aspirational.
 
 Bumps: removing or renaming a verb, event, field, host type, or source kind, or changing
 the meaning of one.
+
+`GTNumber` was nonetheless split into `GTInt` and `GTFloat` at version 1 rather than at 2. The
+policy above governs a bound surface and none is bound: no contract snapshot is recorded and no
+plugin binary ships this vocabulary. Negotiating both would have cost a per-connection value-type
+table and two normalizers, for a support window whose only client rebuilds weekly. Once a snapshot
+exists that door is closed.
 
 `SUPPORTED_PROTOCOL_VERSIONS` is the support window. Studios keep plugin binaries in
 service for years, so entries leave on a stated schedule.

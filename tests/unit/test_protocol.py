@@ -82,7 +82,8 @@ def test_value_type_wire_strings_are_exactly_these() -> None:
     assert protocol.ValueType.MOVIE == "GTMovie"
     assert protocol.ValueType.FILE == "GTFile"
     assert protocol.ValueType.TEXT == "GTText"
-    assert protocol.ValueType.NUMBER == "GTNumber"
+    assert protocol.ValueType.INT == "GTInt"
+    assert protocol.ValueType.FLOAT == "GTFloat"
     assert protocol.ValueType.BOOL == "GTBool"
     assert protocol.ValueType.NULL == "GTNull"
 

@@ -61,11 +61,14 @@ class ExecutionState:
 
 # Image sequences use multiple sources rather than a separate value type.
 class ValueType:
+    """``INT`` and ``FLOAT`` are separate members because Nuke's Int_Knob and Double_Knob are."""
+
     IMAGE = "GTImage"
     MOVIE = "GTMovie"
     FILE = "GTFile"
     TEXT = "GTText"
-    NUMBER = "GTNumber"
+    INT = "GTInt"
+    FLOAT = "GTFloat"
     BOOL = "GTBool"
     NULL = "GTNull"
 
@@ -75,7 +78,8 @@ VALUE_TYPES = (
     ValueType.MOVIE,
     ValueType.FILE,
     ValueType.TEXT,
-    ValueType.NUMBER,
+    ValueType.INT,
+    ValueType.FLOAT,
     ValueType.BOOL,
     ValueType.NULL,
 )

@@ -44,8 +44,8 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
     "VideoUrlArtifact": ValueType.MOVIE,
     "str": ValueType.TEXT,
     "string": ValueType.TEXT,
-    "int": ValueType.NUMBER,
-    "float": ValueType.NUMBER,
+    "int": ValueType.INT,
+    "float": ValueType.FLOAT,
     "bool": ValueType.BOOL,
 }
 
@@ -68,6 +68,13 @@ def value_type_for_engine_type(engine_type: str | None) -> str:
     if engine_type.endswith("Artifact"):
         return ValueType.FILE
     return ValueType.TEXT
+
+
+def _numeric_value_type(value: int | float, declared_engine_type: str | None) -> str:
+    """A float declaration outranks an int value, so a knob built for 0.5 survives holding 4."""
+    if isinstance(value, float) or value_type_for_engine_type(declared_engine_type) == ValueType.FLOAT:
+        return ValueType.FLOAT
+    return ValueType.INT
 
 
 def _extension_of(locator: str) -> str | None:
@@ -193,7 +200,7 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
         return _descriptor(ValueType.BOOL, [], engine_type, value)
 
     if isinstance(value, (int, float)):
-        return _descriptor(ValueType.NUMBER, [], engine_type, value)
+        return _descriptor(_numeric_value_type(value, declared_engine_type), [], engine_type, value)
 
     if isinstance(value, bytes):
         return _descriptor(
@@ -282,6 +289,9 @@ def _normalize_sequence(items: list[Any], declared_engine_type: str | None, engi
         if not sources:
             return _sourceless_descriptor(ValueType.FILE, engine_type)
         return _descriptor(ValueType.FILE, sources, engine_type)
+    # Ints beside floats are one numeric knob, not a type conflict.
+    if set(value_types) == {ValueType.INT, ValueType.FLOAT}:
+        return _descriptor(ValueType.FLOAT, sources, engine_type)
     if len(set(value_types)) > 1:
         logger.warning("Mixed host types in one list (%s); reporting GTFile.", sorted(set(value_types)))
         return _descriptor(ValueType.FILE, sources, engine_type)
