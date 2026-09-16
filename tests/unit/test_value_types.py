@@ -236,10 +236,19 @@ def test_unknown_artifact_class_is_classified_by_extension() -> None:
     assert descriptor["sources"][0]["format"] == "jpg"
 
 
-@pytest.mark.parametrize("extension", ["mp4", "mov", "mxf", "mpg", "webm", "r3d"])
+@pytest.mark.parametrize(
+    "extension",
+    ["mp4", "mov", "avi", "mkv", "webm", "m4v", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"],
+)
 def test_a_movie_container_nuke_reads_is_a_movie(extension: str) -> None:
     descriptor = value_types.normalize_value(f"/show/cut.{extension}", "str")
     assert descriptor["value_type"] == ValueType.MOVIE
+
+
+def test_an_ambiguous_container_stays_a_file_until_a_declared_type_says_otherwise() -> None:
+    """MXF wraps audio-only essence too, so the extension alone cannot promise a movie."""
+    assert value_types.normalize_value("/show/master.mxf", "str")["value_type"] == ValueType.FILE
+    assert value_types.normalize_value("/show/master.mxf", "VideoArtifact")["value_type"] == ValueType.MOVIE
 
 
 def test_locator_kinds_are_explicit() -> None:

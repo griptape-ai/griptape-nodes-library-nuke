@@ -21,9 +21,10 @@ from nuke_host_api.protocol import SourceKind, ValueType
 logger = logging.getLogger("griptape_nodes")
 
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "exr", "tif", "tiff", "webp", "dpx", "tga", "hdr"})
-# Unlisted Nuke-readable containers fall back to GTFile instead of GTMovie.
+# MXF is deliberately absent: it also wraps audio-only essence, so it stays GTFile unless a
+# declared movie type says otherwise.
 VIDEO_EXTENSIONS = frozenset(
-    {"mp4", "mov", "avi", "mkv", "webm", "m4v", "mxf", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"}
+    {"mp4", "mov", "avi", "mkv", "webm", "m4v", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"}
 )
 
 # Control parameters carry no data and are omitted from descriptions and events.
