@@ -238,7 +238,6 @@ def test_unknown_artifact_class_is_classified_by_extension() -> None:
 
 @pytest.mark.parametrize("extension", ["mp4", "mov", "mxf", "mpg", "webm", "r3d"])
 def test_a_movie_container_nuke_reads_is_a_movie(extension: str) -> None:
-    """An unlisted container reads as GTFile, which builds a host a file knob for a plate."""
     descriptor = value_types.normalize_value(f"/show/cut.{extension}", "str")
     assert descriptor["value_type"] == ValueType.MOVIE
 

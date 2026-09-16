@@ -21,7 +21,7 @@ from nuke_host_api.protocol import SourceKind, ValueType
 logger = logging.getLogger("griptape_nodes")
 
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "exr", "tif", "tiff", "webp", "dpx", "tga", "hdr"})
-# Nuke reads more containers than a web player does, and an unlisted one reads as GTFile.
+# Unlisted Nuke-readable containers fall back to GTFile instead of GTMovie.
 VIDEO_EXTENSIONS = frozenset(
     {"mp4", "mov", "avi", "mkv", "webm", "m4v", "mxf", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"}
 )
