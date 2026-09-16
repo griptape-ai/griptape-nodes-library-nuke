@@ -70,7 +70,7 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         assert {declared["parameter"] for declared in result.inputs} == {"topic", "plate"}
         assert {declared["parameter"] for declared in result.outputs} == {"was_successful", "mixed_audio"}
-        assert set(result.inputs[0]) == {"node", "parameter", "name", "type", "default", "tooltip", "settable"}
+        assert set(result.inputs[0]) == {"node", "parameter", "name", "type", "default_value", "tooltip", "settable"}
 
     async def test_current_values_come_back_for_both_sides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The whole point of the verb: knobs can be built and initialized from one reply."""
@@ -83,7 +83,7 @@ class TestLoadWorkflow:
         assert result.output_values["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert result.unavailable == []
 
-    async def test_values_use_the_same_descriptor_shape_as_a_declared_default(
+    async def test_a_declared_default_is_a_value_while_a_live_value_is_a_descriptor(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         use_engine(monkeypatch, load_responses())
@@ -93,7 +93,8 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         keys = {"value_type", "value", "sources", "colorspace", "engine_type"}
         assert set(result.input_values["Start Flow"]["topic"]) == keys
-        assert set(result.inputs[0]["default"]) == keys
+        topic = next(declared for declared in result.inputs if declared["parameter"] == "topic")
+        assert topic["default_value"] == "a quiet harbour at dusk"
 
     async def test_control_parameters_reach_neither_the_declarations_nor_the_values(
         self, monkeypatch: pytest.MonkeyPatch
