@@ -89,6 +89,9 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "choices": list(choices) if isinstance(choices, list) else [],
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
+        # Only the whole-parameter flag. `hide_property` hides the editor's value widget while
+        # leaving a connectable port, and a host that builds knobs has no equivalent of that.
+        "hidden": bool(ui_options.get("hide", False)),
     }
 
 

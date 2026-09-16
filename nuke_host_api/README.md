@@ -215,8 +215,8 @@ next call; the other two are not the host's doing. Telling a host to save a work
 saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
 because then there is nothing to check against the allow-list.
 
-`NukeDescribeWorkflowRequest` carries each parameter's `default_value`, `choices`, `tooltip`, and
-`settable` alongside its type. The default is the value a host sets a knob to, with macros resolved;
+`NukeDescribeWorkflowRequest` carries each parameter's `default_value`, `choices`, `tooltip`,
+`settable`, and `hidden` alongside its type. The default is the value a host sets a knob to, with macros resolved;
 `kind`, `format`, and `is_pattern` stay on the `input_values` descriptors. `choices` is what an
 `Enumeration_Knob` offers.
 
@@ -598,11 +598,13 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 - **Registry entries can be stale.** `NukeListWorkflowsRequest` checks that a workflow's
   file still exists, because the registry keeps entries for deleted files and its own
   `is_saved` flag stays true for them.
-- **Parameter metadata exposes only `default_value`, `choices`, `tooltip`, and `settable`.**
+- **Parameter metadata exposes only `default_value`, `choices`, `tooltip`, `settable`, and
+  `hidden`.**
   The engine also carries slider ranges (`range_slider`, `step`), multi-select dropdowns
-  (`multi_options`), and `multiline` in `ui_options`. Passing that dict through raw would bind
-  plugin authors to editor vocabulary, so a Nuke knob's metadata must be narrowed into named
-  fields. Such fields require no version bump. Multi-select parameters report no choices.
+  (`multi_options`), `multiline`, and `hide_property` in `ui_options`. Passing that dict through raw
+  would bind plugin authors to editor vocabulary, so a Nuke knob's metadata must be narrowed into
+  named fields. Such fields require no version bump. Multi-select parameters report no choices, and
+  a parameter hidden only in the editor's property panel reports `hidden: false`.
 - **A host addresses inputs by node name.** Node names are editable in the canvas, so
   renaming a start node breaks a host's saved knob mapping. Re-describing on connect is the
   only mitigation.

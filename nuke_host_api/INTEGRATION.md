@@ -441,6 +441,7 @@ Parameter descriptor fields:
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
+| `hidden` | True when the author hid the parameter in the editor. Still declared, still settable |
 
 `default_value` is a plain value, not a descriptor: a scalar for a scalar parameter, a resolved path or
 URL for one that points at bytes, a list of them for a sequence, and `null` when there is nothing a
@@ -456,8 +457,19 @@ repopulate a dropdown while the graph holds an older value, so a value outside `
 read back, and setting one the engine rejects is reported in `rejected_inputs`. Multi-select
 parameters report no choices.
 
+`hidden` reports what the author did, not what a host must do. A hidden parameter is still
+declared, still readable, and still settable, so it is reported rather than dropped: a workflow can
+carry one deliberately for a host to drive, and omitting it here would leave no way to address it.
+Build it as a hidden or advanced knob, or leave it off the panel and set it programmatically.
+
+`hidden` covers the editor's whole-parameter flag only. A parameter the author hid from the
+editor's property panel while leaving its port connectable reports `hidden: false`, because a knob
+is the only way a host can expose a parameter at all, so there is nothing for that state to mean
+here.
+
 Every field is always present. A parameter the engine gave no metadata for reports a `null`
-default, no choices, an empty tooltip, and `settable: true` rather than omitting keys.
+default, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
+keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
 value exists; a descriptor's `value_type` is built from the value itself. They differ in one
@@ -498,7 +510,8 @@ arrives. Never branch on the declared type at runtime.
       "default_value": "a quiet harbour at dusk",
       "choices": [],
       "tooltip": "What the shot is about.",
-      "settable": true
+      "settable": true,
+      "hidden": false
     },
     {
       "node": "Start Flow",
@@ -508,7 +521,8 @@ arrives. Never branch on the declared type at runtime.
       "default_value": "1024x1024",
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
       "tooltip": "",
-      "settable": true
+      "settable": true,
+      "hidden": false
     },
     {
       "node": "Start Flow",
@@ -518,7 +532,8 @@ arrives. Never branch on the declared type at runtime.
       "default_value": 23.976,
       "choices": [],
       "tooltip": "",
-      "settable": true
+      "settable": true,
+      "hidden": false
     }
   ],
   "outputs": [
@@ -530,7 +545,8 @@ arrives. Never branch on the declared type at runtime.
       "default_value": null,
       "choices": [],
       "tooltip": "",
-      "settable": true
+      "settable": true,
+      "hidden": false
     },
     {
       "node": "End Flow",
@@ -540,7 +556,8 @@ arrives. Never branch on the declared type at runtime.
       "default_value": null,
       "choices": [],
       "tooltip": "",
-      "settable": true
+      "settable": true,
+      "hidden": false
     },
     {
       "node": "End Flow",
@@ -550,7 +567,8 @@ arrives. Never branch on the declared type at runtime.
       "default_value": null,
       "choices": [],
       "tooltip": "",
-      "settable": true
+      "settable": true,
+      "hidden": false
     }
   ]
 }
@@ -614,7 +632,8 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "default_value": "a quiet harbour at dusk",
       "choices": [],
       "tooltip": "What the shot is about.",
-      "settable": true
+      "settable": true,
+      "hidden": false
     }
   ],
   "outputs": [
@@ -626,7 +645,8 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "default_value": null,
       "choices": [],
       "tooltip": "",
-      "settable": true
+      "settable": true,
+      "hidden": false
     }
   ],
   "input_values": {
