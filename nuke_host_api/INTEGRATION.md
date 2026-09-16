@@ -460,8 +460,10 @@ parameters report no choices.
 A hidden parameter is still declared, readable, and settable. Build it as a hidden or advanced
 knob, or leave it off the panel and set it programmatically.
 
-`hidden` excludes `hide_property`, which hides the editor's value widget but leaves its port
-connectable. Such a parameter reports `hidden: false` because a knob cannot represent that state.
+`hidden` is the parameter's own flag. It excludes `hide_property`, which hides the editor's value
+widget but leaves the port connectable, and it excludes a hidden parameter group, which the
+workflow shape does not describe at all. Either reports `hidden: false`, so read the field as "the
+author hid this parameter" rather than "the editor shows nothing here".
 
 Every field is always present. A parameter the engine gave no metadata for reports a `null`
 default, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting

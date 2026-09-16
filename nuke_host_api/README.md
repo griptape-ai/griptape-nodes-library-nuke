@@ -603,8 +603,9 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   The engine also carries slider ranges (`range_slider`, `step`), multi-select dropdowns
   (`multi_options`), `multiline`, and `hide_property` in `ui_options`. Passing that dict through raw
   would bind plugin authors to editor vocabulary, so a Nuke knob's metadata must be narrowed into
-  named fields. Such fields require no version bump. Multi-select parameters report no choices;
-  `hide_property` does not set `hidden`.
+  named fields. Such fields require no version bump. Multi-select parameters report no choices, and
+  neither `hide_property` nor a hidden parameter group sets `hidden`: a group's own flag lives on an
+  element the shape does not emit, so this layer cannot see it.
 - **A host addresses inputs by node name.** Node names are editable in the canvas, so
   renaming a start node breaks a host's saved knob mapping. Re-describing on connect is the
   only mitigation.
