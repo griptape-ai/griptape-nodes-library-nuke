@@ -216,10 +216,8 @@ saved sends it down the wrong recovery path. None of the three fires when no inp
 because then there is nothing to check against the allow-list.
 
 `NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
-alongside its type, because a host builds knobs from this and a knob with no default has
-nothing to initialize to. The default is one plain value with its macros already resolved. A
-locator's `kind`, `format`, and `is_pattern` remain on the value descriptors in `input_values`,
-which a fresh load fills with the same defaults.
+alongside its type. The default is the value a host sets a knob to, with macros resolved;
+`kind`, `format`, and `is_pattern` stay on the `input_values` descriptors.
 
 ### 4. Read and set declared parameter values
 

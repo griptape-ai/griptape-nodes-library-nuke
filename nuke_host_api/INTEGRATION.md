@@ -442,11 +442,12 @@ Parameter descriptor fields:
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 
 `default` is a plain value, not a descriptor: a scalar for a scalar parameter, a resolved path or
-URL for one that points at bytes, a list of them for a sequence, and `null` when the author set
-none or the default is engine-held bytes. Project macros are resolved before it is sent, since
-only the engine can expand `{outputs}`. What a bare value cannot carry, a source's `kind`,
-`format`, and `is_pattern`, is on `input_values` instead, which a fresh load fills with these same
-defaults.
+URL for one that points at bytes, a list of them for a sequence, and `null` when there is nothing a
+host can open. `null` covers three cases a bare value cannot tell apart: the author set no default,
+the default is bytes the engine never wrote out, and the default is a macro that did not resolve.
+A frame a host cannot open is dropped from a sequence rather than sent as a `null` inside the list.
+What a bare value cannot carry, a source's `kind`, `format`, and `is_pattern`, is on `input_values`
+instead, which a fresh load fills with these same defaults.
 
 Every field is always present. A parameter the engine gave no metadata for reports a `null`
 default, an empty tooltip, and `settable: true` rather than omitting keys.

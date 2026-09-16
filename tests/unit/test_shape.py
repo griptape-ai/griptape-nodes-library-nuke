@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from nuke_host_api import shape
-from nuke_host_api.protocol import VALUE_TYPES, ValueType
+from nuke_host_api.protocol import VALUE_TYPES, SourceKind, ValueType
 from tests.unit.host_api_fakes import SHAPE
 
 
@@ -60,6 +60,80 @@ class TestDeclaredParameters:
         """Nuke's TCL layer reads a backslash as an escape."""
         section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "C:\\show\\plate.exr"}}}
         assert shape.declared_parameters(section)[0]["default"] == "C:/show/plate.exr"
+
+    def test_a_sequence_default_keeps_one_locator_per_frame(self) -> None:
+        section = {
+            "Start Flow": {
+                "plate": {
+                    "type": "Sequence",
+                    "default_value": ["/show/plate.0001.exr", "/show/plate.0002.exr"],
+                }
+            }
+        }
+        assert shape.declared_parameters(section)[0]["default"] == [
+            "/show/plate.0001.exr",
+            "/show/plate.0002.exr",
+        ]
+
+    def test_a_default_that_names_nothing_openable_is_null(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An unresolved macro is a template and inline bytes never left the engine.
+
+        Either would reach a host as a string it cannot open, indistinguishable from a real path.
+        """
+
+        def unresolvable(value: Any, declared: Any = None) -> dict[str, Any]:  # noqa: ARG001
+            return {
+                "value_type": ValueType.IMAGE,
+                "value": None,
+                "sources": [
+                    {
+                        "kind": SourceKind.MACRO,
+                        "value": "{VAR}/plate.exr",
+                        "format": "exr",
+                        "width": None,
+                        "height": None,
+                        "byte_count": None,
+                        "is_pattern": False,
+                        "raw": "{VAR}/plate.exr",
+                    }
+                ],
+                "colorspace": None,
+                "engine_type": "str",
+            }
+
+        monkeypatch.setattr(shape, "normalize_value", unresolvable)
+        section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "{VAR}/plate.exr"}}}
+
+        assert shape.declared_parameters(section)[0]["default"] is None
+
+    def test_a_sequence_default_drops_frames_a_host_cannot_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A null in the middle of a frame list would land in a per-frame knob as a literal null."""
+
+        def mixed(value: Any, declared: Any = None) -> dict[str, Any]:  # noqa: ARG001
+            def source(kind: str, locator: str | None) -> dict[str, Any]:
+                return {
+                    "kind": kind,
+                    "value": locator,
+                    "format": "png",
+                    "width": None,
+                    "height": None,
+                    "byte_count": None,
+                    "is_pattern": False,
+                    "raw": None,
+                }
+
+            return {
+                "value_type": ValueType.IMAGE,
+                "value": None,
+                "sources": [source(SourceKind.URL, "http://x/one.png"), source(SourceKind.INLINE, None)],
+                "colorspace": None,
+                "engine_type": "ListArtifact",
+            }
+
+        monkeypatch.setattr(shape, "normalize_value", mixed)
+        section = {"Start Flow": {"plate": {"type": "Sequence", "default_value": ["http://x/one.png", b"\x89PNG"]}}}
+
+        assert shape.declared_parameters(section)[0]["default"] == "http://x/one.png"
 
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}

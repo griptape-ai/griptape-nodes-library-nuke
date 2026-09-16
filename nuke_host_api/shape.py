@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 
+from nuke_host_api.protocol import SourceKind
 from nuke_host_api.value_types import CONTROL_PARAM_TYPE, normalize_value, value_type_for_engine_type
 
 if TYPE_CHECKING:
@@ -89,11 +90,18 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
     }
 
 
+# Only these kinds name something a knob can be set to. An unresolved macro is a template and
+# inline bytes never left the engine, so neither is a default a host can use.
+_OPENABLE_SOURCE_KINDS = frozenset({SourceKind.PATH, SourceKind.URL})
+
+
 def _default_value(parameter: dict) -> Any:
     descriptor = normalize_value(parameter.get("default_value"), parameter.get("type"))
-    locators = [source["value"] for source in descriptor["sources"]]
-    if not locators:
+    if not descriptor["sources"]:
         return descriptor["value"]
+    locators = [source["value"] for source in descriptor["sources"] if source["kind"] in _OPENABLE_SOURCE_KINDS]
+    if not locators:
+        return None
     # A sequence default has a locator per frame and no single path to collapse them into.
     return locators[0] if len(locators) == 1 else locators
 
