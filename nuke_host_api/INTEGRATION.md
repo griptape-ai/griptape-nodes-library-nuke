@@ -437,11 +437,11 @@ Parameter descriptor fields:
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
 | `type` | Always one of the eight value types |
-| `default` | The workflow author's default, as one plain value with its macros already resolved. Initialize the knob to this |
+| `default_value` | The workflow author's default, as one plain value with its macros already resolved. Initialize the knob to this |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 
-`default` is a plain value, not a descriptor: a scalar for a scalar parameter, a resolved path or
+`default_value` is a plain value, not a descriptor: a scalar for a scalar parameter, a resolved path or
 URL for one that points at bytes, a list of them for a sequence, and `null` when there is nothing a
 host can open. `null` covers three cases a bare value cannot tell apart: the author set no default,
 the default is bytes the engine never wrote out, and the default is a macro that did not resolve.
@@ -488,7 +488,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "topic",
       "name": "Topic",
       "type": "GTText",
-      "default": "a quiet harbour at dusk",
+      "default_value": "a quiet harbour at dusk",
       "tooltip": "What the shot is about.",
       "settable": true
     }
@@ -499,7 +499,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "was_successful",
       "name": "was_successful",
       "type": "GTBool",
-      "default": null,
+      "default_value": null,
       "tooltip": "",
       "settable": true
     },
@@ -508,7 +508,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "result_details",
       "name": "result_details",
       "type": "GTText",
-      "default": null,
+      "default_value": null,
       "tooltip": "",
       "settable": true
     },
@@ -517,7 +517,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "summary",
       "name": "summary",
       "type": "GTText",
-      "default": null,
+      "default_value": null,
       "tooltip": "",
       "settable": true
     }
@@ -561,9 +561,9 @@ workflows; neither is refused too.
 
 Four fields separate declarations, which are fixed for the workflow, from values, which change on every run. Their shapes match the describe and bulk-read verbs.
 
-**Initialize knobs from `input_values`, not from a descriptor's `default`.** `default` is the
+**Initialize knobs from `input_values`, not from `default_value`.** `default_value` is the
 workflow author's value; `input_values` is what the graph currently holds. They differ for any
-workflow whose inputs have been touched. `default` is what a reset-to-default button sends.
+workflow whose inputs have been touched. `default_value` is what a reset-to-default button sends.
 
 ```json
 { "workflow_id": "nuke_api_smoke" }
@@ -580,7 +580,7 @@ workflow whose inputs have been touched. `default` is what a reset-to-default bu
       "parameter": "topic",
       "name": "Topic",
       "type": "GTText",
-      "default": "a quiet harbour at dusk",
+      "default_value": "a quiet harbour at dusk",
       "tooltip": "What the shot is about.",
       "settable": true
     }
@@ -591,7 +591,7 @@ workflow whose inputs have been touched. `default` is what a reset-to-default bu
       "parameter": "was_successful",
       "name": "was_successful",
       "type": "GTBool",
-      "default": null,
+      "default_value": null,
       "tooltip": "",
       "settable": true
     }

@@ -84,7 +84,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         # `node` is separate; prefixing it would repeat the node in knob labels.
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
-        "default": _default_value(parameter),
+        "default_value": _default_value(parameter),
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
     }

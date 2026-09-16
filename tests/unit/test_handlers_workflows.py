@@ -81,11 +81,11 @@ class TestDescribeWorkflow:
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
         parameters = {declared["parameter"]: declared for declared in result.inputs}
 
-        assert parameters["topic"]["default"] == "a quiet harbour at dusk"
+        assert parameters["topic"]["default_value"] == "a quiet harbour at dusk"
         assert parameters["topic"]["tooltip"] == "What the shot is about."
         assert parameters["topic"]["settable"] is True
 
-        assert parameters["plate"]["default"] is None
+        assert parameters["plate"]["default_value"] is None
         assert parameters["plate"]["settable"] is False
 
     async def test_a_parameter_the_engine_gave_no_metadata_for_still_describes_completely(
@@ -101,7 +101,7 @@ class TestDescribeWorkflow:
 
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
         bare = next(declared for declared in result.outputs if declared["parameter"] == "was_successful")
-        assert bare["default"] is None
+        assert bare["default_value"] is None
         assert bare["tooltip"] == ""
         assert bare["settable"] is True
 

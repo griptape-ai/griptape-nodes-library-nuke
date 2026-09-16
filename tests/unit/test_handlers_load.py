@@ -70,7 +70,7 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         assert {declared["parameter"] for declared in result.inputs} == {"topic", "plate"}
         assert {declared["parameter"] for declared in result.outputs} == {"was_successful", "mixed_audio"}
-        assert set(result.inputs[0]) == {"node", "parameter", "name", "type", "default", "tooltip", "settable"}
+        assert set(result.inputs[0]) == {"node", "parameter", "name", "type", "default_value", "tooltip", "settable"}
 
     async def test_current_values_come_back_for_both_sides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The whole point of the verb: knobs can be built and initialized from one reply."""
@@ -94,7 +94,7 @@ class TestLoadWorkflow:
         keys = {"value_type", "value", "sources", "colorspace", "engine_type"}
         assert set(result.input_values["Start Flow"]["topic"]) == keys
         topic = next(declared for declared in result.inputs if declared["parameter"] == "topic")
-        assert topic["default"] == "a quiet harbour at dusk"
+        assert topic["default_value"] == "a quiet harbour at dusk"
 
     async def test_control_parameters_reach_neither_the_declarations_nor_the_values(
         self, monkeypatch: pytest.MonkeyPatch

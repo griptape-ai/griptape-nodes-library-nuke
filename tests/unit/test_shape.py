@@ -54,12 +54,12 @@ class TestDeclaredParameters:
     )
     def test_a_default_is_one_plain_value(self, parameter: dict, expected: Any) -> None:
         declared = shape.declared_parameters({"Start Flow": {"p": parameter}})[0]
-        assert declared["default"] == expected
+        assert declared["default_value"] == expected
 
     def test_a_windows_default_path_is_slash_normalized(self) -> None:
         """Nuke's TCL layer reads a backslash as an escape."""
         section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "C:\\show\\plate.exr"}}}
-        assert shape.declared_parameters(section)[0]["default"] == "C:/show/plate.exr"
+        assert shape.declared_parameters(section)[0]["default_value"] == "C:/show/plate.exr"
 
     def test_a_sequence_default_keeps_one_locator_per_frame(self) -> None:
         section = {
@@ -70,7 +70,7 @@ class TestDeclaredParameters:
                 }
             }
         }
-        assert shape.declared_parameters(section)[0]["default"] == [
+        assert shape.declared_parameters(section)[0]["default_value"] == [
             "/show/plate.0001.exr",
             "/show/plate.0002.exr",
         ]
@@ -104,7 +104,7 @@ class TestDeclaredParameters:
         monkeypatch.setattr(shape, "normalize_value", unresolvable)
         section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "{VAR}/plate.exr"}}}
 
-        assert shape.declared_parameters(section)[0]["default"] is None
+        assert shape.declared_parameters(section)[0]["default_value"] is None
 
     def test_a_sequence_default_drops_frames_a_host_cannot_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A null in the middle of a frame list would land in a per-frame knob as a literal null."""
@@ -133,7 +133,7 @@ class TestDeclaredParameters:
         monkeypatch.setattr(shape, "normalize_value", mixed)
         section = {"Start Flow": {"plate": {"type": "Sequence", "default_value": ["http://x/one.png", b"\x89PNG"]}}}
 
-        assert shape.declared_parameters(section)[0]["default"] == "http://x/one.png"
+        assert shape.declared_parameters(section)[0]["default_value"] == "http://x/one.png"
 
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}
