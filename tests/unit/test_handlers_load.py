@@ -83,9 +83,10 @@ class TestLoadWorkflow:
         assert result.output_values["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert result.unavailable == []
 
-    async def test_values_use_the_same_descriptor_shape_as_a_declared_default(
+    async def test_a_declared_default_is_a_value_while_a_live_value_is_a_descriptor(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """A default initializes a knob, so it is the value. A live value also reports where its bytes are."""
         use_engine(monkeypatch, load_responses())
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
@@ -93,7 +94,8 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         keys = {"value_type", "value", "sources", "colorspace", "engine_type"}
         assert set(result.input_values["Start Flow"]["topic"]) == keys
-        assert set(result.inputs[0]["default"]) == keys
+        topic = next(declared for declared in result.inputs if declared["parameter"] == "topic")
+        assert topic["default"] == "a quiet harbour at dusk"
 
     async def test_control_parameters_reach_neither_the_declarations_nor_the_values(
         self, monkeypatch: pytest.MonkeyPatch

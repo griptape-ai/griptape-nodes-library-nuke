@@ -40,6 +40,28 @@ class TestDeclaredParameters:
         labels = {declared["parameter"]: declared["name"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert labels == {"topic": "Topic", "plate": "plate"}
 
+    @pytest.mark.parametrize(
+        ("parameter", "expected"),
+        [
+            ({"type": "str", "default_value": "a quiet harbour"}, "a quiet harbour"),
+            ({"type": "int", "default_value": 24}, 24),
+            ({"type": "float", "default_value": 23.976}, 23.976),
+            ({"type": "bool", "default_value": True}, True),
+            ({"type": "ImageUrlArtifact", "default_value": None}, None),
+            ({"type": "ImageUrlArtifact", "default_value": "/show/plate.exr"}, "/show/plate.exr"),
+            ({"type": "str"}, None),
+        ],
+    )
+    def test_a_default_is_one_plain_value(self, parameter: dict, expected: Any) -> None:
+        """A knob is initialized from a value, so the default is the value and not a descriptor."""
+        declared = shape.declared_parameters({"Start Flow": {"p": parameter}})[0]
+        assert declared["default"] == expected
+
+    def test_a_windows_default_path_is_slash_normalized(self) -> None:
+        """Nuke's TCL layer reads a backslash as an escape."""
+        section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "C:\\show\\plate.exr"}}}
+        assert shape.declared_parameters(section)[0]["default"] == "C:/show/plate.exr"
+
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert types == {"topic": ValueType.TEXT, "plate": ValueType.IMAGE}

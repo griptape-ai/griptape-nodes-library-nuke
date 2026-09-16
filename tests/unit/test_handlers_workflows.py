@@ -19,7 +19,6 @@ from nuke_host_api.events import (
     NukeListWorkflowsResultSuccess,
 )
 from nuke_host_api.handlers import handle_describe_workflow, handle_list_workflows
-from nuke_host_api.protocol import ValueType
 from tests.unit.host_api_fakes import SHAPE, WORKFLOW_TABLE, use_engine
 
 
@@ -76,8 +75,8 @@ class TestDescribeWorkflow:
     ) -> None:
         """A host builds knobs from this, so a parameter with no default has nothing to initialize to.
 
-        The default arrives as a normalized descriptor rather than a raw engine value, so a
-        parameter's default and its live value are the same shape.
+        The default is the author's value with its macros resolved, because that is what a knob is
+        set to.
         """
         use_engine(monkeypatch, _registry(WORKFLOW_TABLE))
 
@@ -86,11 +85,11 @@ class TestDescribeWorkflow:
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
         parameters = {declared["parameter"]: declared for declared in result.inputs}
 
-        assert parameters["topic"]["default"]["value_type"] == ValueType.TEXT
+        assert parameters["topic"]["default"] == "a quiet harbour at dusk"
         assert parameters["topic"]["tooltip"] == "What the shot is about."
         assert parameters["topic"]["settable"] is True
 
-        assert parameters["plate"]["default"]["value_type"] == ValueType.NULL
+        assert parameters["plate"]["default"] is None
         assert parameters["plate"]["settable"] is False
 
     async def test_a_parameter_the_engine_gave_no_metadata_for_still_describes_completely(
@@ -106,7 +105,7 @@ class TestDescribeWorkflow:
 
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
         bare = next(declared for declared in result.outputs if declared["parameter"] == "was_successful")
-        assert bare["default"]["value_type"] == ValueType.NULL
+        assert bare["default"] is None
         assert bare["tooltip"] == ""
         assert bare["settable"] is True
 

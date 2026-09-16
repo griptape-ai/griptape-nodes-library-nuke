@@ -208,7 +208,9 @@ class TestDescribe:
                 f"{addressed} label must not be prefixed with the node, which is already its own field"
             )
             assert declared["type"] in VALUE_TYPES, f"{addressed} escaped the closed set with {declared['type']!r}"
-            assert declared["default"]["value_type"] in VALUE_TYPES, f"{addressed} default is not a descriptor"
+            assert not isinstance(declared["default"], dict), (
+                f"{addressed} default must be a plain value, not a descriptor"
+            )
             assert isinstance(declared["tooltip"], str)
             assert isinstance(declared["settable"], bool)
 

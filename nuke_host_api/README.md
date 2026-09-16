@@ -217,8 +217,10 @@ because then there is nothing to check against the allow-list.
 
 `NukeDescribeWorkflowRequest` carries each parameter's `default`, `tooltip`, and `settable`
 alongside its type, because a host builds knobs from this and a knob with no default has
-nothing to initialize to. The default is a value descriptor, so a parameter's default and its
-live value are one shape.
+nothing to initialize to. The default is one plain value with its macros already resolved, since a
+knob is set from a value; what a bare value cannot carry, a locator's `kind`, `format`, and
+`is_pattern`, is on the value descriptors in `input_values`, which a fresh load fills with those
+same defaults.
 
 ### 4. Read and set declared parameter values
 
