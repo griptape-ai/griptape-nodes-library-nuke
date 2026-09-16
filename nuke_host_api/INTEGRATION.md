@@ -435,7 +435,7 @@ Parameter descriptor fields:
 |---|---|
 | `node` | Node name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
-| `name` | The parameter's own display label, never prefixed with the node. Empty of an author label, it is `parameter` |
+| `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
 | `type` | Always one of the eight value types |
 | `default` | The workflow author's default, as a value descriptor. Initialize the knob to this |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |

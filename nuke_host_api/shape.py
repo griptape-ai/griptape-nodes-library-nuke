@@ -80,7 +80,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
     return {
         "node": node_name,
         "parameter": parameter_name,
-        # The node is already its own field, so prefixing it here would label every knob twice.
+        # `node` is separate; prefixing it would repeat the node in knob labels.
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
         "default": normalize_value(parameter.get("default_value"), parameter.get("type")),

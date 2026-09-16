@@ -37,7 +37,6 @@ class TestDeclaredParameters:
         assert declared["parameter"] == "topic"
 
     def test_a_label_is_the_parameters_own_name_not_the_node_and_the_parameter(self) -> None:
-        """A knob sits under its node already, so a node-prefixed label names it twice."""
         labels = {declared["parameter"]: declared["name"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert labels == {"topic": "Topic", "plate": "plate"}
 
