@@ -401,7 +401,7 @@ engine's instruction that execution event listeners stay cheap and non-blocking.
 
 ## Value contract
 
-Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTNumber`,
+Closed set, eight members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
 `GTBool`, `GTNull`.
 
 ```json
@@ -422,7 +422,7 @@ types the Nuke library already consumes are not in the SDK at all: `ThreeDUrlArt
 `BlobArtifact`, and `GenericArtifact` are structurally identical, all carrying a single
 `value`, so the class name is the only discriminator.
 
-14 representative shapes, all landing in the seven-member set:
+14 representative shapes, all landing in the eight-member set:
 
 ```
 GTImage    <- ImageUrlArtifact, static server URL          [url/png]
@@ -461,6 +461,10 @@ Rules:
   `GTText`, whatever the parameter declared, so `GTImage`, `GTMovie`, and `GTFile` never arrive
   with an empty `sources`.
 - **Sequences are source count, not a host type**, so sequence support costs no version bump.
+- **Int and float are separate types**, because Nuke's Int_Knob and Double_Knob are separate
+  knobs and a knob built from "a number" is neither. A `float` declaration outranks a whole
+  number sitting in it, so a knob built from `type` survives the next value; an `int`
+  declaration does not outrank a real float value, which would be truncated silently.
 - **`engine_type` is diagnostic only** and must never be branched on.
 
 ## Versioning

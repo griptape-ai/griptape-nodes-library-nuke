@@ -34,12 +34,14 @@ const Protocol = (function () {
     "GTMovie",
     "GTFile",
     "GTText",
-    "GTNumber",
+    "GTInt",
+    "GTFloat",
     "GTBool",
     "GTNull",
   ];
   // Types that carry no sources: the descriptor reports the type, not the value.
-  const SCALAR_TYPES = ["GTText", "GTNumber", "GTBool", "GTNull"];
+  const SCALAR_TYPES = ["GTText", "GTInt", "GTFloat", "GTBool", "GTNull"];
+  const NUMERIC_TYPES = ["GTInt", "GTFloat"];
   const MEDIA_TYPES = ["GTImage", "GTMovie", "GTFile"];
   const PREVIEWABLE = { GTImage: "img", GTMovie: "video" };
 
@@ -48,6 +50,7 @@ const Protocol = (function () {
 
   const isTerminal = (executionState) => TERMINAL_EXECUTION_STATES.indexOf(executionState) !== -1;
   const isScalar = (valueType) => SCALAR_TYPES.indexOf(valueType) !== -1;
+  const isNumeric = (valueType) => NUMERIC_TYPES.indexOf(valueType) !== -1;
   const isMedia = (valueType) => MEDIA_TYPES.indexOf(valueType) !== -1;
 
   return {
@@ -59,12 +62,14 @@ const Protocol = (function () {
     KNOWN_NODE_STATES,
     KNOWN_VALUE_TYPES,
     SCALAR_TYPES,
+    NUMERIC_TYPES,
     MEDIA_TYPES,
     PREVIEWABLE,
     USABLE_PROJECT_STATUSES,
     usableProject,
     isTerminal,
     isScalar,
+    isNumeric,
     isMedia,
   };
 })();
