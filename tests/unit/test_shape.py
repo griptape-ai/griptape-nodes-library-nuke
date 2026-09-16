@@ -53,7 +53,6 @@ class TestDeclaredParameters:
         ],
     )
     def test_a_default_is_one_plain_value(self, parameter: dict, expected: Any) -> None:
-        """A knob is initialized from a value, so the default is the value and not a descriptor."""
         declared = shape.declared_parameters({"Start Flow": {"p": parameter}})[0]
         assert declared["default"] == expected
 

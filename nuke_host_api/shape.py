@@ -90,7 +90,6 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
 
 
 def _default_value(parameter: dict) -> Any:
-    """Normalize a default to resolve its macros, then hand back the one value a knob is set from."""
     descriptor = normalize_value(parameter.get("default_value"), parameter.get("type"))
     locators = [source["value"] for source in descriptor["sources"]]
     if not locators:

@@ -86,7 +86,6 @@ class TestLoadWorkflow:
     async def test_a_declared_default_is_a_value_while_a_live_value_is_a_descriptor(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A default initializes a knob, so it is the value. A live value also reports where its bytes are."""
         use_engine(monkeypatch, load_responses())
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))

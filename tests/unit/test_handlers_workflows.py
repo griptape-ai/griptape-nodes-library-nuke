@@ -73,11 +73,7 @@ class TestDescribeWorkflow:
     async def test_parameters_carry_the_authors_default_its_help_text_and_whether_it_may_be_set(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A host builds knobs from this, so a parameter with no default has nothing to initialize to.
-
-        The default is the author's value with its macros resolved, because that is what a knob is
-        set to.
-        """
+        """A host builds knobs from this, so a parameter with no default has nothing to initialize to."""
         use_engine(monkeypatch, _registry(WORKFLOW_TABLE))
 
         result = await handle_describe_workflow(NukeDescribeWorkflowRequest(workflow_id="wf1"))
