@@ -135,7 +135,9 @@
     return html`
       <div class="out">
         <div class="top">
-          <span class="clip grow">${param.name || paramKey(param.node, param.parameter)}</span>
+          <span class="clip grow" title=${paramKey(param.node, param.parameter)}
+            >${param.name || paramKey(param.node, param.parameter)}</span
+          >
           ${
             valueType
               ? html`<span class=${"badge" + (scalar ? "" : " good")}>${valueType}</span>`

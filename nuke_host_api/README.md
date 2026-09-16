@@ -220,9 +220,6 @@ alongside its type, because a host builds knobs from this and a knob with no def
 nothing to initialize to. The default is a value descriptor, so a parameter's default and its
 live value are one shape.
 
-`name` is the author's display label, or `parameter` when absent. It excludes `node`, which is
-already part of the addressing pair.
-
 ### 4. Read and set declared parameter values
 
 `NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and

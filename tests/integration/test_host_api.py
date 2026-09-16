@@ -201,15 +201,14 @@ class TestDescribe:
         parameters = body["inputs"] + body["outputs"]
         assert parameters, f"workflow {workflow_id!r} was listed runnable but declares no parameters"
         for declared in parameters:
+            addressed = f"{declared['node']}.{declared['parameter']}"
             assert declared["node"] and declared["parameter"]
-            assert declared["name"], "a parameter with no label leaves a host nothing to put on a knob"
-            assert declared["name"] != f"{declared['node']}.{declared['parameter']}", (
-                "a label must not be prefixed with the node, which is already its own field"
+            assert declared["name"], f"{addressed} has no label, so a host has nothing to put on a knob"
+            assert declared["name"] != addressed, (
+                f"{addressed} label must not be prefixed with the node, which is already its own field"
             )
-            assert declared["type"] in VALUE_TYPES, (
-                f"{declared['name']} escaped the closed set with {declared['type']!r}"
-            )
-            assert declared["default"]["value_type"] in VALUE_TYPES, f"{declared['name']} default is not a descriptor"
+            assert declared["type"] in VALUE_TYPES, f"{addressed} escaped the closed set with {declared['type']!r}"
+            assert declared["default"]["value_type"] in VALUE_TYPES, f"{addressed} default is not a descriptor"
             assert isinstance(declared["tooltip"], str)
             assert isinstance(declared["settable"], bool)
 
