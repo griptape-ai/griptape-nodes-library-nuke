@@ -102,6 +102,7 @@ class TestDescribeWorkflow:
         assert isinstance(result, NukeDescribeWorkflowResultSuccess)
         bare = next(declared for declared in result.outputs if declared["parameter"] == "was_successful")
         assert bare["default_value"] is None
+        assert bare["choices"] == []
         assert bare["tooltip"] == ""
         assert bare["settable"] is True
 

@@ -438,6 +438,7 @@ Parameter descriptor fields:
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
 | `type` | Always one of the eight value types |
 | `default_value` | The workflow author's default, as one plain value with its macros already resolved. Initialize the knob to this |
+| `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 
@@ -449,8 +450,14 @@ A frame a host cannot open is dropped from a sequence rather than sent as a `nul
 What a bare value cannot carry, a source's `kind`, `format`, and `is_pattern`, is on `input_values`
 instead, which a fresh load fills with these same defaults.
 
+Non-empty `choices` is the set of values the workflow author offers, so build an
+`Enumeration_Knob` from them. Treat the list as what to offer, not as a guarantee: the engine can
+repopulate a dropdown while the graph holds an older value, so a value outside `choices` can be
+read back, and setting one the engine rejects is reported in `rejected_inputs`. Multi-select
+parameters report no choices.
+
 Every field is always present. A parameter the engine gave no metadata for reports a `null`
-default, an empty tooltip, and `settable: true` rather than omitting keys.
+default, no choices, an empty tooltip, and `settable: true` rather than omitting keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
 value exists; a descriptor's `value_type` is built from the value itself. They differ in one
@@ -489,7 +496,28 @@ arrives. Never branch on the declared type at runtime.
       "name": "Topic",
       "type": "GTText",
       "default_value": "a quiet harbour at dusk",
+      "choices": [],
       "tooltip": "What the shot is about.",
+      "settable": true
+    },
+    {
+      "node": "Start Flow",
+      "parameter": "size",
+      "name": "Size",
+      "type": "GTText",
+      "default_value": "1024x1024",
+      "choices": ["1024x1024", "1536x1024", "1024x1536"],
+      "tooltip": "",
+      "settable": true
+    },
+    {
+      "node": "Start Flow",
+      "parameter": "frame_rate",
+      "name": "Frame Rate",
+      "type": "GTFloat",
+      "default_value": 23.976,
+      "choices": [],
+      "tooltip": "",
       "settable": true
     }
   ],
@@ -500,6 +528,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "was_successful",
       "type": "GTBool",
       "default_value": null,
+      "choices": [],
       "tooltip": "",
       "settable": true
     },
@@ -509,6 +538,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "result_details",
       "type": "GTText",
       "default_value": null,
+      "choices": [],
       "tooltip": "",
       "settable": true
     },
@@ -518,6 +548,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "summary",
       "type": "GTText",
       "default_value": null,
+      "choices": [],
       "tooltip": "",
       "settable": true
     }
@@ -581,6 +612,7 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "name": "Topic",
       "type": "GTText",
       "default_value": "a quiet harbour at dusk",
+      "choices": [],
       "tooltip": "What the shot is about.",
       "settable": true
     }
@@ -592,6 +624,7 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "name": "was_successful",
       "type": "GTBool",
       "default_value": null,
+      "choices": [],
       "tooltip": "",
       "settable": true
     }

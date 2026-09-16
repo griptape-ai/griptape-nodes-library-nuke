@@ -211,6 +211,7 @@ class TestDescribe:
             assert not isinstance(declared["default_value"], dict), (
                 f"{addressed} default must be a plain value, not a descriptor"
             )
+            assert isinstance(declared["choices"], list)
             assert isinstance(declared["tooltip"], str)
             assert isinstance(declared["settable"], bool)
 

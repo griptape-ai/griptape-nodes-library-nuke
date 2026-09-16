@@ -78,6 +78,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
     ui_options = parameter.get("ui_options")
     if not isinstance(ui_options, dict):
         ui_options = {}
+    choices = ui_options.get("simple_dropdown")
     return {
         "node": node_name,
         "parameter": parameter_name,
@@ -85,6 +86,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
         "default_value": _default_value(parameter),
+        "choices": list(choices) if isinstance(choices, list) else [],
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
     }

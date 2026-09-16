@@ -40,6 +40,46 @@ class TestDeclaredParameters:
         labels = {declared["parameter"]: declared["name"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert labels == {"topic": "Topic", "plate": "plate"}
 
+    def test_a_dropdown_publishes_its_choices(self) -> None:
+        section = {
+            "Start Flow": {
+                "size": {
+                    "type": "str",
+                    "ui_options": {"simple_dropdown": ["1024x1024", "1536x1024"], "show_search": True},
+                }
+            }
+        }
+
+        declared = shape.declared_parameters(section)[0]
+
+        assert declared["choices"] == ["1024x1024", "1536x1024"]
+
+    def test_an_engine_flag_beside_the_choices_is_not_published(self) -> None:
+        """The engine's allow_custom stays engine-side: nothing here promises the set is enforced."""
+        section = {
+            "Start Flow": {"model": {"type": "str", "ui_options": {"simple_dropdown": ["flux"], "allow_custom": True}}}
+        }
+
+        declared = shape.declared_parameters(section)[0]
+
+        assert declared["choices"] == ["flux"]
+        assert "allow_custom" not in declared
+
+    def test_choices_are_a_copy_of_what_the_engine_holds(self) -> None:
+        """The Options trait hands out its live list, which a host must not be able to mutate."""
+        engine_choices = ["flux", "sdxl"]
+        section = {"Start Flow": {"model": {"type": "str", "ui_options": {"simple_dropdown": engine_choices}}}}
+
+        declared = shape.declared_parameters(section)[0]
+        declared["choices"].append("invented")
+
+        assert engine_choices == ["flux", "sdxl"]
+
+    def test_a_parameter_with_no_dropdown_has_no_choices(self) -> None:
+        """An empty list, never a missing key."""
+        declared = shape.declared_parameters(SHAPE["inputs"])
+        assert all(entry["choices"] == [] for entry in declared)
+
     @pytest.mark.parametrize(
         ("parameter", "expected"),
         [

@@ -70,7 +70,16 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         assert {declared["parameter"] for declared in result.inputs} == {"topic", "plate"}
         assert {declared["parameter"] for declared in result.outputs} == {"was_successful", "mixed_audio"}
-        assert set(result.inputs[0]) == {"node", "parameter", "name", "type", "default_value", "tooltip", "settable"}
+        assert set(result.inputs[0]) == {
+            "node",
+            "parameter",
+            "name",
+            "type",
+            "default_value",
+            "choices",
+            "tooltip",
+            "settable",
+        }
 
     async def test_current_values_come_back_for_both_sides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The whole point of the verb: knobs can be built and initialized from one reply."""
