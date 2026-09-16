@@ -435,7 +435,7 @@ Parameter descriptor fields:
 |---|---|
 | `node` | Node name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
-| `name` | Pre-joined `node.parameter` label for display |
+| `name` | The parameter's own display label, never prefixed with the node. Empty of an author label, it is `parameter` |
 | `type` | Always one of the eight value types |
 | `default` | The workflow author's default, as a value descriptor. Initialize the knob to this |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
@@ -482,7 +482,7 @@ arrives. Never branch on the declared type at runtime.
     {
       "node": "Start Flow",
       "parameter": "topic",
-      "name": "Start Flow.topic",
+      "name": "Topic",
       "type": "GTText",
       "default": {
         "value_type": "GTText",
@@ -499,7 +499,7 @@ arrives. Never branch on the declared type at runtime.
     {
       "node": "End Flow",
       "parameter": "was_successful",
-      "name": "End Flow.was_successful",
+      "name": "was_successful",
       "type": "GTBool",
       "default": {
         "value_type": "GTNull",
@@ -514,7 +514,7 @@ arrives. Never branch on the declared type at runtime.
     {
       "node": "End Flow",
       "parameter": "result_details",
-      "name": "End Flow.result_details",
+      "name": "result_details",
       "type": "GTText",
       "default": {
         "value_type": "GTNull",
@@ -529,7 +529,7 @@ arrives. Never branch on the declared type at runtime.
     {
       "node": "End Flow",
       "parameter": "summary",
-      "name": "End Flow.summary",
+      "name": "summary",
       "type": "GTText",
       "default": {
         "value_type": "GTNull",
@@ -598,7 +598,7 @@ workflow whose inputs have been touched.
     {
       "node": "Start Flow",
       "parameter": "topic",
-      "name": "Start Flow.topic",
+      "name": "Topic",
       "type": "GTText",
       "default": {
         "value_type": "GTText",
@@ -615,7 +615,7 @@ workflow whose inputs have been touched.
     {
       "node": "End Flow",
       "parameter": "was_successful",
-      "name": "End Flow.was_successful",
+      "name": "was_successful",
       "type": "GTBool",
       "default": {
         "value_type": "GTNull",

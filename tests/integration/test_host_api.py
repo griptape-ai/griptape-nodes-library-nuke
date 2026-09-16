@@ -202,7 +202,10 @@ class TestDescribe:
         assert parameters, f"workflow {workflow_id!r} was listed runnable but declares no parameters"
         for declared in parameters:
             assert declared["node"] and declared["parameter"]
-            assert declared["name"] == f"{declared['node']}.{declared['parameter']}"
+            assert declared["name"], "a parameter with no label leaves a host nothing to put on a knob"
+            assert declared["name"] != f"{declared['node']}.{declared['parameter']}", (
+                "a label must not be prefixed with the node, which is already its own field"
+            )
             assert declared["type"] in VALUE_TYPES, (
                 f"{declared['name']} escaped the closed set with {declared['type']!r}"
             )

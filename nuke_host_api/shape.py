@@ -66,19 +66,27 @@ def data_parameters(section: object) -> Iterator[tuple[str, str, dict]]:
 
 
 def declared_parameters(section: object) -> list[dict[str, Any]]:
-    """Normalize defaults so declarations and live values share one descriptor shape."""
+    """Narrow the engine's parameter dicts into named host fields."""
     return [
-        {
-            "node": node_name,
-            "parameter": parameter_name,
-            "name": f"{node_name}.{parameter_name}",
-            "type": value_type_for_engine_type(parameter.get("type")),
-            "default": normalize_value(parameter.get("default_value"), parameter.get("type")),
-            "tooltip": str(parameter.get("tooltip") or ""),
-            "settable": bool(parameter.get("settable", True)),
-        }
+        _declared_parameter(node_name, parameter_name, parameter)
         for node_name, parameter_name, parameter in data_parameters(section)
     ]
+
+
+def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) -> dict[str, Any]:
+    ui_options = parameter.get("ui_options")
+    if not isinstance(ui_options, dict):
+        ui_options = {}
+    return {
+        "node": node_name,
+        "parameter": parameter_name,
+        # The node is already its own field, so prefixing it here would label every knob twice.
+        "name": str(ui_options.get("display_name") or parameter_name),
+        "type": value_type_for_engine_type(parameter.get("type")),
+        "default": normalize_value(parameter.get("default_value"), parameter.get("type")),
+        "tooltip": str(parameter.get("tooltip") or ""),
+        "settable": bool(parameter.get("settable", True)),
+    }
 
 
 def input_parameter_ids(entry: dict) -> set[tuple[str, str]]:

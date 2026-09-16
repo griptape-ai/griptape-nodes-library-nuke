@@ -220,6 +220,9 @@ alongside its type, because a host builds knobs from this and a knob with no def
 nothing to initialize to. The default is a value descriptor, so a parameter's default and its
 live value are one shape.
 
+The parameter's own label is `name`. Prefixing it with the node would title every knob twice, since
+`node` is a field of its own and the addressing pair is `node` plus `parameter`.
+
 ### 4. Read and set declared parameter values
 
 `NukeGetExecutionStateRequest` answers exactly one question: is the engine running, and
