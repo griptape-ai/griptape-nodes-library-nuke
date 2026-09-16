@@ -35,7 +35,10 @@ class TestDeclaredParameters:
         declared = next(p for p in shape.declared_parameters(SHAPE["inputs"]) if p["parameter"] == "topic")
         assert declared["node"] == "Start Flow"
         assert declared["parameter"] == "topic"
-        assert declared["name"] == "Start Flow.topic"
+
+    def test_a_label_is_the_parameters_own_name_not_the_node_and_the_parameter(self) -> None:
+        labels = {declared["parameter"]: declared["name"] for declared in shape.declared_parameters(SHAPE["inputs"])}
+        assert labels == {"topic": "Topic", "plate": "plate"}
 
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}
