@@ -10,6 +10,13 @@
     const set = (v) => setField(param, v);
     const readOnly = param.settable === false;
     const disabled = readOnly || locked;
+    const choices = Array.isArray(param.choices) ? param.choices : [];
+    // A dropdown's choices can change under a value the graph already holds, so the current value
+    // is offered alongside them rather than silently replaced by the first choice.
+    const options = choices.map(String);
+    if (value !== undefined && value !== "" && options.indexOf(String(value)) === -1) {
+      options.unshift(String(value));
+    }
 
     let widget;
     if (param.type === "GTBool") {
@@ -19,6 +26,10 @@
         checked=${value === true}
         onChange=${(e) => set(e.target.checked)}
       />`;
+    } else if (choices.length) {
+      widget = html`<select disabled=${disabled} value=${value === undefined ? "" : String(value)} onChange=${(e) => set(e.target.value)}>
+        ${options.map((choice) => html`<option value=${choice}>${choice}</option>`)}
+      </select>`;
     } else if (isNumeric(param.type)) {
       widget = html`<input
         type="number"
@@ -45,6 +56,7 @@
         <div>${widget}</div>
         <span class="type">
           ${param.type || "?"}${readOnly ? " ro" : ""}
+          ${choices.length ? " choices" : ""}
           ${KNOWN_VALUE_TYPES.indexOf(param.type) === -1 ? " unknown" : ""}
         </span>
       </div>

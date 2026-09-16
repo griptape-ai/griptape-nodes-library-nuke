@@ -215,9 +215,15 @@ next call; the other two are not the host's doing. Telling a host to save a work
 saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
 because then there is nothing to check against the allow-list.
 
-`NukeDescribeWorkflowRequest` carries each parameter's `default_value`, `tooltip`, and `settable`
-alongside its type. The default is the value a host sets a knob to, with macros resolved;
-`kind`, `format`, and `is_pattern` stay on the `input_values` descriptors.
+`NukeDescribeWorkflowRequest` carries each parameter's `default_value`, `choices`, `tooltip`, and
+`settable` alongside its type. The default is the value a host sets a knob to, with macros resolved;
+`kind`, `format`, and `is_pattern` stay on the `input_values` descriptors. `choices` is what an
+`Enumeration_Knob` offers.
+
+`choices` carries the values, and nothing carries whether the engine enforces them. The `Options`
+trait can repopulate a dropdown at run time while the value the graph holds stays as it was, so a
+value outside `choices` is reachable no matter what this layer promised, and a host has to tolerate
+one. A flag saying "closed" would be a promise this protocol cannot keep.
 
 ### 4. Read and set declared parameter values
 
@@ -592,11 +598,11 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 - **Registry entries can be stale.** `NukeListWorkflowsRequest` checks that a workflow's
   file still exists, because the registry keeps entries for deleted files and its own
   `is_saved` flag stays true for them.
-- **Parameter metadata stops at `default_value`, `tooltip`, and `settable`.** The engine also carries
-  `ui_options`, holding slider ranges (`range_slider`, `step`), dropdown choices
-  (`simple_dropdown`, `multi_options`), and `multiline`. Passing that dict through raw would
-  hand a plugin author editor vocabulary to bind to, so whatever a Nuke knob needs from it
-  should be narrowed into named fields first. Adding them costs no version bump.
+- **Parameter metadata exposes only `default_value`, `choices`, `tooltip`, and `settable`.**
+  The engine also carries slider ranges (`range_slider`, `step`), multi-select dropdowns
+  (`multi_options`), and `multiline` in `ui_options`. Passing that dict through raw would bind
+  plugin authors to editor vocabulary, so a Nuke knob's metadata must be narrowed into named
+  fields. Such fields require no version bump. Multi-select parameters report no choices.
 - **A host addresses inputs by node name.** Node names are editable in the canvas, so
   renaming a start node breaks a host's saved knob mapping. Re-describing on connect is the
   only mitigation.
