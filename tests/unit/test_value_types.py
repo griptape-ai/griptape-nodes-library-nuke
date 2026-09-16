@@ -50,6 +50,7 @@ def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
         ("ImageArtifact", ValueType.IMAGE),
         ("ImageUrlArtifact", ValueType.IMAGE),
         ("VideoUrlArtifact", ValueType.MOVIE),
+        ("VideoArtifact", ValueType.MOVIE),
         ("str", ValueType.TEXT),
         ("int", ValueType.INT),
         ("float", ValueType.FLOAT),
@@ -233,6 +234,13 @@ def test_unknown_artifact_class_is_classified_by_extension() -> None:
     descriptor = value_types.normalize_value(GenericArtifact("https://cdn.example.com/still.jpg"))
     assert descriptor["value_type"] == ValueType.IMAGE
     assert descriptor["sources"][0]["format"] == "jpg"
+
+
+@pytest.mark.parametrize("extension", ["mp4", "mov", "mxf", "mpg", "webm", "r3d"])
+def test_a_movie_container_nuke_reads_is_a_movie(extension: str) -> None:
+    """An unlisted container reads as GTFile, which builds a host a file knob for a plate."""
+    descriptor = value_types.normalize_value(f"/show/cut.{extension}", "str")
+    assert descriptor["value_type"] == ValueType.MOVIE
 
 
 def test_locator_kinds_are_explicit() -> None:
