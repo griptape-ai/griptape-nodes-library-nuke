@@ -79,6 +79,7 @@ class TestLoadWorkflow:
             "choices",
             "tooltip",
             "settable",
+            "hidden",
         }
 
     async def test_current_values_come_back_for_both_sides(self, monkeypatch: pytest.MonkeyPatch) -> None:

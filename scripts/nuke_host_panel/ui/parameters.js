@@ -56,6 +56,7 @@
         <div>${widget}</div>
         <span class="type">
           ${param.type || "?"}${readOnly ? " ro" : ""}
+          ${param.hidden ? " hidden" : ""}
           ${choices.length ? " choices" : ""}
           ${KNOWN_VALUE_TYPES.indexOf(param.type) === -1 ? " unknown" : ""}
         </span>
