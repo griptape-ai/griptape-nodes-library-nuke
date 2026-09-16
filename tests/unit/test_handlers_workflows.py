@@ -105,6 +105,7 @@ class TestDescribeWorkflow:
         assert bare["choices"] == []
         assert bare["tooltip"] == ""
         assert bare["settable"] is True
+        assert bare["hidden"] is False
 
     async def test_an_unknown_workflow_id_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(monkeypatch, _registry({}))

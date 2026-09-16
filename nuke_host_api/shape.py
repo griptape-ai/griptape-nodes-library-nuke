@@ -89,6 +89,8 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "choices": list(choices) if isinstance(choices, list) else [],
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
+        # `hide_property` leaves a connectable port, which a knob cannot represent.
+        "hidden": bool(ui_options.get("hide", False)),
     }
 
 

@@ -80,6 +80,23 @@ class TestDeclaredParameters:
         declared = shape.declared_parameters(SHAPE["inputs"])
         assert all(entry["choices"] == [] for entry in declared)
 
+    def test_a_parameter_the_author_hid_is_reported_hidden(self) -> None:
+        section = {
+            "Start Flow": {
+                "counter": {"type": "int", "ui_options": {"hide": True}},
+                "topic": {"type": "str"},
+            }
+        }
+
+        hidden = {declared["parameter"]: declared["hidden"] for declared in shape.declared_parameters(section)}
+
+        assert hidden == {"counter": True, "topic": False}
+
+    def test_a_parameter_hidden_only_in_the_editors_property_panel_is_not_hidden(self) -> None:
+        section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "ui_options": {"hide_property": True}}}}
+
+        assert shape.declared_parameters(section)[0]["hidden"] is False
+
     @pytest.mark.parametrize(
         ("parameter", "expected"),
         [

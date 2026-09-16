@@ -214,6 +214,7 @@ class TestDescribe:
             assert isinstance(declared["choices"], list)
             assert isinstance(declared["tooltip"], str)
             assert isinstance(declared["settable"], bool)
+            assert isinstance(declared["hidden"], bool)
 
     def test_no_control_flow_parameter_is_exposed(self, client: HostClient) -> None:
         workflow_id = _smoke_workflow_id(client)
