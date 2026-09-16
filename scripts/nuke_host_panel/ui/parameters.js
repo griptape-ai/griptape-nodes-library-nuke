@@ -41,7 +41,7 @@
 
     return html`
       <div class="field">
-        <label title=${param.tooltip || key}>${param.name || key}</label>
+        <label title=${key + (param.tooltip ? ": " + param.tooltip : "")}>${param.name || key}</label>
         <div>${widget}</div>
         <span class="type">
           ${param.type || "?"}${readOnly ? " ro" : ""}

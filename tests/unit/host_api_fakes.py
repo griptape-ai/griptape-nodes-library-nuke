@@ -58,6 +58,7 @@ SHAPE = {
                 "default_value": "a quiet harbour at dusk",
                 "tooltip": "What the shot is about.",
                 "settable": True,
+                "ui_options": {"display_name": "Topic"},
             },
             "plate": {"type": "ImageUrlArtifact", "default_value": None, "tooltip": "", "settable": False},
         }
