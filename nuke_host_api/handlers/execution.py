@@ -111,6 +111,8 @@ async def handle_execute_workflow(
                     f"resolved values. {unresolved.details}"
                 ),
                 workflow_id=loaded_id,
+                applied_inputs=applied,
+                rejected_inputs=rejected,
             )
 
     started = await engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
@@ -120,6 +122,8 @@ async def handle_execute_workflow(
             attempted=attempted,
             because=f"the engine would not run the flow. {started.details}",
             workflow_id=loaded_id,
+            applied_inputs=applied,
+            rejected_inputs=rejected,
         )
 
     return NukeExecuteWorkflowResultSuccess(

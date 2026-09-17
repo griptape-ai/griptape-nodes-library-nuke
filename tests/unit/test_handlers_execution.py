@@ -373,6 +373,8 @@ class TestExecuteWorkflow:
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
+        assert result.applied_inputs == [], "nothing was written, so nothing should be reported as applied"
+        assert result.rejected_inputs == []
 
     async def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host(
         self, monkeypatch: pytest.MonkeyPatch
@@ -389,6 +391,23 @@ class TestExecuteWorkflow:
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "validation failed" in str(result.result_details)
+
+    async def test_a_refused_start_reports_the_inputs_already_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """apply_inputs runs before StartFlowRequest, so a start refusal still holds the write."""
+        use_engine(
+            monkeypatch,
+            execute_responses(
+                {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])}
+            ),
+        )
+
+        result = await handle_execute_workflow(
+            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
+        assert result.rejected_inputs == []
 
 
 class TestUnresolveFirst:
@@ -430,6 +449,25 @@ class TestUnresolveFirst:
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "no such flow" in str(result.result_details), "the engine's own reason must reach the host"
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+
+    async def test_a_refused_unresolve_reports_the_inputs_already_applied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """apply_inputs runs before the unresolve, so a refused unresolve still holds the write."""
+        use_engine(
+            monkeypatch,
+            execute_responses({UnresolveFlowRequest: UnresolveFlowResultFailure(result_details="no such flow")}),
+        )
+
+        result = await handle_execute_workflow(
+            NukeExecuteWorkflowRequest(
+                workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}}, unresolve_first=True
+            )
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
+        assert result.rejected_inputs == []
 
     async def test_it_costs_one_engine_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, execute_responses())

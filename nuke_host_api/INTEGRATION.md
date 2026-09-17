@@ -827,6 +827,17 @@ longer occupies the engine, this refusal is what a second host gets mid-run rath
 request that waits. An execution id would arrive as an added field, which a tolerant parser
 already handles.
 
+Inputs are applied before the flow starts, so a refusal to unresolve or a refusal to start
+carries the same `applied_inputs`/`rejected_inputs` a success would have, reporting what is
+now live on the graph despite the run not happening. Every earlier refusal returns both empty:
+nothing was applied yet.
+
+| `NukeExecuteWorkflowResultFailure` field | Type | Notes |
+|---|---|---|
+| `workflow_id` | `str` | The ID the request named, until the loaded-workflow guard passes; the loaded ID after. Empty when the host named none |
+| `applied_inputs` | `list[dict]` | `{node, parameter}` already written to the graph when the refusal happened. Empty unless the refusal is the unresolve or the start-flow refusal |
+| `rejected_inputs` | `list[dict]` | `{node, parameter, reason}`, same emptiness rule as `applied_inputs` |
+
 ### NukeGetExecutionStateRequest
 
 The running-state recovery path. Notifications have no replay, so a host that connected
