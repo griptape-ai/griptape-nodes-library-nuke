@@ -141,6 +141,8 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
 @PayloadRegistry.register
 class NukeExecuteWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
     workflow_id: str = ""
+    applied_inputs: list[dict[str, str]] = field(default_factory=list)
+    rejected_inputs: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
