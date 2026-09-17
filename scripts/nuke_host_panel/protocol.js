@@ -21,6 +21,7 @@ const Protocol = (function () {
     PARAMETER_VALUE: "NukeParameterValueEvent",
     EXECUTION_STATE: "NukeExecutionStateEvent",
     EXECUTION_NODES: "NukeExecutionNodesEvent",
+    HOST_DISCONNECT: "NukeHostDisconnectEvent",
   };
 
   const CLIENT_PROTOCOL_VERSIONS = [1];

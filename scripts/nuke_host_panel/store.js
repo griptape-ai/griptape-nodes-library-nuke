@@ -21,6 +21,8 @@ const Store = (function () {
       clientName: saved.clientName || DEFAULT_CLIENT_NAME,
       socket: "disconnected",
       session: null,
+      heldBy: null,
+      standingDown: false,
       subscribed: { reply: false, events: false },
       autoConnect: true,
       connectAttempts: 0,

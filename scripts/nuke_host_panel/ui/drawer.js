@@ -3,7 +3,7 @@
   const { NOTIFICATION } = Protocol;
   const { FRAME_LOG_LIMIT, LIVE_FEED_LIMIT, REPLY_TOPIC } = Config;
   const { guard, persist, setState } = Store;
-  const { cancelReconnect, doConnect, doDisconnect, doDropSocket } = Session;
+  const { cancelReconnect, doConnect, doDisconnect, doDropSocket, doTakeOver } = Session;
   const { Stat, html } = Ui;
 
   function ConnectionTab({ st }) {
@@ -54,6 +54,9 @@
               keep connected
             </label>
             <button disabled=${Boolean(st.session)} onClick=${guard(doConnect)}>Connect</button>
+            <button class="danger" disabled=${!st.heldBy} onClick=${guard(doTakeOver)}>
+              Take over
+            </button>
             <button disabled=${!st.autoConnect && !st.session} onClick=${doDisconnect}>
               Close
             </button>
@@ -90,6 +93,10 @@
               <tr>
                 <th>session_id</th>
                 <td class="mono">${session.session_id || "-"}</td>
+              </tr>
+              <tr>
+                <th>host_client_name</th>
+                <td>${session.host_client_name || st.heldBy || "-"}</td>
               </tr>
               <tr>
                 <th>event_topic</th>
