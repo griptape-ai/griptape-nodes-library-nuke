@@ -361,6 +361,19 @@ class TestExecuteWorkflow:
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
+    async def test_no_input_is_applied_when_the_loaded_workflow_has_no_top_level_flow(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A run that cannot start must mutate nothing, so the flow check must precede apply_inputs."""
+        engine = use_engine(monkeypatch, execute_responses(NOTHING_LOADED))
+
+        result = await handle_execute_workflow(
+            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
+        )
+
+        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
+
     async def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
