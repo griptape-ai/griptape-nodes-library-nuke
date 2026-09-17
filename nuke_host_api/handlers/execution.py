@@ -87,8 +87,6 @@ async def handle_execute_workflow(
                 workflow_id=loaded_id,
             )
 
-    applied, rejected = await parameter_values.apply_inputs(request.inputs, declared)
-
     flow_name = await engine.top_level_flow_name()
     if flow_name is None:
         return failure(
@@ -97,6 +95,8 @@ async def handle_execute_workflow(
             because="the loaded workflow has no top-level flow to start.",
             workflow_id=loaded_id,
         )
+
+    applied, rejected = await parameter_values.apply_inputs(request.inputs, declared)
 
     # Running a resolved graph resolves nothing, so a failed unresolve would report a run that
     # returned the previous run's values.
