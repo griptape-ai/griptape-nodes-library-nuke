@@ -16,6 +16,7 @@ from tests.integration.host_api_client import (
     engines_registry_path,
     result_of,
     running_engine,
+    socket_dir,
     socket_path_for,
     succeeded,
 )
@@ -38,11 +39,20 @@ pytestmark = [
         ENGINE is None,
         reason=(
             f"No running engine found. Checked {engines_registry_path()} for engine ids and "
-            f"looked for a live socket per id. Start an engine with the local_socket IPC "
-            f"driver enabled; see nuke_host_api/INTEGRATION.md."
+            f"looked for a live socket per id in {socket_dir()}. Start an engine with the "
+            f"local_socket IPC driver enabled; see nuke_host_api/INTEGRATION.md."
         ),
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_engine_env() -> None:
+    """Override the conftest fixture: this suite drives an engine in another process.
+
+    That fixture repoints XDG_DATA_HOME at a tmp dir for in-process engine tests, which
+    hides the registry naming the engine under test.
+    """
 
 
 @pytest.fixture(scope="module")
@@ -403,19 +413,17 @@ class TestExecute:
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
         """Serial execution is what makes the missing engine-side execution id survivable.
 
-        The first execute is sent without waiting: its reply lands when the run ends, and the
-        point is to be mid-run. Skips rather than fails when the first run finishes too fast to
-        race, since that is a property of the chosen workflow and not of the guard.
+        Both executes go out before either reply is read. A workflow can resolve in
+        milliseconds, so any round trip in between hands the first run enough time to finish
+        and leaves the guard nothing to refuse. Skips rather than fails when the first run
+        still wins that race, since that is a property of the chosen workflow, not the guard.
         """
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
         client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
+        second = client.reply_for(client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
 
-        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
-        if not state.get("running"):
+        if succeeded(second):
             pytest.skip(f"workflow {workflow_id!r} finished before a second execute could race it")
-
-        second = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
-        assert not succeeded(second), "a second run must be refused, not allowed to displace the first"
         assert "already executing" in detail_of(second).lower()
 
     def test_no_workflow_id_runs_whatever_is_loaded(self, client: HostClient) -> None:
