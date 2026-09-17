@@ -20,7 +20,8 @@ The protocol contract is `protocol.py` and `INTEGRATION.md`, not this panel.
 | Preview and switch projects | `NukeDescribeProjectRequest`, `NukeSetCurrentProjectRequest` |
 | List, describe, and load workflows | `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest` |
 | Edit parameters | `NukeSetParameterValuesRequest` |
-| Run, poll, and cancel | `NukeExecuteWorkflowRequest`, `NukeCancelExecutionRequest`, `NukeGetExecutionStateRequest` || Read outputs | `NukeGetParameterValuesRequest` |
+| Run, poll, and cancel | `NukeExecuteWorkflowRequest`, `NukeCancelExecutionRequest`, `NukeGetExecutionStateRequest` |
+| Read outputs | `NukeGetParameterValuesRequest` |
 
 The Events drawer shows progress, node-state, and value notifications.
 
