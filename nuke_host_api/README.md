@@ -128,16 +128,14 @@ every request that the editor and every other driver would not carry anyway. The
 "is someone else here", which is the question a host asks before it starts, not an access
 control this layer can honestly offer.
 
-`force` cannot close the other socket, so it publishes `NukeHostDisconnectEvent` naming the
-displaced host, and that host closes its own. The engine's transport keeps each connection in
-Rust: `websocket_direct` mints a connection id per client and holds its sender, but the Python
-message callback receives only the payload and the driver name, and `RustIPCManager` exposes no
-close for one connection. `stop_all` would take down the driver and every client, the editor
-included. So a cooperative stand-down is the strongest kick available from here, and it is also
-the one a plugin wants: a socket that simply closes is indistinguishable from an engine crash,
-while this carries a `cause` to branch on and a `reason` to show an artist. `replaced_by` names
-who took it. A host that ignores the event keeps working, which is why the claim is described as
-reported rather than enforced.
+`force` cannot close the other socket: the engine's transport holds each connection in Rust
+and gives this library no way to close one, only every connection at once, which would drop
+the editor along with it. So a takeover publishes `NukeHostDisconnectEvent` naming the
+displaced host, and that host closes its own socket. This is also the shape a plugin wants: a
+socket that simply closes is indistinguishable from an engine crash, while this carries a
+`cause` to branch on and a `reason` to show an artist. `replaced_by` names who took it. A host
+that ignores the event keeps working, which is why the claim is described as reported rather
+than enforced.
 
 A claim never goes stale on its own. The transport gives Python no disconnect signal, which is
 also why the event bridge latches on instead of counting connections, so a crashed Nuke session

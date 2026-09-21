@@ -197,9 +197,8 @@ answers all of it.
 | Which engine is this, and is it busy | `NukeConnectResultSuccess` for id, name, version, and session, then `NukeGetExecutionStateRequest` for what is running |
 | Is a Nuke session already driving it | `NukeConnectResultSuccess.host_client_name`, and the claim refusal a second host gets |
 
-The engine's own `EngineHeartbeatRequest` answers the middle row in one round trip, carrying
-`engine_id`, `engine_name`, `engine_version`, `session_id`, `has_active_flow`,
-`current_workflow`, `workflow_file_path`, `engine_os`, and `orchestrator_engine_id`. It reaches
+The engine's own `EngineHeartbeatRequest` answers the middle row in one round trip: engine
+identity, a session id, and what workflow is currently active. It reaches
 any transport this library does not have to be installed for, which makes it the cheapest poll
 for an engine picker. It is engine vocabulary rather than part of the [bound
 surface](#bound-surface), so it changes on the engine's release cadence and the binding rules
