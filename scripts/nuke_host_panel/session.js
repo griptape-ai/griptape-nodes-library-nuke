@@ -2,7 +2,7 @@
 const Session = (function () {
   const { CLIENT_PROTOCOL_VERSIONS, VERB } = Protocol;
   const { CONNECT_TIMEOUT_MS, RECONNECT_BACKOFF_MS, REPLY_TOPIC } = Config;
-  const { banner, guard, remembered, setState, state } = Store;
+  const { banner, guard, remembered, setState, state, tabId } = Store;
   const { closeSocket, detailOf, isOpen, openSocket, request, subscribe, succeeded } = Transport;
   const { noteRunActivity } = Events;
   const {
@@ -100,7 +100,8 @@ const Session = (function () {
         VERB.CONNECT,
         {
           client_protocol_versions: CLIENT_PROTOCOL_VERSIONS,
-          client_name: state().clientName.trim() || "browser host",
+          // The claim key, so a per-tab suffix keeps two tabs from sharing one silently.
+          client_name: (state().clientName.trim() || "browser host") + " " + tabId(),
           force,
         },
         CONNECT_TIMEOUT_MS,

@@ -1,5 +1,5 @@
 const Store = (function () {
-  const { DEFAULT_CLIENT_NAME, DEFAULT_WS_URL, SETTINGS_KEY } = Config;
+  const { DEFAULT_CLIENT_NAME, DEFAULT_WS_URL, SETTINGS_KEY, TAB_ID_KEY } = Config;
 
   function readSettings() {
     try {
@@ -8,6 +8,25 @@ const Store = (function () {
     } catch {
       return {};
     }
+  }
+
+  let cachedTabId = null;
+
+  // sessionStorage is per-tab and survives that tab's reload, unlike localStorage
+  // (shared by every tab) or a fresh random id per load (refused by its own stale claim).
+  // Duplicating a tab clones it, so two tabs can still share one id.
+  function tabId() {
+    if (cachedTabId) return cachedTabId;
+    try {
+      cachedTabId = sessionStorage.getItem(TAB_ID_KEY);
+      if (!cachedTabId) {
+        cachedTabId = Math.random().toString(36).slice(2, 8);
+        sessionStorage.setItem(TAB_ID_KEY, cachedTabId);
+      }
+    } catch {
+      cachedTabId = Math.random().toString(36).slice(2, 8);
+    }
+    return cachedTabId;
   }
 
   const saved = readSettings();
@@ -164,5 +183,6 @@ const Store = (function () {
     remembered,
     remember,
     rememberFields,
+    tabId,
   };
 })();
