@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import sys
 import tempfile
 from typing import Any
 
@@ -46,6 +47,13 @@ def data_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
     return root
 
 
+def expected_socket_path(engine_id: str) -> str:
+    """Compose the path independently so the assertion is not socket_path_for() twice."""
+    if sys.platform == "win32":
+        return f"\\\\.\\pipe\\griptape_nodes_{engine_id}"
+    return str(host_api_client.socket_dir() / f"{engine_id}.sock")
+
+
 def socket_for(engine_id: str) -> pathlib.Path:
     path = pathlib.Path(host_api_client.socket_path_for(engine_id))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,8 +66,12 @@ class TestDiscovery:
         engines = host_api_client.discover()
         assert [engine.id for engine in engines] == ["aaa-111", "bbb-222"]
         assert [engine.name for engine in engines] == ["honest-red-ant", "quiet-blue-fox"]
-        assert engines[0].socket_path == str(host_api_client.socket_dir() / "aaa-111.sock")
+        assert engines[0].socket_path == expected_socket_path("aaa-111")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows addresses a named pipe, so there is no socket dir to resolve",
+    )
     def test_a_socket_is_resolved_as_runtime_state_outside_the_data_home(self, data_home: pathlib.Path) -> None:
         """The app moved sockets out of the data home for macOS's 104-byte sun_path limit.
 

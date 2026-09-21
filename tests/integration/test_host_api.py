@@ -33,6 +33,9 @@ NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "3
 # Long enough to batch frames, short enough to notice a terminal event promptly.
 DRAIN_TICK_S = 0.5
 
+# A skipif reason is built eagerly for the whole list, ahead of the win32 skip beside it.
+_socket_dir_hint = "a named pipe, not this harness's socket_dir" if sys.platform == "win32" else str(socket_dir())
+
 pytestmark = [
     pytest.mark.skipif(
         sys.platform == "win32",
@@ -42,7 +45,7 @@ pytestmark = [
         ENGINE is None,
         reason=(
             f"No running engine found. Checked {engines_registry_path()} for engine ids and "
-            f"looked for a live socket per id in {socket_dir()}. Start an engine with the "
+            f"looked for a live socket per id in {_socket_dir_hint}. Start an engine with the "
             f"local_socket IPC driver enabled; see nuke_host_api/INTEGRATION.md."
         ),
     ),
