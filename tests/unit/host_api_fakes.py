@@ -1,7 +1,9 @@
 """Engine stand-ins shared by the host API tests.
 
-Every engine request the handlers issue passes through ``nuke_host_api.engine``, so one
-patch of that module's ``GriptapeNodes`` symbol is enough to isolate any of them.
+Every engine request the handlers issue passes through ``nuke_host_api.engine``, so one patch
+of that module's ``GriptapeNodes`` symbol is enough to isolate any of them. ``value_types``
+resolves macros through its own ``GriptapeNodes`` import instead, patched separately in
+``test_value_types.py`` and ``test_macros.py``.
 """
 
 from __future__ import annotations
