@@ -31,8 +31,9 @@ async def handle_execute_workflow(
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
     """Refuse concurrent runs because engine events carry no execution ID.
 
-    The engine's StartFlowRequest resolves when the flow does, so this result reports a run
-    that already ended. Progress is the notification stream, not this reply.
+    StartFlowRequest is sent with wait_for_completion=True, so it resolves when the flow does.
+    A success reply means the run finished; a failure reply covers both a refusal to start and a
+    run that started and then failed. Progress is the notification stream, not this reply.
     """
     attempted = (
         f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
@@ -115,12 +116,14 @@ async def handle_execute_workflow(
                 rejected_inputs=rejected,
             )
 
-    started = await engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
+    started = await engine.request(
+        StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
+    )
     if started.value is None:
         return failure(
             NukeExecuteWorkflowResultFailure,
             attempted=attempted,
-            because=f"the engine would not run the flow. {started.details}",
+            because=f"the engine refused the run or the run failed. {started.details}",
             workflow_id=loaded_id,
             applied_inputs=applied,
             rejected_inputs=rejected,

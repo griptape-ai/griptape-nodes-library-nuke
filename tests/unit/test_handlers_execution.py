@@ -77,13 +77,16 @@ class TestExecuteWorkflow:
         )
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        # StartFlowRequest resolves when the flow does, so a reply means the run already ended.
+        # wait_for_completion=True makes the StartFlowRequest resolve when the flow does, so a
+        # reply means the run already ended.
         assert result.state == ExecutionState.COMPLETED
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
         assert result.rejected_inputs == []
 
         request_types = [type(request) for request in engine.requests]
         assert request_types.index(SetParameterValueRequest) < request_types.index(StartFlowRequest)
+        started = next(r for r in engine.requests if isinstance(r, StartFlowRequest))
+        assert started.wait_for_completion is True
 
     async def test_loads_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Loading is NukeLoadWorkflowRequest's job, and it clears all object state.
