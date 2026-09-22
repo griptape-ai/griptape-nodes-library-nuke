@@ -284,8 +284,8 @@ loaded at all.
 
 ### 5. Node execution changes
 
-Eight engine execution events collapse into four states (`unresolved`, `running`,
-`resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a ninth event
+Five engine execution events collapse into four states (`unresolved`, `running`,
+`resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a sixth event
 type without the host learning anything.
 
 `NukeExecutionNodesEvent` forwards the engine's node lists for progress tracking. The first
@@ -458,10 +458,11 @@ Rules:
 - **Never guesses a format.** Unknown is `null`.
 - **`kind` is explicit**, so a host never sniffs whether a string is a URL, path, macro,
   or prose.
-- **A declared parameter type outranks the extension**, except for an artifact class this version
-  does not map: there the extension is the only media information there is, so an unmapped
-  class describes as `GTFile` and its values may narrow to `GTImage` or `GTMovie`. A value
-  carrying a source narrows only within the sourced types.
+- **A locator's extension outranks the declared type, except `GTImage` and `GTMovie`.** Those
+  two keep their declared type. Any other declared type holding a locator, including `GTText`,
+  `GTFile`, and an artifact class this version does not map, classifies from the extension: a
+  `str` parameter holding `plate.exr` describes as `GTImage`. A value carrying a source narrows
+  only within the sourced types.
 - **Sourceless is never media.** An unset value is `GTNull` and a value pointing at no bytes is
   `GTText`, whatever the parameter declared, so `GTImage`, `GTMovie`, and `GTFile` never arrive
   with an empty `sources`.
