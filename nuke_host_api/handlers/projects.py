@@ -19,7 +19,7 @@ from griptape_nodes.retained_mode.events.project_events import (
     SetCurrentProjectResultSuccess,
 )
 
-from nuke_host_api import engine
+from nuke_host_api import engine, flow_run
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeDescribeProjectRequest,
@@ -130,7 +130,7 @@ async def handle_set_current_project(
     """Refuse switches during execution and compare live workspaces around the switch."""
     attempted = f"to set the current project to '{request.project_id}'"
 
-    if await engine.is_running():
+    if await flow_run.busy():
         return failure(
             NukeSetCurrentProjectResultFailure,
             attempted=attempted,

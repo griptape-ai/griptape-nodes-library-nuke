@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -35,7 +36,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryRequest,
 )
 
-from nuke_host_api import shape
+from nuke_host_api import execution_bridge, flow_run, shape
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultFailure,
@@ -75,11 +76,10 @@ class TestExecuteWorkflow:
         result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
+        await flow_run.settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        # wait_for_completion=True makes the StartFlowRequest resolve when the flow does, so a
-        # reply means the run already ended.
-        assert result.state == ExecutionState.COMPLETED
+        assert result.state == ExecutionState.RUNNING
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
         assert result.rejected_inputs == []
 
@@ -87,6 +87,20 @@ class TestExecuteWorkflow:
         assert request_types.index(SetParameterValueRequest) < request_types.index(StartFlowRequest)
         started = next(r for r in engine.requests if isinstance(r, StartFlowRequest))
         assert started.wait_for_completion is True
+
+    async def test_the_reply_lands_before_the_engine_is_asked_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The engine's start request resolves when the flow does, so awaiting it would hold the reply.
+
+        A host learns a run began from this reply and reads progress from notifications.
+        """
+        engine = use_engine(monkeypatch, execute_responses())
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+        await flow_run.settled()
+        assert any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
     async def test_loads_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Loading is NukeLoadWorkflowRequest's job, and it clears all object state.
@@ -154,6 +168,50 @@ class TestExecuteWorkflow:
             "must not touch inputs of a run it refused to start"
         )
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
+
+    async def test_refuses_a_second_run_while_the_first_start_is_still_detached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The engine reports a flow running only once it picks the start up.
+
+        Replying before the run starts opens a window the engine's own guard would answer with a
+        failed notification for a run the host was told had begun.
+        """
+        use_engine(monkeypatch, execute_responses())
+
+        first = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        second = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        await flow_run.settled()
+
+        assert isinstance(first, NukeExecuteWorkflowResultSuccess)
+        assert isinstance(second, NukeExecuteWorkflowResultFailure)
+        assert "already executing" in str(second.result_details)
+
+    async def test_refuses_a_second_run_that_arrives_during_the_first_ones_preflight(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The first run is not started yet, so only a slot taken before any await refuses the second.
+
+        Otherwise both write inputs, both replies say started, and the engine refuses the loser
+        afterwards with a failed notification no host can tell from the winner's.
+        """
+        engine = use_engine(monkeypatch, execute_responses(), suspends=True)
+
+        first, second = await asyncio.gather(
+            handle_execute_workflow(
+                NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "a"}})
+            ),
+            handle_execute_workflow(
+                NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "b"}})
+            ),
+        )
+        await flow_run.settled()
+
+        assert isinstance(first, NukeExecuteWorkflowResultSuccess)
+        assert isinstance(second, NukeExecuteWorkflowResultFailure)
+        assert sum(isinstance(request, StartFlowRequest) for request in engine.requests) == 1
+        written = [request.value for request in engine.requests if isinstance(request, SetParameterValueRequest)]
+        assert written == ["a"], "the refused run must not have touched the graph"
 
     async def test_an_input_that_is_not_a_declared_parameter_is_rejected_without_reaching_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
@@ -271,6 +329,7 @@ class TestExecuteWorkflow:
                 inputs={"Start Flow": {"topic": "hello"}, "Some Private Node": {"api_key": "stolen"}},
             )
         )
+        await flow_run.settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         forwarded = sum(isinstance(request, SetParameterValueRequest) for request in engine.requests)
@@ -295,6 +354,7 @@ class TestExecuteWorkflow:
         result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
+        await flow_run.settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.applied_inputs == []
@@ -379,24 +439,12 @@ class TestExecuteWorkflow:
         assert result.applied_inputs == [], "nothing was written, so nothing should be reported as applied"
         assert result.rejected_inputs == []
 
-    async def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host(
+    async def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host_as_a_notification(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A host cannot see the engine's result, so a refusal it never quotes is lost."""
-        use_engine(
-            monkeypatch,
-            execute_responses(
-                {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])}
-            ),
-        )
-
-        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
-
-        assert isinstance(result, NukeExecuteWorkflowResultFailure)
-        assert "validation failed" in str(result.result_details)
-
-    async def test_a_refused_start_reports_the_inputs_already_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """apply_inputs runs before StartFlowRequest, so a start refusal still holds the write."""
+        """The reply is gone by the time the engine answers, so a refusal it never pushes is lost."""
+        published: list[Any] = []
+        monkeypatch.setattr(execution_bridge, "publish", published.append)
         use_engine(
             monkeypatch,
             execute_responses(
@@ -407,10 +455,13 @@ class TestExecuteWorkflow:
         result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
+        await flow_run.settled()
 
-        assert isinstance(result, NukeExecuteWorkflowResultFailure)
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess), "the run was started; the engine refused after"
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
-        assert result.rejected_inputs == []
+        assert len(published) == 1
+        assert published[0].state == ExecutionState.FAILED
+        assert "validation failed" in published[0].detail
 
 
 class TestUnresolveFirst:
@@ -424,6 +475,7 @@ class TestUnresolveFirst:
         engine = use_engine(monkeypatch, execute_responses())
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
+        await flow_run.settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         request_types = [type(request) for request in engine.requests]
@@ -476,6 +528,7 @@ class TestUnresolveFirst:
         engine = use_engine(monkeypatch, execute_responses())
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
+        await flow_run.settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert len(engine.requests) == 7, "the six a plain execution costs, plus the unresolve"
@@ -509,6 +562,20 @@ class TestGetExecutionState:
 
         assert isinstance(result, NukeGetExecutionStateResultFailure)
         assert len(engine.requests) == 1, "must not ask the engine for flow state with nothing loaded"
+
+    async def test_a_started_run_the_engine_has_not_picked_up_is_reported_as_running(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A host polling right after execute would otherwise read the run as already over."""
+        use_engine(monkeypatch, execute_responses())
+
+        await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        result = await handle_get_execution_state(NukeGetExecutionStateRequest())
+        await flow_run.settled()
+
+        assert isinstance(result, NukeGetExecutionStateResultSuccess)
+        assert result.running is True
+        assert result.active_nodes == [], "the engine has reported no node yet, and inventing one would be a lie"
 
 
 class TestCancelExecution:

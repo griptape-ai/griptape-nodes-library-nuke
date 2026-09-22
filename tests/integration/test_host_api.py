@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, NodeState, Verb
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, ExecutionState, NodeState, Notification, Verb
 from tests.integration.host_api_client import (
     HostClient,
     detail_of,
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
 ENGINE = running_engine()
 NAMED_WORKFLOW = os.environ.get("GRIPTAPE_NODES_SMOKE_WORKFLOW")
 NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "30"))
+# Long enough to batch frames, short enough to notice a terminal event promptly.
+DRAIN_TICK_S = 0.5
 
 pytestmark = [
     pytest.mark.skipif(
@@ -53,7 +56,7 @@ def engine() -> Engine:
 
 @pytest.fixture
 def client(engine: Engine) -> Iterator[HostClient]:
-    """Connect before each test and cancel any execution during teardown."""
+    """Connect before each test, and leave the engine idle for the next one."""
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
             Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
@@ -69,6 +72,18 @@ def client(engine: Engine) -> Iterator[HostClient]:
             state = connected.request(Verb.GET_EXECUTION_STATE)
             if succeeded(state) and result_of(state).get("running"):
                 connected.request(Verb.CANCEL_EXECUTION)
+                # Execute replies at kickoff and cancel does not wait, so a run can outlive its test
+                # and the next test's load would be refused mid-run.
+                _wait_for_idle(connected)
+
+
+def _wait_for_idle(client: HostClient) -> None:
+    deadline = time.monotonic() + NOTIFICATION_WINDOW_S
+    while time.monotonic() < deadline:
+        state = client.request(Verb.GET_EXECUTION_STATE)
+        if succeeded(state) and not result_of(state).get("running"):
+            return
+        client.drain(DRAIN_TICK_S)
 
 
 def _runnable_workflows(client: HostClient) -> list[dict[str, Any]]:
@@ -104,19 +119,29 @@ def _load_smoke_workflow(client: HostClient) -> dict[str, Any]:
     return body
 
 
-def _run_and_collect(client: HostClient, payload: dict[str, Any]) -> set[str]:
-    """Execute once and return the nodes that reported resolved during that execution.
+def _drain_run(client: HostClient, mark: int) -> list[Any]:
+    """Collect a run's notifications up to its first terminal event and one tick past it, sending nothing.
 
-    Notifications land while the execute reply is being waited for, so the accumulated list is
-    marked first; the drain afterwards only catches what trails the reply.
+    Execute replies at kickoff, so every event a run pushes trails the reply. The extra tick
+    catches a `failed` verdict or values trailing `completed`.
     """
+    deadline = time.monotonic() + NOTIFICATION_WINDOW_S
+    while time.monotonic() < deadline:
+        if any(event.type == Notification.EXECUTION_STATE for event in client.notifications[mark:]):
+            client.drain(DRAIN_TICK_S)
+            break
+        client.drain(DRAIN_TICK_S)
+    return client.notifications[mark:]
+
+
+def _run_and_collect(client: HostClient, payload: dict[str, Any]) -> set[str]:
+    """Execute once and return the nodes that reported resolved during that execution."""
     mark = len(client.notifications)
     reply = client.request(Verb.EXECUTE_WORKFLOW, payload)
     assert succeeded(reply), f"execute failed: {detail_of(reply)}"
-    client.drain(NOTIFICATION_WINDOW_S)
     return {
         event.body["node_name"]
-        for event in client.notifications[mark:]
+        for event in _drain_run(client, mark)
         if event.type == "NukeNodeStateEvent" and event.body["state"] == NodeState.RESOLVED
     }
 
@@ -294,13 +319,15 @@ class TestExecute:
         The fixture has already connected, which is what installs the bridge.
         """
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        mark = len(client.notifications)
         started = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
         assert succeeded(started), f"execute failed: {detail_of(started)}"
+        assert result_of(started)["state"] == ExecutionState.RUNNING, "the reply reports a run that has begun"
         assert result_of(started)["rejected_inputs"] == [], "no inputs were sent, so none may be rejected"
 
-        client.drain(NOTIFICATION_WINDOW_S)
+        events = _drain_run(client, mark)
 
-        node_events = client.of_type("NukeNodeStateEvent")
+        node_events = [event for event in events if event.type == "NukeNodeStateEvent"]
         assert node_events, (
             f"no NukeNodeStateEvent arrived in {NOTIFICATION_WINDOW_S}s. Either the execution "
             f"bridge is not installed or push does not reach a local_socket client."
@@ -320,10 +347,10 @@ class TestExecute:
         control flow is GTText, contradicting describe_workflow which never lists it.
         """
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        mark = len(client.notifications)
         assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
-        client.drain(NOTIFICATION_WINDOW_S)
 
-        value_events = client.of_type("NukeParameterValueEvent")
+        value_events = [event for event in _drain_run(client, mark) if event.type == "NukeParameterValueEvent"]
         assert value_events, "no NukeParameterValueEvent arrived, so the value path is untested"
         for event in value_events:
             descriptor = event.body["value"]
@@ -346,8 +373,9 @@ class TestExecute:
         """
         loaded = _load_smoke_workflow(client)
         workflow_id = loaded["workflow_id"]
+        mark = len(client.notifications)
         assert succeeded(client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
-        client.drain(NOTIFICATION_WINDOW_S)
+        _drain_run(client, mark)
 
         reply = client.request(Verb.GET_PARAMETER_VALUES, {"sections": ["outputs"]})
         assert succeeded(reply), f"reading parameter values failed: {detail_of(reply)}"

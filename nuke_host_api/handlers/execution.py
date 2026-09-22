@@ -3,13 +3,11 @@ from __future__ import annotations
 from griptape_nodes.retained_mode.events.execution_events import (
     CancelFlowRequest,
     CancelFlowResultSuccess,
-    StartFlowRequest,
-    StartFlowResultSuccess,
     UnresolveFlowRequest,
     UnresolveFlowResultSuccess,
 )
 
-from nuke_host_api import engine, parameter_values, shape
+from nuke_host_api import engine, flow_run, parameter_values, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
@@ -32,23 +30,32 @@ async def handle_execute_workflow(
     """Refuse concurrent runs because engine events carry no execution ID.
 
     StartFlowRequest is sent with wait_for_completion=True, so it resolves when the flow does.
-    A success reply means the run finished; a failure reply covers both a refusal to start and a
-    run that started and then failed. Progress is the notification stream, not this reply.
+    It is detached and this result reports a run that has begun. Progress and outcome are the
+    notification stream.
     """
-    attempted = (
-        f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
+    with flow_run.reserve() as reserved:
+        if reserved and not await engine.is_running():
+            return await _start_loaded_workflow(request)
+
+    return failure(
+        NukeExecuteWorkflowResultFailure,
+        attempted=_attempted(request),
+        because=(
+            "the engine is already executing. Wait for the current run to "
+            "finish, or cancel it with NukeCancelExecutionRequest, then retry."
+        ),
+        workflow_id=request.workflow_id,
     )
 
-    if await engine.is_running():
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=(
-                "the engine is already executing. Wait for the current run to "
-                "finish, or cancel it with NukeCancelExecutionRequest, then retry."
-            ),
-            workflow_id=request.workflow_id,
-        )
+
+def _attempted(request: NukeExecuteWorkflowRequest) -> str:
+    return f"to execute workflow '{request.workflow_id}'" if request.workflow_id else "to execute the loaded workflow"
+
+
+async def _start_loaded_workflow(
+    request: NukeExecuteWorkflowRequest,
+) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
+    attempted = _attempted(request)
 
     loaded_id = await engine.current_workflow_id()
     if not loaded_id:
@@ -116,25 +123,14 @@ async def handle_execute_workflow(
                 rejected_inputs=rejected,
             )
 
-    started = await engine.request(
-        StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
-    )
-    if started.value is None:
-        return failure(
-            NukeExecuteWorkflowResultFailure,
-            attempted=attempted,
-            because=f"the engine refused the run or the run failed. {started.details}",
-            workflow_id=loaded_id,
-            applied_inputs=applied,
-            rejected_inputs=rejected,
-        )
+    flow_run.start(flow_name)
 
     return NukeExecuteWorkflowResultSuccess(
         workflow_id=loaded_id,
-        state=ExecutionState.COMPLETED,
+        state=ExecutionState.RUNNING,
         applied_inputs=applied,
         rejected_inputs=rejected,
-        result_details=f"Ran workflow '{loaded_id}'{' from unresolved' if request.unresolve_first else ''}.",
+        result_details=f"Started workflow '{loaded_id}'{' from unresolved' if request.unresolve_first else ''}.",
     )
 
 
@@ -163,7 +159,8 @@ async def handle_get_execution_state(
 
     active = list(state.value.resolving_nodes)
     involved = list(state.value.involved_nodes)
-    running = engine.flow_is_running(state.value)
+    # A start the engine has not picked up yet has no nodes to report, and is not idle.
+    running = flow_run.pending() or engine.flow_is_running(state.value)
 
     workflow_id = await engine.current_workflow_id()
 

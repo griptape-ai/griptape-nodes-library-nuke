@@ -8,6 +8,7 @@ resolves macros through its own ``GriptapeNodes`` import instead, patched separa
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
@@ -90,6 +91,9 @@ class FakeEngine:
     callable that receives the request and computes one, needed when the same request
     type is issued more than once with different outcomes (e.g. one SetParameterValueRequest
     per input).
+
+    ``suspends`` yields to the loop inside every request, as an engine request may, which is what
+    lets two handlers interleave.
     """
 
     def __init__(
@@ -98,13 +102,17 @@ class FakeEngine:
         *,
         session_id: str = "session-abc",
         engine_id: str = "engine-xyz",
+        suspends: bool = False,
     ) -> None:
         self._responses = responses or {}
         self._session_id = session_id
         self._engine_id = engine_id
+        self._suspends = suspends
         self.requests: list[Any] = []
 
     async def ahandle_request(self, request: Any) -> Any:
+        if self._suspends:
+            await asyncio.sleep(0)
         self.requests.append(request)
         response = self._responses.get(type(request))
         if response is None:

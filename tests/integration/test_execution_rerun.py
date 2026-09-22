@@ -13,6 +13,7 @@ import pytest
 from griptape_nodes.retained_mode.events.execution_events import NodeResolvedEvent
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
+from nuke_host_api import flow_run
 from nuke_host_api.events import NukeExecuteWorkflowRequest, NukeExecuteWorkflowResultSuccess
 from nuke_host_api.handlers import handle_execute_workflow
 
@@ -27,6 +28,8 @@ DATA_NODE = "Canary"
 async def _execute(**fields: Any) -> None:
     result = await handle_execute_workflow(NukeExecuteWorkflowRequest(**fields))
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result.result_details
+    # The reply lands at kickoff, and the engine's start request resolves when the flow does.
+    await flow_run.settled()
 
 
 @pytest.fixture

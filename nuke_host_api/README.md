@@ -20,6 +20,7 @@ nuke_host_api/
     values.py                        bulk parameter-value reads and writes, addressed to the loaded workflow
     projects.py                      list, current, switch, describe a project
   engine.py                        engine request narrowing and shared queries
+  flow_run.py                      the detached flow start, and whether a run is in progress
   shape.py                         workflow_shape -> host-visible parameters
   parameter_values.py              reading a loaded workflow's values, shared by load and values
   dispatch.py                      handler calling convention: request guard, failure wording
@@ -32,6 +33,7 @@ tests/unit/
   test_macros.py                   macro resolution, patterns, unresolved tokens
   test_shape.py                    shape parsing, parameter narrowing, runnability
   test_engine.py                   narrowing, event topic, shared queries
+  test_flow_run.py                 detachment, the run slot, a failed run reaching a host
   test_parameter_values.py         section reading, unavailable reporting, control exclusion
   test_dispatch.py                 request guard, failure wording
   test_library_version.py          manifest read and reload reset
@@ -159,14 +161,18 @@ drives the engine, including the editor. An identifier can be added when engine 
 What makes that survivable is refusing to start a second run while one is in progress.
 Without the guard, a host could not tell which run any following notification described, or
 which one a cancel would stop. `NukeLoadWorkflowRequest` refuses mid-run for the same reason
-and a stronger one: it would discard the running graph.
+and a stronger one: it would discard the running graph. Engine flow state alone would leave two
+gaps, since the engine reports a flow running only once it picks the start up: a second execute
+arriving during the first's preflight, and one arriving between the first's reply and the flow
+starting. So `flow_run` reserves the one run slot before execute's first await and holds it until
+the engine answers the start, and every verb that refuses mid-run reads that answer too.
 
-Every verb is async, and execute awaits the engine's `StartFlowRequest` sent with
-`wait_for_completion=True`, so it resolves when the flow does. Two things follow. The engine's
-loop stays free while a run is in flight, so notifications publish live and other verbs still
-answer, including the refusals above. And execute's own reply lands at the end of the run, so it
-reports a run that already happened; a host gives it no request timeout and reads progress from
-notifications, which can still be arriving after the reply.
+Every verb is async, and the engine's `StartFlowRequest`, sent with `wait_for_completion=True`,
+resolves only when the flow does, so execute detaches it rather than awaiting it. The reply lands
+at kickoff and reports a run that has begun; progress and outcome are the notification stream.
+The engine's answer to the start is its verdict on the run, the only flow-level outcome it gives,
+so a failure is published as a `NukeExecutionStateEvent` with `state: "failed"`, after
+`completed` when a node errored mid-run.
 
 Six engine requests plus one per input forwarded to the engine, plus one when
 `unresolve_first` is set, and none of them loads.
@@ -394,10 +400,10 @@ blocks.
 path: a reconnecting host that missed every notification reads what is running from the
 first and what every declared parameter currently holds from the second. Both read straight from
 the engine on every call, holding no cache, which is why neither can drift from the
-engine's own view. Neither is a recovery path for a run's outcome: the engine exposes no
-flow-level success/failure field anywhere, on either request or any other, so a host that
-misses the live `NukeNodeStateEvent` with `state: "failed"` has no way to learn afterward
-that a run failed.
+engine's own view. Neither is a recovery path for a run's outcome. The engine's only verdict is
+its answer to the start execute sends, pushed once as `failed` and never replayed, so a host that
+misses it, or the live `NukeNodeStateEvent` with `state: "failed"`, has no way to learn
+afterward that a run failed.
 
 **Outputs have exactly one meaning:** the parameters `NukeDescribeWorkflowRequest` declared.
 The engine's terminal event reports values for whichever node control flow ended on, which

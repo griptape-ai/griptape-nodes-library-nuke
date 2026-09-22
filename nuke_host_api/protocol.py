@@ -49,8 +49,8 @@ PARAMETER_SECTIONS = (ParameterSection.INPUTS, ParameterSection.OUTPUTS)
 
 
 class ExecutionState:
-    """``COMPLETED`` has no success meaning. ``RUNNING`` and ``FAILED`` are reserved: the engine
-    exposes no flow outcome, and no reply or notification reports a run as in progress.
+    """``COMPLETED`` says the flow finished and has no success meaning. ``FAILED`` is the engine's
+    verdict on a run execute started, and can follow ``COMPLETED`` for the same run.
     """
 
     RUNNING = "running"
