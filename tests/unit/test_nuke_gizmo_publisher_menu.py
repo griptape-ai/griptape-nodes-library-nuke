@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from publish_gizmo.constants import menu_label
+
 
 def _extract_menu_code() -> str:
     """Parse nuke_gizmo_publisher.py and extract the menu_code string literal
@@ -119,3 +121,17 @@ def test_menu_code_warns_on_remote_mount() -> None:
     # Helper and warning must be inside the if _QT_AVAILABLE block (headless safe).
     qt_guard_idx = code.rindex("if _QT_AVAILABLE")
     assert code.index("_griptape_is_remote_mount") > qt_guard_idx
+
+
+def test_menu_code_label_matches_constants_menu_label() -> None:
+    """The publish dialog tells the artist which menu entry to look for, so the label
+    it computes and the one the generated menu.py computes must not drift apart.
+
+    menu.py runs inside Nuke where publish_gizmo is not importable, so it keeps its own
+    copy of the expression instead of importing menu_label.
+    """
+    code = _extract_menu_code()
+    expr = next(line.strip() for line in code.splitlines() if line.strip().startswith("label = stem."))
+    ns = {"stem": "some_long_workflow_name"}
+    exec(expr, ns)  # noqa: S102
+    assert ns["label"] == menu_label("some_long_workflow_name")
