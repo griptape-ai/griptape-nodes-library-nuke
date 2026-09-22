@@ -715,14 +715,12 @@ Applies inputs to the loaded workflow and starts it. Loads nothing: call
 `NukeLoadWorkflowRequest` first. The reply lands at kickoff, not at the end of the run, so
 progress and outcome are the notification stream, not this result.
 
-The handler sends the engine's own `StartFlowRequest` with `wait_for_completion=True`, so it
-resolves only when the flow does. The handler detaches it and replies as soon as the run is under
-way. Three things follow. A normal request timeout is
-enough: no reply has to outlast a render. A host learns a run began from
-this reply, with no need to watch for the first `NukeNodeStateEvent` or poll
-`NukeGetExecutionStateRequest`. And the engine's verdict on the run lands after the reply is
-gone, so a failed run, refused at validation or errored mid-run, arrives as a
-`NukeExecutionStateEvent` with `state: "failed"`. A clean run gets no verdict event.
+The engine's `StartFlowRequest`, sent with `wait_for_completion=True`, resolves only when the flow
+ends, so the handler detaches it and replies at kickoff. A normal request timeout is enough, and
+the reply itself signals that the run began. The engine's later verdict arrives on the
+notification stream: a validation refusal emits only a `NukeExecutionStateEvent` with
+`state: "failed"`; a mid-run node error emits `completed` followed by `failed`. A clean run gets
+no verdict event.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -824,9 +822,9 @@ Nothing loaded is also a refusal, naming `NukeLoadWorkflowRequest`.
 One execution at a time. Starting a run while one is in progress returns
 `NukeExecuteWorkflowResultFailure` rather than displacing it, because the engine threads no
 execution identifier through its execution events: a second run's notifications would be
-indistinguishable from the first's, and a cancel could not say which to stop. The guard holds from
-the moment an execute passes it, through its preflight and the gap before the engine reports the
-flow running, so a racing execute is refused before it writes any input. Since a run no
+indistinguishable from the first's, and a cancel could not say which to stop. The guard covers
+the first execute's preflight and the gap before the engine reports the flow running, so a racing
+execute is refused before writing any input. Since a run no
 longer occupies the engine, this refusal is what a second host gets mid-run rather than a
 request that waits. An execution id would arrive as an added field, which a tolerant parser
 already handles.
@@ -1246,19 +1244,17 @@ Terminal notification.
 ```
 
 `completed` means only that the engine finished the flow, not that it succeeded. The
-engine's `ControlFlowResolvedEvent` fires on both a clean run and an errored one and
-carries no status field. The one flow-level verdict the engine gives is its answer to the start
-`NukeExecuteWorkflowRequest` sends, and a failure is pushed as `failed` with the engine's reason
-in `detail`: alone when the engine refused the run at validation, after `completed` when a node
-errored mid-run. A clean run gets no verdict event, and neither does a run started from the
-editor, whose start this library never sent. `NukeGetExecutionStateRequest` keeps reporting
+engine's `ControlFlowResolvedEvent` fires on both a clean run and an errored one but carries no
+status. The engine's verdict is its answer to the start `NukeExecuteWorkflowRequest` sent. A
+validation refusal emits only `failed`; a mid-run node error emits `completed` followed by
+`failed`, with the reason in `detail`. A clean run gets no verdict event, and neither does a run
+started from the editor, whose start this library never sent. `NukeGetExecutionStateRequest` keeps reporting
 `running: true` until the verdict, if any, has been published.
 
 For a run started elsewhere, the only failure signal is the live `NukeNodeStateEvent` with
 `state: "failed"`. Neither signal is replayed. `NukeGetExecutionStateRequest` carries running
-state and active/involved nodes, never an outcome, and `NukeGetParameterValuesRequest` reads
-values, a separate call with a separate purpose. A host that drops its connection or connects
-late has no way to learn, after the fact, that a run failed.
+state and active/involved nodes, never an outcome; `NukeGetParameterValuesRequest` reads values,
+not outcomes. A disconnected or late host cannot learn that a run failed.
 
 A run can end with two terminal states. `failed` follows `completed` when a node errored, and a
 cancelled run can report `completed` and `cancelled` in either order, because the engine's cancel

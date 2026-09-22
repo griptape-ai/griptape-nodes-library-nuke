@@ -89,10 +89,7 @@ class TestExecuteWorkflow:
         assert started.wait_for_completion is True
 
     async def test_the_reply_lands_before_the_engine_is_asked_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The engine's start request resolves when the flow does, so awaiting it would hold the reply.
-
-        A host learns a run began from this reply and reads progress from notifications.
-        """
+        """StartFlowRequest resolves only when the flow ends, so awaiting it would hold the reply."""
         engine = use_engine(monkeypatch, execute_responses())
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
@@ -172,11 +169,7 @@ class TestExecuteWorkflow:
     async def test_refuses_a_second_run_while_the_first_start_is_still_detached(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The engine reports a flow running only once it picks the start up.
-
-        Replying before the run starts opens a window the engine's own guard would answer with a
-        failed notification for a run the host was told had begun.
-        """
+        """The reservation covers the gap before the engine reports the flow running."""
         use_engine(monkeypatch, execute_responses())
 
         first = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
@@ -190,11 +183,7 @@ class TestExecuteWorkflow:
     async def test_refuses_a_second_run_that_arrives_during_the_first_ones_preflight(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The first run is not started yet, so only a slot taken before any await refuses the second.
-
-        Otherwise both write inputs, both replies say started, and the engine refuses the loser
-        afterwards with a failed notification no host can tell from the winner's.
-        """
+        """Reserving before execute's first await prevents a racing refusal from writing inputs."""
         engine = use_engine(monkeypatch, execute_responses(), suspends=True)
 
         first, second = await asyncio.gather(
@@ -442,7 +431,6 @@ class TestExecuteWorkflow:
     async def test_the_engines_own_reason_for_refusing_to_start_reaches_the_host_as_a_notification(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The reply is gone by the time the engine answers, so a refusal it never pushes is lost."""
         published: list[Any] = []
         monkeypatch.setattr(execution_bridge, "publish", published.append)
         use_engine(
@@ -566,7 +554,6 @@ class TestGetExecutionState:
     async def test_a_started_run_the_engine_has_not_picked_up_is_reported_as_running(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A host polling right after execute would otherwise read the run as already over."""
         use_engine(monkeypatch, execute_responses())
 
         await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))

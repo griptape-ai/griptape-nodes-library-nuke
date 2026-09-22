@@ -1,5 +1,3 @@
-"""Start a flow and let it outlive the reply that asked for it."""
-
 from __future__ import annotations
 
 import asyncio
@@ -18,19 +16,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("griptape_nodes")
 
-# Process-wide because the run outlives the request that started it, and a task nothing holds
-# is collected mid-run.
+# Keep a strong reference to the detached task until the run ends.
 _RUN: asyncio.Task[None] | None = None
 _RESERVED = False
 
 
 @contextmanager
 def reserve() -> Iterator[bool]:
-    """Hold the one run slot across execute's preflight, yielding whether it was free.
-
-    Taken without awaiting, so a racing execute is refused before it writes inputs rather than
-    passing the guard and being refused by the engine after its reply said the run started.
-    """
+    """Reserve before execute's first await so a racing execute is refused before writing inputs."""
     global _RESERVED  # noqa: PLW0603
     if pending():
         yield False
@@ -43,7 +36,6 @@ def reserve() -> Iterator[bool]:
 
 
 def start(flow_name: str) -> None:
-    """Kick the flow off on the engine's own loop, so a caller replies without awaiting the run."""
     global _RUN  # noqa: PLW0603
     _RUN = asyncio.create_task(_run(flow_name))
 
@@ -54,12 +46,11 @@ def pending() -> bool:
 
 
 async def busy() -> bool:
-    """One answer for every verb that refuses mid-run, including before the engine reports the flow."""
     return pending() or await engine.is_running()
 
 
 async def settled() -> None:
-    """Await the run's end. Shielded so a cancelled waiter does not cancel the run."""
+    """Await the run without letting a cancelled waiter cancel it."""
     if _RUN is not None:
         await asyncio.shield(_RUN)
 

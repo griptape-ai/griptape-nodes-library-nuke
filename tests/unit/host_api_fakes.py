@@ -92,8 +92,6 @@ class FakeEngine:
     type is issued more than once with different outcomes (e.g. one SetParameterValueRequest
     per input).
 
-    ``suspends`` yields to the loop inside every request, as an engine request may, which is what
-    lets two handlers interleave.
     """
 
     def __init__(

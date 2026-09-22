@@ -28,7 +28,6 @@ DATA_NODE = "Canary"
 async def _execute(**fields: Any) -> None:
     result = await handle_execute_workflow(NukeExecuteWorkflowRequest(**fields))
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result.result_details
-    # The reply lands at kickoff, and the engine's start request resolves when the flow does.
     await flow_run.settled()
 
 

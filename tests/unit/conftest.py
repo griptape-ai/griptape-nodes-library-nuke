@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _no_detached_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start every test with the run slot free: a task left on a closed loop never settles."""
+    """Discard detached tasks bound to a closed test loop."""
     monkeypatch.setattr(flow_run, "_RUN", None)
     monkeypatch.setattr(flow_run, "_RESERVED", False)
 

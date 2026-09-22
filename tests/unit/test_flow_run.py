@@ -1,5 +1,3 @@
-"""Tests for the detached flow start."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -35,7 +33,6 @@ def _published(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 
 async def test_the_start_request_is_not_issued_before_the_caller_returns(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The point of the module: a caller that awaited the start would wait out the whole run."""
     engine = use_engine(monkeypatch, STARTS)
 
     flow_run.start("main")
@@ -56,7 +53,6 @@ async def test_a_started_flow_is_pending_until_the_start_settles(monkeypatch: py
 
 
 async def test_an_idle_engine_is_busy_while_a_start_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The engine reports a flow running only once it picks the start up, and a run is one run."""
     use_engine(monkeypatch, {**STARTS, **IDLE})
 
     flow_run.start("main")
@@ -67,7 +63,7 @@ async def test_an_idle_engine_is_busy_while_a_start_is_pending(monkeypatch: pyte
 
 
 async def test_a_reservation_is_busy_until_released(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute's preflight writes inputs, so a load or a set landing inside it must be refused too."""
+    """Loads and writes must also refuse during execute preflight."""
     use_engine(monkeypatch, IDLE)
 
     with flow_run.reserve() as reserved:
@@ -87,7 +83,6 @@ def test_the_slot_cannot_be_reserved_twice_or_while_a_start_is_pending(monkeypat
 
 
 def test_a_preflight_that_raises_releases_the_slot() -> None:
-    """Otherwise one bad request leaves every later execute refused as already executing."""
     with pytest.raises(RuntimeError), flow_run.reserve():
         raise RuntimeError
 
@@ -102,7 +97,6 @@ class _Unfinished:
 async def test_a_failed_run_reaches_the_host_as_a_failed_execution_state(
     monkeypatch: pytest.MonkeyPatch, _published: list[Any]
 ) -> None:
-    """The reply said the run started, so the engine's verdict has nowhere else to go."""
     use_engine(
         monkeypatch,
         {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])},
@@ -119,7 +113,7 @@ async def test_a_failed_run_reaches_the_host_as_a_failed_execution_state(
 async def test_an_engine_that_raises_reaches_the_host_the_same_way(
     monkeypatch: pytest.MonkeyPatch, _published: list[Any]
 ) -> None:
-    """Nothing awaits this task, so an exception left to propagate is lost with it."""
+    """Detached task exceptions must reach the event stream."""
 
     def explode(_request: Any) -> Any:
         msg = "engine went away"
@@ -136,7 +130,6 @@ async def test_an_engine_that_raises_reaches_the_host_the_same_way(
 
 
 async def test_a_clean_start_publishes_nothing(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
-    """Progress is the engine's own event feed, which the bridge already forwards."""
     use_engine(monkeypatch, STARTS)
 
     flow_run.start("main")

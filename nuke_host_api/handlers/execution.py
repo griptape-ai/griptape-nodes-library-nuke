@@ -27,12 +27,7 @@ from nuke_host_api.protocol import ExecutionState
 async def handle_execute_workflow(
     request: NukeExecuteWorkflowRequest,
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
-    """Refuse concurrent runs because engine events carry no execution ID.
-
-    StartFlowRequest is sent with wait_for_completion=True, so it resolves when the flow does.
-    It is detached and this result reports a run that has begun. Progress and outcome are the
-    notification stream.
-    """
+    """Refuse concurrent runs because engine events carry no execution ID."""
     with flow_run.reserve() as reserved:
         if reserved and not await engine.is_running():
             return await _start_loaded_workflow(request)
@@ -159,7 +154,7 @@ async def handle_get_execution_state(
 
     active = list(state.value.resolving_nodes)
     involved = list(state.value.involved_nodes)
-    # A start the engine has not picked up yet has no nodes to report, and is not idle.
+    # A reserved or detached start is running before the engine reports a node.
     running = flow_run.pending() or engine.flow_is_running(state.value)
 
     workflow_id = await engine.current_workflow_id()

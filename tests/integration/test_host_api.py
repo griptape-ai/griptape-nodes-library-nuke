@@ -56,7 +56,6 @@ def engine() -> Engine:
 
 @pytest.fixture
 def client(engine: Engine) -> Iterator[HostClient]:
-    """Connect before each test, and leave the engine idle for the next one."""
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
             Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
@@ -72,8 +71,7 @@ def client(engine: Engine) -> Iterator[HostClient]:
             state = connected.request(Verb.GET_EXECUTION_STATE)
             if succeeded(state) and result_of(state).get("running"):
                 connected.request(Verb.CANCEL_EXECUTION)
-                # Execute replies at kickoff and cancel does not wait, so a run can outlive its test
-                # and the next test's load would be refused mid-run.
+                # Wait because execute and cancel replies do not mean the run has ended.
                 _wait_for_idle(connected)
 
 
@@ -120,11 +118,7 @@ def _load_smoke_workflow(client: HostClient) -> dict[str, Any]:
 
 
 def _drain_run(client: HostClient, mark: int) -> list[Any]:
-    """Collect a run's notifications up to its first terminal event and one tick past it, sending nothing.
-
-    Execute replies at kickoff, so every event a run pushes trails the reply. The extra tick
-    catches a `failed` verdict or values trailing `completed`.
-    """
+    """Collect through the first terminal event plus one tick for trailing verdicts and values."""
     deadline = time.monotonic() + NOTIFICATION_WINDOW_S
     while time.monotonic() < deadline:
         if any(event.type == Notification.EXECUTION_STATE for event in client.notifications[mark:]):
@@ -135,7 +129,6 @@ def _drain_run(client: HostClient, mark: int) -> list[Any]:
 
 
 def _run_and_collect(client: HostClient, payload: dict[str, Any]) -> set[str]:
-    """Execute once and return the nodes that reported resolved during that execution."""
     mark = len(client.notifications)
     reply = client.request(Verb.EXECUTE_WORKFLOW, payload)
     assert succeeded(reply), f"execute failed: {detail_of(reply)}"

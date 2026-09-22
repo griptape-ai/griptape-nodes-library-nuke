@@ -221,7 +221,7 @@ const Actions = (function () {
     });
     noteRunActivity(true);
 
-    // Open logging and polling before execute; a run's events trail its reply.
+    // Open logging and polling before execute so no run event is missed.
     openRun();
     startPolling();
 
@@ -346,7 +346,7 @@ const Actions = (function () {
     const history = state().history.slice();
     const entry = history.find((run) => run.state === "running");
     if (!entry) return;
-    // A `failed` verdict can trail `completed`, and closing waits out the grace, so read the latest.
+    // A trailing `failed` verdict supersedes `completed` during the grace period.
     const final = state().execution || terminal;
     const failures = state()
       .nodeStates.filter((node) => node.state === "failed")
