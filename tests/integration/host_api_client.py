@@ -118,11 +118,7 @@ class HostClient:
         return self.reply_for(self.send(request_type, payload))
 
     def send(self, request_type: str, payload: dict[str, Any] | None = None) -> str:
-        """Send without waiting, and return the id to claim the reply with.
-
-        Execute replies when the run ends, so racing a second request against a run in
-        progress means not waiting for the first reply.
-        """
+        """Send without waiting, and return the id to claim the reply with."""
         request_id = uuid.uuid4().hex
         self._send(
             {
