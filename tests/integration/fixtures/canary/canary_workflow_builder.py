@@ -41,6 +41,8 @@ from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import pytest
+
 CANARY_LIBRARY_DIR = Path(__file__).parent / "canary_library"
 NUKE_LIBRARY_DIR = Path(__file__).parents[4]
 
@@ -280,3 +282,50 @@ def connect(source_node: str, source_param: str, target_node: str, target_param:
         )
     )
     assert isinstance(result, CreateConnectionResultSuccess), result
+
+
+def build_start_canary_end_flow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, file_name: str, data_node_name: str = "Canary"
+) -> None:
+    """Register the canary library and save Start -> End with a data node feeding End."""
+    workspace = tmp_path / "workspace"
+    (workspace / "assets").mkdir(parents=True)
+    (workspace / "assets" / "canary_asset.txt").write_text("canary asset\n")
+    (workspace / "inputs").mkdir()
+    (workspace / "inputs" / "canary_macro_asset.txt").write_text("canary input\n")
+    monkeypatch.setenv("GTN_CONFIG_WORKSPACE_DIRECTORY", str(workspace))
+    monkeypatch.setenv("GTN_CONFIG_ENABLE_WORKSPACE_FILE_WATCHING", "false")
+
+    GriptapeNodes.EventManager().initialize_queue()
+
+    nuke_library = NUKE_LIBRARY_DIR / "griptape-nodes-library.json"
+    result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(nuke_library)))
+    assert result.succeeded(), result
+    canary_library = materialize_canary_library(tmp_path / "canary_library")
+    result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(canary_library)))
+    assert result.succeeded(), result
+
+    result = GriptapeNodes.handle_request(SetWorkflowContextRequest())
+    assert result.succeeded(), result
+    flow = GriptapeNodes.handle_request(CreateFlowRequest(parent_flow_name=None, flow_name="ControlFlow_1"))
+    assert isinstance(flow, CreateFlowResultSuccess), flow
+    create_node("NukeStartFlow", "Start", flow.flow_name)
+    create_node("CanaryNode", data_node_name, flow.flow_name)
+    create_node("NukeEndFlow", "End", flow.flow_name)
+    result = GriptapeNodes.handle_request(
+        AddParameterToNodeRequest(
+            node_name="End",
+            parameter_name="output_path",
+            default_value="",
+            tooltip="",
+            type="str",
+            input_types=["str"],
+            mode_allowed_output=False,
+        )
+    )
+    assert result.succeeded(), result
+    connect("Start", "exec_out", "End", "exec_in")
+    connect(data_node_name, "output_path", "End", "output_path")
+
+    result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name=file_name))
+    assert result.succeeded(), result
