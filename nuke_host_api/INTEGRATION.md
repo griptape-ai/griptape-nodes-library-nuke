@@ -716,11 +716,16 @@ Applies inputs to the loaded workflow and runs it. Loads nothing: call
 notification stream, not this result. Give this verb no request timeout, or one as long as the
 longest render the host allows.
 
-The engine's own `StartFlowRequest` resolves only when the flow does, and the handler awaits it
-rather than detaching it, which is what keeps the engine's loop free to publish notifications
-and answer other requests mid-run. A host that wants to know a run has begun watches for the
-first `NukeNodeStateEvent` or `NukeExecutionNodesEvent`, or polls
-`NukeGetExecutionStateRequest`.
+The reply can arrive before the run's last notifications, including the terminal
+`NukeExecutionStateEvent`: the engine sends a result as soon as its handler returns, while the
+run's queued events are still going out. Keep reading `event_topic` after the reply, and treat
+the terminal `NukeExecutionStateEvent` as the end of the run's notifications.
+
+The handler sends the engine's own `StartFlowRequest` with `wait_for_completion=True`, so it
+resolves only when the flow does. The handler awaits it rather than detaching it, which is what
+keeps the engine's loop free to publish notifications and answer other requests mid-run. A host
+that wants to know a run has begun watches for the first `NukeNodeStateEvent` or
+`NukeExecutionNodesEvent`, or polls `NukeGetExecutionStateRequest`.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -750,7 +755,7 @@ the request instead of starting a run that would hand those same values back.
 | `NukeExecuteWorkflowResultSuccess` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The workflow that ran. Always the loaded one, so a host that sent no id still learns what it ran |
-| `state` | `str` | Always `completed`, which carries no outcome: the engine reports none. Node failures arrive as `NukeNodeStateEvent` |
+| `state` | `str` | Always `completed`, even for a run cancelled mid-flight: the cancel shows only as `NukeExecutionStateEvent` `cancelled`. A node error fails the request instead |
 | `applied_inputs` | `list[dict]` | `{node, parameter}` the engine accepted |
 | `rejected_inputs` | `list[dict]` | `{node, parameter, reason}` |
 
@@ -827,15 +832,19 @@ longer occupies the engine, this refusal is what a second host gets mid-run rath
 request that waits. An execution id would arrive as an added field, which a tolerant parser
 already handles.
 
-Inputs are applied before the flow starts, so a refusal to unresolve or a refusal to start
-carries the same `applied_inputs`/`rejected_inputs` a success would have, reporting what is
-now live on the graph despite the run not happening. Every earlier refusal returns both empty:
+A node that errors mid-run fails the request with the engine's error in `result_details`, so
+the host that sent execute learns of the failure from the reply as well as from
+`NukeNodeStateEvent` `failed`.
+
+Inputs are applied before the flow starts, so a refusal to unresolve, a refusal to start, or a
+run that fails carries the same `applied_inputs`/`rejected_inputs` a success would have,
+reporting what is now live on the graph. Every earlier refusal returns both empty:
 nothing was applied yet.
 
 | `NukeExecuteWorkflowResultFailure` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The ID the request named, until the loaded-workflow guard passes; the loaded ID after. Empty when the host named none |
-| `applied_inputs` | `list[dict]` | `{node, parameter}` already written to the graph when the refusal happened. Empty unless the refusal is the unresolve or the start-flow refusal |
+| `applied_inputs` | `list[dict]` | `{node, parameter}` already written to the graph when the refusal happened. Empty unless the failure is the unresolve refusal, the start-flow refusal, or a failed run |
 | `rejected_inputs` | `list[dict]` | `{node, parameter, reason}`, same emptiness rule as `applied_inputs` |
 
 ### NukeGetExecutionStateRequest
@@ -1243,14 +1252,14 @@ Terminal notification.
 
 `completed` means only that the engine finished the flow, not that it succeeded. The
 engine's `ControlFlowResolvedEvent` fires on both a clean run and an errored one and
-carries no status field, so this layer has nothing else to report. `failed` is reserved for an engine-provided flow outcome and is not emitted. The
-only way to detect an actual failure is to catch the live `NukeNodeStateEvent` with
-`state: "failed"` as it is pushed. `NukeGetExecutionStateRequest` cannot recover a missed
-one after the fact: its result carries running state and active/involved nodes, never a
-flow-level outcome, because the engine exposes none. `NukeGetParameterValuesRequest` reads
-values, a separate call with a separate purpose, and it carries no outcome either. A host
-that drops its connection or connects late has no way to learn, after the fact, that a run
-failed.
+carries no status field, so this layer has nothing else to report. `failed` is reserved for an
+engine-provided flow outcome and is not emitted. The host that sent `NukeExecuteWorkflowRequest`
+gets a failed reply when a node errors. Any other host, or one that reconnected mid-run, has no
+such reply and must catch the live `NukeNodeStateEvent` with `state: "failed"` as it is pushed.
+`NukeGetExecutionStateRequest` cannot recover a missed one after the fact: its result carries
+running state and active/involved nodes, never a flow-level outcome, because the engine
+exposes none. `NukeGetParameterValuesRequest` reads values, a separate call with a separate
+purpose, and it carries no outcome either.
 
 May also receive `cancelled` followed by `completed` for one run: the engine's cancel and
 error paths both end in the same completion event, and whether a host observes both for a

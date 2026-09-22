@@ -161,11 +161,12 @@ Without the guard, a host could not tell which run any following notification de
 which one a cancel would stop. `NukeLoadWorkflowRequest` refuses mid-run for the same reason
 and a stronger one: it would discard the running graph.
 
-Every verb is async, and execute awaits the engine's `StartFlowRequest`, which resolves only
-when the flow does. Two things follow. The engine's loop stays free while a run is in flight,
-so notifications publish live and other verbs still answer, including the refusals above. And
-execute's own reply lands at the end of the run, so it reports a run that already happened; a
-host gives it no request timeout and reads progress from notifications.
+Every verb is async, and execute awaits the engine's `StartFlowRequest` sent with
+`wait_for_completion=True`, so it resolves when the flow does. Two things follow. The engine's
+loop stays free while a run is in flight, so notifications publish live and other verbs still
+answer, including the refusals above. And execute's own reply lands at the end of the run, so it
+reports a run that already happened; a host gives it no request timeout and reads progress from
+notifications, which can still be arriving after the reply.
 
 Six engine requests plus one per input forwarded to the engine, plus one when
 `unresolve_first` is set, and none of them loads.
