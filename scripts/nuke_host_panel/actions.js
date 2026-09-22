@@ -346,7 +346,7 @@ const Actions = (function () {
     const history = state().history.slice();
     const entry = history.find((run) => run.state === "running");
     if (!entry) return;
-    // `execution` holds the run's strongest terminal state, which can trail the first one.
+    // `execution` preserves a failed or cancelled verdict received during the grace period.
     const final = state().execution || terminal;
     const failures = state()
       .nodeStates.filter((node) => node.state === "failed")

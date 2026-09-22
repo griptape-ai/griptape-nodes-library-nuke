@@ -385,13 +385,7 @@ class TestExecute:
         assert body["unavailable"] == [], f"every promised output should have answered: {body['unavailable']}"
 
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
-        """Serial execution is what makes the missing engine-side execution id survivable.
-
-        The first execute's reply is not awaited: it lands at kickoff and says nothing about whether
-        the run is still going, which the state read establishes. Skips rather than fails when the
-        first run finishes too fast to race, since that is a property of the chosen workflow and not
-        of the guard.
-        """
+        """Serial execution is what makes the missing engine-side execution id survivable."""
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
         client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
 
