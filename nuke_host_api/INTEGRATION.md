@@ -477,7 +477,7 @@ direction only, by narrowing:
 |---|---|---|
 | A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
-| A wildcard (`any`, `all`) | `GTText` | anything |
+| `str` / `string`, or a wildcard (`any`, `all`) | `GTText` | anything: a locator classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
 | `float` | `GTFloat` | `GTFloat`, whatever the value holds: a float parameter the engine happens to hold `4` in is still a float parameter |
 | `int` | `GTInt` | `GTInt`, or `GTFloat` when the engine hands over a float, because reporting `GTInt` would invite a host to truncate it |
 
