@@ -31,9 +31,14 @@ from nuke_host_api.value_types import CONTROL_PARAM_TYPE, normalize_value
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from griptape_nodes.retained_mode.events.base_events import ExecutionPayload
+    from griptape_nodes.retained_mode.events.base_events import AppPayload, ExecutionPayload
 
 logger = logging.getLogger("griptape_nodes")
+
+
+def publish(payload: AppPayload) -> None:
+    """``broadcast_app_event`` reaches in-process listeners only, so IPC needs ``put_event``."""
+    GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
 
 
 class ExecutionBridge:
@@ -87,7 +92,7 @@ class ExecutionBridge:
         self,
         payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent | NukeExecutionNodesEvent,
     ) -> None:
-        GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
+        publish(payload)
 
     def _emit_node_state(self, node_name: str, state: str, detail: str = "") -> None:
         self._emit(NukeNodeStateEvent(node_name=node_name, state=state, detail=detail))

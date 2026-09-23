@@ -1,7 +1,6 @@
 const Actions = (function () {
   const { VERB, isNumeric } = Protocol;
-  const { DRAIN_GRACE_MS, EXECUTE_TIMEOUT_MS, HISTORY_LIMIT, POLL_TICK_MS, WRITE_THROUGH_DEBOUNCE_MS } =
-    Config;
+  const { DRAIN_GRACE_MS, HISTORY_LIMIT, POLL_TICK_MS, WRITE_THROUGH_DEBOUNCE_MS } = Config;
   const { banner, guard, remembered, rememberFields, remember, setState, state } = Store;
   const { closeSocket, detailOf, isOpen, request, requestBatch, succeeded } = Transport;
   const { noteRunActivity } = Events;
@@ -222,21 +221,17 @@ const Actions = (function () {
     });
     noteRunActivity(true);
 
-    // Open logging and polling before execute; its reply arrives after terminal events.
+    // Open logging and polling before execute so no run event is missed.
     openRun();
     startPolling();
 
     // Supplying the loaded id rejects a graph swapped out by another client.
-    const reply = await request(
-      VERB.EXECUTE_WORKFLOW,
-      {
-        workflow_id: state().loaded.workflow_id,
-        inputs: collectInputs(),
-        // A graph left resolved by the previous run resolves nothing without this.
-        unresolve_first: state().unresolveFirst,
-      },
-      EXECUTE_TIMEOUT_MS,
-    );
+    const reply = await request(VERB.EXECUTE_WORKFLOW, {
+      workflow_id: state().loaded.workflow_id,
+      inputs: collectInputs(),
+      // A graph left resolved by the previous run resolves nothing without this.
+      unresolve_first: state().unresolveFirst,
+    });
 
     if (!succeeded(reply)) {
       stopPolling();
@@ -351,12 +346,14 @@ const Actions = (function () {
     const history = state().history.slice();
     const entry = history.find((run) => run.state === "running");
     if (!entry) return;
+    // `execution` preserves a failed or cancelled verdict received during the grace period.
+    const final = state().execution || terminal;
     const failures = state()
       .nodeStates.filter((node) => node.state === "failed")
       .map((node) => ({ node: node.node, detail: node.detail }));
     Object.assign(entry, {
       endedAt: state().runEndedAt || Date.now(),
-      state: terminal ? terminal.state || "completed" : "completed",
+      state: final ? final.state || "completed" : "completed",
       outputs: Object.assign({}, state().outputValues),
       failures,
     });
@@ -367,6 +364,8 @@ const Actions = (function () {
         failures.length + " node(s) failed.",
         failures.map((failure) => failure.node + ": " + failure.detail).join(" | "),
       );
+    } else if (final && final.state === "failed") {
+      banner("bad", "Run failed.", final.detail || "");
     }
   }
 

@@ -18,8 +18,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from nuke_host_api import flow_run
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+
+@pytest.fixture(autouse=True)
+def _no_detached_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discard detached tasks bound to a closed test loop."""
+    monkeypatch.setattr(flow_run, "_RUN", None)
+    monkeypatch.setattr(flow_run, "_RESERVED", False)
 
 
 @pytest.fixture(autouse=True)

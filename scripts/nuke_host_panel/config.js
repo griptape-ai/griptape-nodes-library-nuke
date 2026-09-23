@@ -4,8 +4,6 @@ const Config = (function () {
   const REQUEST_TIMEOUT_MS = 60000;
   // Missing request handlers fail silently, so connect uses a shorter timeout.
   const CONNECT_TIMEOUT_MS = 12000;
-  // Execute replies after the run; zero disables its timeout.
-  const EXECUTE_TIMEOUT_MS = 0;
 
   // Trailing parameter values follow the terminal event, so outputs are read after a grace period.
   const DRAIN_GRACE_MS = 800;
@@ -28,7 +26,6 @@ const Config = (function () {
     REPLY_TOPIC,
     REQUEST_TIMEOUT_MS,
     CONNECT_TIMEOUT_MS,
-    EXECUTE_TIMEOUT_MS,
     DRAIN_GRACE_MS,
     RECONNECT_BACKOFF_MS,
     WRITE_THROUGH_DEBOUNCE_MS,
