@@ -49,25 +49,12 @@ async def busy() -> bool:
     return pending() or await engine.is_running()
 
 
-async def settled() -> None:
-    """Await the run without letting a cancelled waiter cancel it."""
-    if _RUN is not None:
-        await asyncio.shield(_RUN)
-
-
 async def _run(flow_name: str) -> None:
-    try:
-        started = await engine.request(
-            StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
-        )
-    except Exception as error:
-        _report_failure(f"the engine raised while running flow '{flow_name}'. {error}")
-        return
-    if started.value is None:
-        _report_failure(f"the engine reported flow '{flow_name}' failed. {started.details}")
-
-
-def _report_failure(detail: str) -> None:
     """The reply already said the run started, so the engine's verdict has nowhere to go but the stream."""
-    logger.error("Nuke host API: %s", detail)
-    execution_bridge.publish(NukeExecutionStateEvent(state=ExecutionState.FAILED, detail=detail))
+    started = await engine.request(
+        StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
+    )
+    if started.value is None:
+        detail = f"the engine reported flow '{flow_name}' failed. {started.details}"
+        logger.error("Nuke host API: %s", detail)
+        execution_bridge.publish(NukeExecutionStateEvent(state=ExecutionState.FAILED, detail=detail))

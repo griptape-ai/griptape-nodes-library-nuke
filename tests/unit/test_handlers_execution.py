@@ -36,7 +36,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryRequest,
 )
 
-from nuke_host_api import execution_bridge, flow_run, shape
+from nuke_host_api import execution_bridge, shape
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultFailure,
@@ -50,6 +50,7 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow, handle_get_execution_state
 from nuke_host_api.protocol import ExecutionState
+from tests.detached_run import settled
 from tests.unit.host_api_fakes import WORKFLOW_TABLE, execute_responses, use_engine
 
 NOTHING_LOADED = {GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok")}
@@ -76,7 +77,7 @@ class TestExecuteWorkflow:
         result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.state == ExecutionState.RUNNING
@@ -96,7 +97,7 @@ class TestExecuteWorkflow:
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
-        await flow_run.settled()
+        await settled()
         assert any(isinstance(request, StartFlowRequest) for request in engine.requests)
 
     async def test_loads_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,7 +175,7 @@ class TestExecuteWorkflow:
 
         first = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
         second = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(first, NukeExecuteWorkflowResultSuccess)
         assert isinstance(second, NukeExecuteWorkflowResultFailure)
@@ -194,7 +195,7 @@ class TestExecuteWorkflow:
                 NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "b"}})
             ),
         )
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(first, NukeExecuteWorkflowResultSuccess)
         assert isinstance(second, NukeExecuteWorkflowResultFailure)
@@ -318,7 +319,7 @@ class TestExecuteWorkflow:
                 inputs={"Start Flow": {"topic": "hello"}, "Some Private Node": {"api_key": "stolen"}},
             )
         )
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         forwarded = sum(isinstance(request, SetParameterValueRequest) for request in engine.requests)
@@ -343,7 +344,7 @@ class TestExecuteWorkflow:
         result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert result.applied_inputs == []
@@ -443,7 +444,7 @@ class TestExecuteWorkflow:
         result = await handle_execute_workflow(
             NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
         )
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess), "the run was started; the engine refused after"
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
@@ -463,7 +464,7 @@ class TestUnresolveFirst:
         engine = use_engine(monkeypatch, execute_responses())
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         request_types = [type(request) for request in engine.requests]
@@ -516,7 +517,7 @@ class TestUnresolveFirst:
         engine = use_engine(monkeypatch, execute_responses())
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1", unresolve_first=True))
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
         assert len(engine.requests) == 7, "the six a plain execution costs, plus the unresolve"
@@ -558,7 +559,7 @@ class TestGetExecutionState:
 
         await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
         result = await handle_get_execution_state(NukeGetExecutionStateRequest())
-        await flow_run.settled()
+        await settled()
 
         assert isinstance(result, NukeGetExecutionStateResultSuccess)
         assert result.running is True

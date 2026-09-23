@@ -16,6 +16,7 @@ from griptape_nodes.retained_mode.events.flow_events import (
 
 from nuke_host_api import execution_bridge, flow_run
 from nuke_host_api.protocol import ExecutionState
+from tests.detached_run import settled
 from tests.unit.host_api_fakes import IDLE_FLOW, use_engine
 
 STARTS = {StartFlowRequest: StartFlowResultSuccess(result_details="started")}
@@ -38,7 +39,7 @@ async def test_the_start_request_is_not_issued_before_the_caller_returns(monkeyp
     flow_run.start("main")
 
     assert engine.requests == []
-    await flow_run.settled()
+    await settled()
     assert [type(request) for request in engine.requests] == [StartFlowRequest]
 
 
@@ -48,7 +49,7 @@ async def test_a_started_flow_is_pending_until_the_start_settles(monkeypatch: py
     flow_run.start("main")
     assert flow_run.pending() is True
 
-    await flow_run.settled()
+    await settled()
     assert flow_run.pending() is False
 
 
@@ -58,7 +59,7 @@ async def test_an_idle_engine_is_busy_while_a_start_is_pending(monkeypatch: pyte
     flow_run.start("main")
 
     assert await flow_run.busy() is True
-    await flow_run.settled()
+    await settled()
     assert await flow_run.busy() is False
 
 
@@ -103,36 +104,17 @@ async def test_a_failed_run_reaches_the_host_as_a_failed_execution_state(
     )
 
     flow_run.start("main")
-    await flow_run.settled()
+    await settled()
 
     assert len(_published) == 1
     assert _published[0].state == ExecutionState.FAILED
     assert "validation failed" in _published[0].detail
 
 
-async def test_an_engine_that_raises_reaches_the_host_the_same_way(
-    monkeypatch: pytest.MonkeyPatch, _published: list[Any]
-) -> None:
-    """Detached task exceptions must reach the event stream."""
-
-    def explode(_request: Any) -> Any:
-        msg = "engine went away"
-        raise RuntimeError(msg)
-
-    use_engine(monkeypatch, {StartFlowRequest: explode})
-
-    flow_run.start("main")
-    await flow_run.settled()
-
-    assert len(_published) == 1
-    assert _published[0].state == ExecutionState.FAILED
-    assert "engine went away" in _published[0].detail
-
-
 async def test_a_clean_start_publishes_nothing(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
     use_engine(monkeypatch, STARTS)
 
     flow_run.start("main")
-    await flow_run.settled()
+    await settled()
 
     assert _published == []

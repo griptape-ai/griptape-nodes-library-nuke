@@ -14,7 +14,7 @@ import pytest
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api import execution_bridge, flow_run
+from nuke_host_api import execution_bridge
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultSuccess,
@@ -24,6 +24,7 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow
 from nuke_host_api.protocol import ExecutionState
+from tests.detached_run import settled
 
 from .fixtures.canary.canary_workflow_builder import build_start_canary_end_flow
 
@@ -64,7 +65,7 @@ async def test_a_node_error_is_published_as_failed(
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result
     assert result.state == ExecutionState.RUNNING
 
-    await flow_run.settled()
+    await settled()
     assert len(failures) == 1, failures
     assert "boom from the outcome test" in failures[0].detail
 
@@ -103,5 +104,5 @@ async def test_a_mid_run_cancel_publishes_no_failure(
     assert isinstance(cancelled, NukeCancelExecutionResultSuccess), cancelled
     assert node.is_cancellation_requested
 
-    await flow_run.settled()
+    await settled()
     assert failures == []
