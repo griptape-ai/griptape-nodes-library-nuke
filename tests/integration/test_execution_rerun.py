@@ -15,6 +15,7 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from nuke_host_api.events import NukeExecuteWorkflowRequest, NukeExecuteWorkflowResultSuccess
 from nuke_host_api.handlers import handle_execute_workflow
+from tests.detached_run import settled
 
 from .fixtures.canary.canary_workflow_builder import build_start_canary_end_flow
 
@@ -27,6 +28,7 @@ DATA_NODE = "Canary"
 async def _execute(**fields: Any) -> None:
     result = await handle_execute_workflow(NukeExecuteWorkflowRequest(**fields))
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result.result_details
+    await settled()
 
 
 @pytest.fixture

@@ -37,7 +37,10 @@ const Events = (function () {
       patch.executionNodeSets = state().executionNodeSets.concat([involved]);
       if (involved.length && state().runTotal === null) patch.runTotal = involved;
     } else if (payloadType === NOTIFICATION.EXECUTION_STATE) {
-      patch.execution = body;
+      // `completed` carries no outcome, so it never replaces a `failed` or `cancelled` for the run.
+      const current = state().execution;
+      const decided = current && (current.state === "failed" || current.state === "cancelled");
+      if (!(body.state === "completed" && decided)) patch.execution = body;
       if (isTerminal(body.state)) {
         patch.runActive = false;
         patch.runEndedAt = Date.now();
@@ -62,6 +65,8 @@ const Events = (function () {
       runStartedAt: Date.now(),
       runEndedAt: null,
       requestsDuringRun: 0,
+      // A previous run's verdict must not outrank this run's `completed`.
+      execution: null,
     });
   }
 

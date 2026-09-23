@@ -50,7 +50,6 @@ const Transport = (function () {
   function trackReply(requestId, requestType, timeoutMs) {
     const budget = timeoutMs === undefined ? REQUEST_TIMEOUT_MS : timeoutMs;
     return new Promise((resolve, reject) => {
-      // Zero disables the timeout for execute requests that span a run.
       const timer = budget
         ? setTimeout(() => {
             pending.delete(requestId);

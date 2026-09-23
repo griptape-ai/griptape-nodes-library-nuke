@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nuke_host_api import engine, parameter_values, shape
+from nuke_host_api import engine, flow_run, parameter_values, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeGetParameterValuesRequest,
@@ -78,7 +78,7 @@ async def handle_set_parameter_values(
             workflow_id=loaded_id,
         )
 
-    if await engine.is_running():
+    if await flow_run.busy():
         return failure(
             NukeSetParameterValuesResultFailure,
             attempted=attempted,
