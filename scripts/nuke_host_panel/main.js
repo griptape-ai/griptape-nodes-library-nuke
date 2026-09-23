@@ -4,7 +4,7 @@
     onNotification: Events.dispatchNotification,
     onClose: Session.onSocketClosed,
   });
-  Events.setEventHooks({ onTerminal: Actions.finishRun });
+  Events.setEventHooks({ onTerminal: Actions.finishRun, onHostDisconnect: Session.standDown });
 
   const root = document.getElementById("app");
   clearTimeout(window.__bootTimer);

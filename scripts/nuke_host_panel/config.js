@@ -21,6 +21,7 @@ const Config = (function () {
   const HISTORY_LIMIT = 12;
 
   const SETTINGS_KEY = "nuke-host-panel/v1";
+  const TAB_ID_KEY = "nuke-host-panel/tab";
   const DEFAULT_WS_URL = "ws://127.0.0.1:18125";
   const DEFAULT_CLIENT_NAME = "browser host panel";
 
@@ -37,6 +38,7 @@ const Config = (function () {
     LIVE_FEED_LIMIT,
     HISTORY_LIMIT,
     SETTINGS_KEY,
+    TAB_ID_KEY,
     DEFAULT_WS_URL,
     DEFAULT_CLIENT_NAME,
   };

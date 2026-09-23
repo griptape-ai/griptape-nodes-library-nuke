@@ -116,9 +116,18 @@ def test_current_protocol_version_is_inside_the_support_window() -> None:
     assert protocol.PROTOCOL_VERSION in protocol.SUPPORTED_PROTOCOL_VERSIONS
 
 
-@pytest.mark.parametrize("namespace", [protocol.NodeState, protocol.ExecutionState])
+@pytest.mark.parametrize("namespace", [protocol.NodeState, protocol.ExecutionState, protocol.DisconnectCause])
 def test_state_values_are_lowercase_and_unique(namespace: type) -> None:
     """States travel on the wire, so casing is part of the contract."""
     values = [value for name, value in vars(namespace).items() if not name.startswith("_")]
     assert values == [value.lower() for value in values]
     assert len(values) == len(set(values))
+
+
+def test_disconnect_cause_wire_strings_are_exactly_these() -> None:
+    assert protocol.DisconnectCause.CLAIM_TAKEN == "claim_taken"
+
+
+def test_disconnect_cause_set_is_closed_and_consistent() -> None:
+    declared = {value for name, value in vars(protocol.DisconnectCause).items() if not name.startswith("_")}
+    assert set(protocol.DISCONNECT_CAUSES) == declared

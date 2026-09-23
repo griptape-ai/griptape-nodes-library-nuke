@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, NodeState, Verb
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause, NodeState, Notification, Verb
 from tests.integration.host_api_client import (
     HostClient,
     detail_of,
@@ -16,6 +16,7 @@ from tests.integration.host_api_client import (
     engines_registry_path,
     result_of,
     running_engine,
+    socket_dir,
     socket_path_for,
     succeeded,
 )
@@ -29,6 +30,9 @@ ENGINE = running_engine()
 NAMED_WORKFLOW = os.environ.get("GRIPTAPE_NODES_SMOKE_WORKFLOW")
 NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "30"))
 
+# A skipif reason is built eagerly for the whole list, ahead of the win32 skip beside it.
+_socket_dir_hint = "a named pipe, not this harness's socket_dir" if sys.platform == "win32" else str(socket_dir())
+
 pytestmark = [
     pytest.mark.skipif(
         sys.platform == "win32",
@@ -38,11 +42,20 @@ pytestmark = [
         ENGINE is None,
         reason=(
             f"No running engine found. Checked {engines_registry_path()} for engine ids and "
-            f"looked for a live socket per id. Start an engine with the local_socket IPC "
-            f"driver enabled; see nuke_host_api/INTEGRATION.md."
+            f"looked for a live socket per id in {_socket_dir_hint}. Start an engine with the "
+            f"local_socket IPC driver enabled; see nuke_host_api/INTEGRATION.md."
         ),
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_engine_env() -> None:
+    """Override the conftest fixture: this suite drives an engine in another process.
+
+    That fixture repoints XDG_DATA_HOME at a tmp dir for in-process engine tests, which
+    hides the registry naming the engine under test.
+    """
 
 
 @pytest.fixture(scope="module")
@@ -56,7 +69,9 @@ def client(engine: Engine) -> Iterator[HostClient]:
     """Connect before each test and cancel any execution during teardown."""
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
-            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+            Verb.CONNECT,
+            # Force, because a panel or an idle Nuke session may still hold the claim.
+            {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
         )
         assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
         try:
@@ -169,9 +184,44 @@ class TestConnect:
         """
         reply = client.request(
             Verb.CONNECT,
-            {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
+            {
+                "client_protocol_versions": [PROTOCOL_VERSION],
+                "client_name": "smoke test",
+                "field_from_a_future_version": "ignore me",
+            },
         )
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
+
+    def test_a_second_host_is_refused_until_it_forces_the_claim(self, client: HostClient) -> None:
+        """The claim is process state, so only a live engine shows it surviving between requests."""
+        second = {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "second smoke host"}
+        try:
+            refused = client.request(Verb.CONNECT, second)
+            assert not succeeded(refused), "a second host must not connect silently"
+            assert result_of(refused)["host_client_name"] == "smoke test"
+            assert result_of(refused)["host_connected_at"] > 0
+
+            forced = client.request(Verb.CONNECT, {**second, "force": True})
+            assert succeeded(forced), f"a forced connect failed: {detail_of(forced)}"
+            assert result_of(forced)["displaced_client_name"] == "smoke test"
+            assert result_of(forced)["host_client_name"] == "second smoke host"
+
+            client.drain(2)
+            asked = [
+                event
+                for event in client.of_type(Notification.HOST_DISCONNECT)
+                if event.body.get("client_name") == "smoke test"
+            ]
+            assert asked, "a displaced host must be asked to disconnect, since nothing can close its socket"
+            assert asked[-1].body["replaced_by"] == "second smoke host"
+            assert asked[-1].body["cause"] == DisconnectCause.CLAIM_TAKEN
+            assert asked[-1].body["reason"]
+        finally:
+            # Every later test's fixture connects as the smoke host, and the engine outlives this test.
+            client.request(
+                Verb.CONNECT,
+                {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
+            )
 
 
 class TestDescribe:
@@ -366,19 +416,17 @@ class TestExecute:
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
         """Serial execution is what makes the missing engine-side execution id survivable.
 
-        The first execute is sent without waiting: its reply lands when the run ends, and the
-        point is to be mid-run. Skips rather than fails when the first run finishes too fast to
-        race, since that is a property of the chosen workflow and not of the guard.
+        Both executes go out before either reply is read. A workflow can resolve in
+        milliseconds, so any round trip in between hands the first run enough time to finish
+        and leaves the guard nothing to refuse. Skips rather than fails when the first run
+        still wins that race, since that is a property of the chosen workflow, not the guard.
         """
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
         client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
+        second = client.reply_for(client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
 
-        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
-        if not state.get("running"):
+        if succeeded(second):
             pytest.skip(f"workflow {workflow_id!r} finished before a second execute could race it")
-
-        second = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
-        assert not succeeded(second), "a second run must be refused, not allowed to displace the first"
         assert "already executing" in detail_of(second).lower()
 
     def test_no_workflow_id_runs_whatever_is_loaded(self, client: HostClient) -> None:
