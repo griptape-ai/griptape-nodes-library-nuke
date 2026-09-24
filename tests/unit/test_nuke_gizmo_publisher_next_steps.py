@@ -49,7 +49,7 @@ class TestNextSteps:
 
     def test_says_not_to_open_the_gizmo_directly(self) -> None:
         """Publish reports a .gizmo path, which reads like something to double-click."""
-        assert any("don't open it directly" in step for step in _steps())
+        assert any("not a file to open" in step for step in _steps())
 
     def test_first_publish_asks_for_a_restart(self) -> None:
         """init.py gained the plugin path, and Nuke reads init.py only at startup."""
@@ -64,7 +64,7 @@ class TestNextSteps:
         """Not once ever: a later publish to a different install dir needs its own restart."""
         step = _steps(first_time_setup=True)[0]
         assert "this install directory" in step
-        assert "Later publishes here need no restart." in step
+        assert "Later publishes here don't need one." in step
 
     def test_republish_mentions_the_refresh_fallback(self) -> None:
         """The watcher misses changes on network mounts; the menu command is the way out."""

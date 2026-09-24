@@ -11,7 +11,7 @@ A Griptape Nodes library for building workflows that run inside [Foundry Nuke](h
 - **Griptape Annotator** – a dockable panel that runs inside the Nuke GUI for tagging I/O nodes and promoting knobs to the Griptape interface.
 - **Gizmo publisher** (`publish_gizmo/`): packages a workflow into a versioned `.gizmo` alongside a runner script and installs it into a Nuke plugin directory (default: `~/.nuke`).
 - **`NUKE_PATH` detection**: extra plugin directories from `NUKE_PATH` are surfaced as gizmo install targets in the publish dialog, alongside the default `~/.nuke`.
-- **Griptape menu integration**: publishing writes a `menu.py` that adds a `Griptape` submenu to Nuke's Nodes toolbar and a `Refresh Griptape Gizmos` command on the main menu bar. Multiple published versions of the same workflow are grouped under a per-workflow submenu. The menu appears only after Nuke has been restarted once following the first publish into that install directory — see [Publishing a Workflow as a Nuke Gizmo](#publishing-a-workflow-as-a-nuke-gizmo).
+- **Griptape menu integration**: publishing writes a `menu.py` that adds a `Griptape` submenu to Nuke's Nodes toolbar and a `Refresh Griptape Gizmos` command on the main menu bar. Multiple published versions of the same workflow are grouped under a per-workflow submenu. The menu appears only after Nuke has been restarted once following the first publish into that install directory; see [Publishing a Workflow as a Nuke Gizmo](#publishing-a-workflow-as-a-nuke-gizmo).
 - **Nuke-aware output paths**: the bundled `project.yml` is rewritten so workflow outputs land next to the `.nk` file, directly under `griptape_outputs/`. Everything else the engine writes (temp files, backups, failed runs, previews, metadata, thumbnails, static files) is gathered beside the `.nk` file too, under a single hidden `.griptape/` directory, so a run leaves its working files in the shot folder rather than inside the installed gizmo, which may be shared or read-only. If the script has never been saved, all of these fall back to the gizmo's own bundle directory instead.
 
 ## Configuration
@@ -153,9 +153,15 @@ Set `foundry_LICENSE` in the Griptape Secrets panel. It is injected into the Nuk
          ...                     # libraries, config, .env, pyproject.toml
    ```
 
-4. **The first gizmo published into a given install directory requires restarting Nuke.** That publish adds the Griptape plugin path to `<install_dir>/init.py`, and Nuke reads `init.py` only at startup — until it restarts there is no `Griptape` menu at all, because `griptape/menu.py` is found only via that path. This is per install directory, not once ever: publishing to `~/.nuke` and later to a custom path means a restart for each.
-5. Inside Nuke, create the gizmo from the `Griptape` menu on the Nodes toolbar. A single published version appears as a flat entry; multiple versions are grouped under a per-workflow submenu. The `.gizmo` is loaded by Nuke as a node class — it is not a file to open directly.
-6. Subsequent publishes into the same install directory need no restart: `menu.py` watches the `griptape/` directory and refreshes itself. When that watcher doesn't fire — most often because the install directory is on a network mount, where `QFileSystemWatcher` silently delivers nothing — run `Griptape > Refresh Griptape Gizmos` from the main menu bar.
+4. **The first gizmo published into a given install directory requires restarting Nuke.** That publish adds the Griptape plugin path to `<install_dir>/init.py`, and Nuke only reads `init.py` at startup. Until it restarts there is no `Griptape` menu at all, since `griptape/menu.py` is found only via that path.
+
+   This is per install directory, not once ever. Publishing to `~/.nuke` and later to a custom path means a restart for each.
+
+5. Inside Nuke, create the gizmo from the `Griptape` menu on the Nodes toolbar. A single published version appears as a flat entry; multiple versions are grouped under a per-workflow submenu. The `.gizmo` is a node class, not a file to open directly.
+
+6. Later publishes into the same install directory need no restart. `menu.py` watches the `griptape/` directory and refreshes itself.
+
+   When that watcher doesn't fire, run `Griptape > Refresh Griptape Gizmos` from the main menu bar. That's usually needed when the install directory is on a network mount, where `QFileSystemWatcher` silently delivers nothing.
 
 ## Repository Layout
 

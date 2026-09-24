@@ -199,9 +199,9 @@ class NukeGizmoPublisher:
     ) -> list[str]:
         """Return the ordered "what do I do now" steps for a successful publish.
 
-        A gizmo is not opened like a published workflow file -- it is a Nuke node the
-        artist creates from a menu -- so the publish dialog has to say that or the path
-        it shows reads like something to double-click.
+        A gizmo isn't opened like a published workflow file. It's a Nuke node the artist
+        creates from a menu, so the dialog has to say that, or the path it shows reads
+        like something to double-click.
         """
         label = menu_label(workflow_stem)
         steps = []
@@ -210,22 +210,23 @@ class NukeGizmoPublisher:
             # first publish into this install dir is the one case a restart is required.
             steps.append(
                 "Restart Nuke. This is the first gizmo published into this install directory, so the "
-                f"publish added the Griptape plugin path to {install_dir / 'init.py'} -- and Nuke reads "
-                "that file only at startup. Later publishes here need no restart."
+                f"publish added the Griptape plugin path to {install_dir / 'init.py'}. Nuke only reads "
+                "that file at startup, so the menu won't appear until you restart. Later publishes "
+                "here don't need one."
             )
         location = f"Nodes > Griptape > {label}" + (f" > v{version}" if published_count > 1 else "")
         steps.append(
             f"In Nuke, create the node from the Nodes toolbar: {location}. "
-            "The .gizmo file is loaded by Nuke as a node class -- don't open it directly."
+            "The .gizmo is a node class, not a file to open."
         )
         steps.append("Fill in the node's Inputs tab, then press Run Workflow on its Run tab.")
         if not first_time_setup:
             steps.append(
-                "An already-running Nuke should pick this up on its own. If the menu doesn't "
-                "update -- most likely when the install directory is on a network mount -- "
-                "run Griptape > Refresh Griptape Gizmos from Nuke's menu bar. If there is no "
-                "Griptape menu at all, that session started before this install directory was "
-                "set up, so restart Nuke once."
+                "An already-running Nuke should pick this up on its own. If the menu doesn't update, "
+                "run Griptape > Refresh Griptape Gizmos from Nuke's menu bar. That's usually needed "
+                "when the install directory is on a network mount. If there's no Griptape menu at "
+                "all, that session started before this install directory was set up, so restart "
+                "Nuke once."
             )
         return steps
 
@@ -237,14 +238,14 @@ class NukeGizmoPublisher:
             # A typo'd or accidentally workspace-relative pick now silently becomes a
             # real directory; saying so is the only thing standing between that and a
             # gizmo the artist cannot find.
-            notes.append(f"The install directory did not exist and was created: {install_dir}")
+            notes.append(f"The install directory didn't exist, so it was created: {install_dir}")
         if lock_error:
             # Surface the skipped lock in the publish result, not just the log:
             # without it the artist running the gizmo is the first to find out.
             notes.append(
-                f"Dependencies were not pinned ({lock_error}). The gizmo will resolve them on the "
-                "machine that runs it, which is slower and may pick up different versions. "
-                "Install uv and re-publish to pin them."
+                f"Dependencies weren't pinned ({lock_error}). The gizmo will resolve them on whatever "
+                "machine runs it, which is slower and can pick up different versions. Install uv and "
+                "publish again to pin them."
             )
         return notes
 
