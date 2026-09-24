@@ -19,7 +19,7 @@
     }
 
     let widget;
-    if (param.type === "GTBool") {
+    if (param.type === "GTBool" && !param.is_list) {
       widget = html`<input
         type="checkbox"
         disabled=${disabled}
@@ -30,7 +30,7 @@
       widget = html`<select disabled=${disabled} value=${value === undefined ? "" : String(value)} onChange=${(e) => set(e.target.value)}>
         ${options.map((choice) => html`<option value=${choice}>${choice}</option>`)}
       </select>`;
-    } else if (isNumeric(param.type)) {
+    } else if (isNumeric(param.type) && !param.is_list) {
       widget = html`<input
         type="number"
         step=${param.type === "GTInt" ? "1" : "any"}
@@ -38,13 +38,11 @@
         value=${value === undefined ? "" : value}
         onInput=${(e) => set(e.target.value)}
       />`;
-    } else if (param.type === "GTNull") {
-      widget = html`<input type="text" disabled placeholder="GTNull, nothing to send" />`;
     } else {
       widget = html`<input
         type="text"
         disabled=${disabled}
-        placeholder=${isMedia(param.type) ? "/path/to/file.####.exr" : ""}
+        placeholder=${param.is_list ? "comma-separated" : isMedia(param.type) ? "/path/to/file.####.exr" : ""}
         value=${value === undefined ? "" : value}
         onInput=${(e) => set(e.target.value)}
       />`;
@@ -55,7 +53,7 @@
         <label title=${key + (param.tooltip ? ": " + param.tooltip : "")}>${param.name || key}</label>
         <div>${widget}</div>
         <span class="type">
-          ${param.type || "?"}${readOnly ? " ro" : ""}
+          ${param.type || "?"}${param.is_list ? " list" : ""}${readOnly ? " ro" : ""}
           ${param.hidden ? " hidden" : ""}
           ${choices.length ? " choices" : ""}
           ${KNOWN_VALUE_TYPES.indexOf(param.type) === -1 ? " unknown" : ""}

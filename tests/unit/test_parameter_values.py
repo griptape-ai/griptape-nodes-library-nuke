@@ -13,6 +13,7 @@ import pytest
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultFailure,
+    GetParameterValueResultSuccess,
     SetParameterValueRequest,
     SetParameterValueResultFailure,
     SetParameterValueResultSuccess,
@@ -74,8 +75,29 @@ class TestReadSections:
 
         inputs, _, unavailable = await parameter_values.read_sections(SHAPE, [ParameterSection.INPUTS])
 
-        assert inputs["Start Flow"]["plate"]["value_type"] == ValueType.NULL
+        assert inputs["Start Flow"]["plate"]["value"] is None
         assert unavailable == []
+
+    async def test_a_value_with_no_host_form_is_unavailable_with_a_reason(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def respond(request: GetParameterValueRequest) -> Any:
+            if request.parameter_name == "plate":
+                return GetParameterValueResultSuccess(
+                    input_types=["ImageUrlArtifact"],
+                    type="ImageUrlArtifact",
+                    output_type="ImageUrlArtifact",
+                    value="https://cdn.example.com/plate.png",
+                    result_details="ok",
+                )
+            return respond_to_get_value(request)
+
+        use_engine(monkeypatch, {GetParameterValueRequest: respond})
+
+        inputs, _, unavailable = await parameter_values.read_sections(SHAPE, [ParameterSection.INPUTS])
+
+        assert "plate" not in inputs["Start Flow"]
+        assert [(entry["parameter"], "URL" in entry["reason"]) for entry in unavailable] == [("plate", True)]
 
     async def test_an_empty_shape_reads_nothing_and_reports_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, {})
@@ -116,6 +138,24 @@ class TestApplyInputs:
 
         assert applied == [{"node": "Node A", "parameter": "good"}]
         assert rejected == [{"node": "Node A", "parameter": "bad", "reason": "rejected: wrong type"}]
+
+    async def test_a_media_entry_a_host_read_back_is_sent_to_the_engine_as_its_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine_fake = use_engine(
+            monkeypatch,
+            {
+                SetParameterValueRequest: SetParameterValueResultSuccess(
+                    finalized_value=None, data_type="ImageUrlArtifact", result_details="ok"
+                )
+            },
+        )
+
+        await parameter_values.apply_inputs(
+            {"Start Flow": {"plate": {"path": "/show/plate.exr", "format": "exr"}}}, {("Start Flow", "plate")}
+        )
+
+        assert [request.value for request in engine_fake.requests] == ["/show/plate.exr"]
 
     async def test_a_non_dict_parameters_value_is_rejected_without_calling_the_engine(
         self, monkeypatch: pytest.MonkeyPatch

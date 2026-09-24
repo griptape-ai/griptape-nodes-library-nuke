@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
-from urllib.parse import urlparse
 
 from griptape_nodes.common.macro_parser import ParsedMacro
 from griptape_nodes.common.macro_parser.exceptions import MacroSyntaxError
+from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
     GetPathForMacroResultSuccess,
@@ -16,7 +16,7 @@ from griptape_nodes.retained_mode.events.project_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api.protocol import SourceKind, ValueType
+from nuke_host_api.protocol import ValueType
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -33,8 +33,6 @@ CONTROL_PARAM_TYPE = "parametercontroltype"
 # Braces alone cannot distinguish project macros from workflow variables.
 _HAS_BRACE_TOKEN = re.compile(r"\{[^{}]*\}")
 
-_HASH_RUN = re.compile(r"#+")
-
 # Recognizes POSIX, drive-letter, and UNC absolute paths.
 _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 
@@ -42,7 +40,6 @@ _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 ENGINE_TYPE_TO_VALUE_TYPE = {
     "ImageArtifact": ValueType.IMAGE,
     "ImageUrlArtifact": ValueType.IMAGE,
-    # Both engine sequence names map to an image with multiple sources.
     "ImageSequenceArtifact": ValueType.IMAGE,
     "Sequence": ValueType.IMAGE,
     "VideoArtifact": ValueType.MOVIE,
@@ -57,9 +54,24 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
 # Strip the engine's ``list[T]`` wrapper before mapping the element type.
 _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
 
+_LIST_ENGINE_TYPES = frozenset({"list", "Sequence", "ImageSequenceArtifact", "ListArtifact"})
+
+_WILDCARD_ENGINE_TYPES = frozenset({"any", "all"})
+
+# griptape's BlobArtifact family. Serialized, their bytes are base64 text indistinguishable from prose.
+_BYTE_ARTIFACT_TYPES = frozenset({"BlobArtifact", "ImageArtifact", "AudioArtifact"})
+
+_SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
+
+MEDIA_ENTRY_FIELDS = frozenset({"path", "format"})
+
+
+class UnrepresentableValueError(ValueError):
+    """Raised when this protocol cannot represent a value."""
+
 
 def value_type_for_engine_type(engine_type: str | None) -> str:
-    """Map a declared type before a runtime value is available."""
+    """Map a declared type, or a list's element type, before a runtime value is available."""
     if engine_type is None:
         return ValueType.TEXT
 
@@ -75,6 +87,109 @@ def value_type_for_engine_type(engine_type: str | None) -> str:
     return ValueType.TEXT
 
 
+def is_list_type(engine_type: str | None) -> bool | None:
+    """None means the declaration is silent, so each value decides for itself."""
+    if not engine_type or engine_type.lower() in _WILDCARD_ENGINE_TYPES:
+        return None
+    return engine_type in _LIST_ENGINE_TYPES or _LIST_TYPE.match(engine_type) is not None
+
+
+def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict[str, Any]:
+    """Raises UnrepresentableValueError when the value has no host form."""
+    if isinstance(value, (bytes, bytearray)):
+        msg = "It holds raw bytes the engine never saved to a file."
+        raise UnrepresentableValueError(msg)
+
+    plain = safe_unstructure(value)
+    engine_type = _engine_type(value, plain, declared_engine_type)
+    declared_value_type = value_type_for_engine_type(declared_engine_type)
+    items = _list_items(plain)
+
+    is_list = is_list_type(declared_engine_type)
+    if is_list is None:
+        is_list = items is not None
+
+    if not is_list:
+        if items is not None:
+            msg = f"It is declared as a single value but holds a list of {len(items)}."
+            raise UnrepresentableValueError(msg)
+        value_type, host_value = _normalize_item(plain, declared_engine_type)
+        return _descriptor(value_type or declared_value_type, host_value, engine_type)
+
+    if items is None:
+        items = [] if plain in (None, "") else [plain]
+    normalized = [_normalize_item(item, declared_engine_type) for item in items]
+    value_type = _merge_value_types([vt for vt, _ in normalized if vt is not None], declared_value_type)
+    return _descriptor(value_type, [host_value for _, host_value in normalized], engine_type)
+
+
+def engine_value(value: Any) -> Any:
+    """Unwrap media entries so a host can send back exactly what it read."""
+    if isinstance(value, list):
+        return [engine_value(item) for item in value]
+    if isinstance(value, dict) and "path" in value and set(value) <= MEDIA_ENTRY_FIELDS:
+        return value["path"]
+    return value
+
+
+def _descriptor(value_type: str, value: Any, engine_type: str) -> dict[str, Any]:
+    return {"value_type": value_type, "value": value, "engine_type": engine_type}
+
+
+def _engine_type(value: Any, plain: Any, declared_engine_type: str | None) -> str:
+    if isinstance(plain, dict):
+        return str(plain.get("type") or declared_engine_type or "dict")
+    return type(value).__name__
+
+
+def _list_items(plain: Any) -> list[Any] | None:
+    if isinstance(plain, (list, tuple)):
+        return list(plain)
+    if not isinstance(plain, dict):
+        return None
+    entries = plain.get("entries")
+    if isinstance(entries, list) and "pattern" in plain:
+        return [entry.get("path") if isinstance(entry, dict) else entry for entry in entries]
+    inner = plain.get("value")
+    if plain.get("type") and isinstance(inner, list):
+        return list(inner)
+    return None
+
+
+def _merge_value_types(value_types: list[str], declared_value_type: str) -> str:
+    present = set(value_types)
+    if not present:
+        return declared_value_type
+    if len(present) == 1:
+        return present.pop()
+    # Ints beside floats are one numeric knob, not a type conflict.
+    if present == {ValueType.INT, ValueType.FLOAT}:
+        return ValueType.FLOAT
+    if present <= _SOURCED_VALUE_TYPES:
+        return ValueType.FILE
+    msg = f"It mixes {', '.join(sorted(present))} in one list."
+    raise UnrepresentableValueError(msg)
+
+
+def _normalize_item(item: Any, declared_engine_type: str | None) -> tuple[str | None, Any]:
+    """A None value type means unset, which takes the declared type."""
+    if item is None:
+        return None, None
+    if isinstance(item, bool):
+        return ValueType.BOOL, item
+    if isinstance(item, (int, float)):
+        return _numeric_value_type(item, declared_engine_type), item
+    if isinstance(item, str):
+        return _normalize_string(item, declared_engine_type)
+    if isinstance(item, dict):
+        return _normalize_artifact_dict(item, declared_engine_type)
+    if isinstance(item, (list, tuple)):
+        msg = "It holds a list nested inside a list."
+        raise UnrepresentableValueError(msg)
+    msg = f"It holds a {type(item).__name__}, which this protocol has no type for."
+    raise UnrepresentableValueError(msg)
+
+
 def _numeric_value_type(value: int | float, declared_engine_type: str | None) -> str:
     """A float declaration preserves a Double_Knob for later fractional values."""
     if isinstance(value, float) or value_type_for_engine_type(declared_engine_type) == ValueType.FLOAT:
@@ -82,49 +197,85 @@ def _numeric_value_type(value: int | float, declared_engine_type: str | None) ->
     return ValueType.INT
 
 
+def _normalize_artifact_dict(value: dict[str, Any], declared_engine_type: str | None) -> tuple[str | None, Any]:
+    """Keyed by the dict's own ``type``, which is what the engine says the value is."""
+    artifact_type = value.get("type")
+    if not artifact_type:
+        msg = "It holds a dict, which this protocol has no type for."
+        raise UnrepresentableValueError(msg)
+    if artifact_type in _BYTE_ARTIFACT_TYPES:
+        msg = f"It holds {artifact_type} bytes the engine never saved to a file."
+        raise UnrepresentableValueError(msg)
+
+    inner = value.get("value")
+    if isinstance(inner, str):
+        return _normalize_string(inner, str(artifact_type))
+    if isinstance(inner, dict):
+        msg = f"It holds a {artifact_type} wrapping a dict, which this protocol has no type for."
+        raise UnrepresentableValueError(msg)
+    return _normalize_item(inner, declared_engine_type)
+
+
+def _normalize_string(value: str, declared_engine_type: str | None) -> tuple[str | None, Any]:
+    declared_value_type = value_type_for_engine_type(declared_engine_type)
+    if not value and declared_value_type in _SOURCED_VALUE_TYPES:
+        return None, None
+
+    if _HAS_BRACE_TOKEN.search(value):
+        resolved = _resolve_macro(value)
+        if resolved is not None:
+            return _path_entry(resolved, declared_value_type)
+        if _extension_of(value) is not None or _ABSOLUTE_PATH_PREFIX.match(value):
+            msg = f"It holds '{value}', a path template that did not resolve."
+            raise UnrepresentableValueError(msg)
+        return ValueType.TEXT, value
+
+    if value.startswith(("http://", "https://")):
+        if declared_value_type in _SOURCED_VALUE_TYPES:
+            msg = f"It holds the URL '{value}', and this protocol version reports local paths only."
+            raise UnrepresentableValueError(msg)
+        return ValueType.TEXT, value
+
+    # A relative locator needs both a separator and an extension to distinguish it from prose.
+    is_relative_locator = ("/" in value or "\\" in value) and _extension_of(value) is not None
+    if _ABSOLUTE_PATH_PREFIX.match(value) or is_relative_locator:
+        # Nuke's TCL layer treats backslashes as escapes.
+        return _path_entry(value.replace("\\", "/"), declared_value_type)
+
+    return ValueType.TEXT, value
+
+
+def _path_entry(path: str, declared_value_type: str) -> tuple[str, dict[str, Any]]:
+    extension = _extension_of(path)
+    if declared_value_type in {ValueType.IMAGE, ValueType.MOVIE}:
+        value_type = declared_value_type
+    elif extension in IMAGE_EXTENSIONS:
+        value_type = ValueType.IMAGE
+    elif extension in VIDEO_EXTENSIONS:
+        value_type = ValueType.MOVIE
+    else:
+        value_type = ValueType.FILE
+    return value_type, {"path": path, "format": extension}
+
+
 def _extension_of(locator: str) -> str | None:
-    path_part = locator
-    if locator.startswith(("http://", "https://")):
-        path_part = urlparse(locator).path
-    if "." not in path_part.rsplit("/", 1)[-1]:
+    name = locator.replace("\\", "/").rsplit("/", 1)[-1]
+    if "." not in name:
         return None
-    extension = path_part.rsplit(".", 1)[-1].lower()
+    extension = name.rsplit(".", 1)[-1].lower()
     if not extension or not extension.isalnum():
         return None
     return extension
 
 
-def _value_type_for_extension(extension: str | None) -> str:
-    """Unknown extensions map to GTFile rather than a guessed format."""
-    if extension in IMAGE_EXTENSIONS:
-        return ValueType.IMAGE
-    if extension in VIDEO_EXTENSIONS:
-        return ValueType.MOVIE
-    return ValueType.FILE
-
-
-def _resolve_macro(locator: str) -> dict[str, Any] | None:
-    """Unresolved sequence slots remain Nuke-readable hash patterns."""
-    if not _HAS_BRACE_TOKEN.search(locator):
+def _resolve_macro(value: str) -> str | None:
+    try:
+        parsed = ParsedMacro(value)
+    except MacroSyntaxError:
+        logger.debug("Value contains braces but is not a valid macro: %s", value)
         return None
 
-    unresolved = {
-        "kind": SourceKind.MACRO,
-        "value": locator,
-        "format": _extension_of(locator),
-        "width": None,
-        "height": None,
-        "byte_count": None,
-        "is_pattern": False,
-        "raw": locator,
-    }
-
-    try:
-        parsed = ParsedMacro(locator)
-    except MacroSyntaxError:
-        logger.debug("Value contains braces but is not a valid macro: %s", locator)
-        return unresolved
-
+    # A Read node expands `###` itself, so an unfilled sequence slot is rendered rather than refused.
     result = GriptapeNodes.handle_request(
         GetPathForMacroRequest(
             parsed_macro=parsed,
@@ -133,220 +284,6 @@ def _resolve_macro(locator: str) -> dict[str, Any] | None:
         )
     )
     if not isinstance(result, GetPathForMacroResultSuccess):
-        return unresolved
-
+        return None
     # Nuke's TCL layer treats backslashes as escapes.
-    resolved = str(result.absolute_path).replace("\\", "/")
-    return {
-        "kind": SourceKind.PATH,
-        "value": resolved,
-        "format": _extension_of(resolved),
-        "width": None,
-        "height": None,
-        "byte_count": None,
-        "is_pattern": bool(_HASH_RUN.search(resolved)),
-        "raw": locator,
-    }
-
-
-def _source_from_locator(locator: str) -> dict[str, Any]:
-    macro_source = _resolve_macro(locator)
-    if macro_source is not None:
-        return macro_source
-
-    if locator.startswith(("http://", "https://")):
-        return {
-            "kind": SourceKind.URL,
-            "value": locator,
-            "format": _extension_of(locator),
-            "width": None,
-            "height": None,
-            "byte_count": None,
-            "is_pattern": False,
-            "raw": None,
-        }
-
-    # Nuke's TCL layer treats backslashes as escapes.
-    normalized = locator.replace("\\", "/")
-    return {
-        "kind": SourceKind.PATH,
-        "value": normalized,
-        "format": _extension_of(normalized),
-        "width": None,
-        "height": None,
-        "byte_count": None,
-        "is_pattern": False,
-        "raw": None,
-    }
-
-
-def _descriptor(value_type: str, sources: list[dict[str, Any]], engine_type: str, value: Any = None) -> dict[str, Any]:
-    """``colorspace`` is reserved because the engine exposes channel layout, not colorimetry.
-
-    ``value`` carries scalars, which have no locator to point at and are otherwise unreadable.
-    Sourced types leave it null: bytes stay in the engine and a path belongs in ``sources``.
-    """
-    return {
-        "value_type": value_type,
-        "value": value,
-        "sources": sources,
-        "colorspace": None,
-        "engine_type": engine_type,
-    }
-
-
-def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict[str, Any]:  # noqa: PLR0911
-    engine_type = type(value).__name__
-
-    if value is None:
-        return _descriptor(ValueType.NULL, [], engine_type)
-
-    if isinstance(value, bool):
-        return _descriptor(ValueType.BOOL, [], engine_type, value)
-
-    if isinstance(value, (int, float)):
-        return _descriptor(_numeric_value_type(value, declared_engine_type), [], engine_type, value)
-
-    if isinstance(value, bytes):
-        return _descriptor(
-            ValueType.FILE,
-            [
-                {
-                    "kind": SourceKind.INLINE,
-                    "value": None,
-                    "format": None,
-                    "width": None,
-                    "height": None,
-                    "byte_count": len(value),
-                    "is_pattern": False,
-                    "raw": None,
-                }
-            ],
-            engine_type,
-        )
-
-    if isinstance(value, str):
-        return _normalize_string(value, declared_engine_type, engine_type)
-
-    if isinstance(value, (list, tuple)):
-        return _normalize_sequence(list(value), declared_engine_type, engine_type)
-
-    if isinstance(value, dict):
-        return _normalize_artifact_dict(value, declared_engine_type)
-
-    return _normalize_artifact(value, declared_engine_type, engine_type)
-
-
-# Media and file types require a source.
-_SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
-
-
-def _sourceless_descriptor(value_type: str, engine_type: str, value: Any = None) -> dict[str, Any]:
-    """Downgrade sourceless media and file values to text."""
-    return _descriptor(ValueType.TEXT if value_type in _SOURCED_VALUE_TYPES else value_type, [], engine_type, value)
-
-
-def _classify_locator_source(source: dict[str, Any], declared_value_type: str, engine_type: str) -> dict[str, Any]:
-    if declared_value_type in {ValueType.IMAGE, ValueType.MOVIE}:
-        return _descriptor(declared_value_type, [source], engine_type)
-    return _descriptor(_value_type_for_extension(source["format"]), [source], engine_type)
-
-
-def _normalize_string(value: str, declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
-    """Only URLs, absolute paths, resolvable macros, and relative paths with extensions are locators."""
-    declared_value_type = value_type_for_engine_type(declared_engine_type)
-
-    if _HAS_BRACE_TOKEN.search(value):
-        macro_source = _resolve_macro(value)
-        if macro_source is None:
-            msg = "_HAS_BRACE_TOKEN matched but _resolve_macro found no brace token"
-            raise AssertionError(msg)
-        # Keep unresolved macros only when their extension or absolute shape identifies a locator.
-        resolved_to_path = macro_source["kind"] == SourceKind.PATH
-        if resolved_to_path or macro_source["format"] is not None or _ABSOLUTE_PATH_PREFIX.match(value):
-            return _classify_locator_source(macro_source, declared_value_type, engine_type)
-        return _sourceless_descriptor(declared_value_type, engine_type, value)
-
-    if value.startswith(("http://", "https://")) or _ABSOLUTE_PATH_PREFIX.match(value):
-        return _classify_locator_source(_source_from_locator(value), declared_value_type, engine_type)
-
-    # A relative locator needs both a separator and an extension to distinguish it from prose.
-    if ("/" in value or "\\" in value) and _extension_of(value) is not None:
-        return _classify_locator_source(_source_from_locator(value), declared_value_type, engine_type)
-
-    return _sourceless_descriptor(declared_value_type, engine_type, value)
-
-
-def _normalize_sequence(items: list[Any], declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
-    """A sequence uses one value type and multiple sources."""
-    if not items:
-        return _descriptor(ValueType.NULL, [], engine_type)
-
-    sources: list[dict[str, Any]] = []
-    value_types: list[str] = []
-    for item in items:
-        inner = normalize_value(item, declared_engine_type)
-        sources.extend(inner["sources"])
-        if inner["value_type"] not in {ValueType.NULL, ValueType.TEXT}:
-            value_types.append(inner["value_type"])
-
-    if not value_types:
-        if not sources:
-            return _sourceless_descriptor(ValueType.FILE, engine_type)
-        return _descriptor(ValueType.FILE, sources, engine_type)
-    # Ints beside floats are one numeric knob, not a type conflict.
-    if set(value_types) == {ValueType.INT, ValueType.FLOAT}:
-        return _descriptor(ValueType.FLOAT, sources, engine_type)
-    if len(set(value_types)) > 1:
-        logger.warning("Mixed host types in one list (%s); reporting GTFile.", sorted(set(value_types)))
-        return _descriptor(ValueType.FILE, sources, engine_type)
-    return _descriptor(value_types[0], sources, engine_type)
-
-
-def _normalize_artifact_dict(value: dict[str, Any], declared_engine_type: str | None) -> dict[str, Any]:
-    """Reads hand back serialized artifacts, where attribute access finds no locator at all.
-
-    Keyed by the dict's own ``type`` rather than the declared one, which is what the engine says
-    the value is. A dict that is not an artifact has no locator to find and stays text.
-    """
-    engine_type = str(value.get("type") or declared_engine_type or "dict")
-    inner_value = value.get("value")
-    if inner_value is None:
-        return _sourceless_descriptor(value_type_for_engine_type(engine_type), engine_type)
-
-    inner = normalize_value(inner_value, engine_type)
-    return _descriptor(inner["value_type"], inner["sources"], engine_type, inner["value"])
-
-
-def _normalize_artifact(value: Any, declared_engine_type: str | None, engine_type: str) -> dict[str, Any]:
-    inner_value = getattr(value, "value", None)
-    if isinstance(inner_value, (list, tuple)):
-        merged = _normalize_sequence(list(inner_value), declared_engine_type, engine_type)
-        return _descriptor(merged["value_type"], merged["sources"], engine_type)
-
-    value_type = value_type_for_engine_type(engine_type)
-
-    if isinstance(inner_value, bytes):
-        source = {
-            "kind": SourceKind.INLINE,
-            "value": None,
-            "format": getattr(value, "format", None),
-            "width": getattr(value, "width", None),
-            "height": getattr(value, "height", None),
-            "byte_count": len(inner_value),
-            "is_pattern": False,
-            "raw": None,
-        }
-        return _descriptor(value_type, [source], engine_type)
-
-    if isinstance(inner_value, str) and inner_value:
-        source = _source_from_locator(inner_value)
-        # Unknown artifact classes are classified by locator extension.
-        if value_type == ValueType.FILE:
-            value_type = _value_type_for_extension(source["format"])
-        # Text values must not carry locators that a host would try to open.
-        if value_type not in _SOURCED_VALUE_TYPES:
-            return _sourceless_descriptor(value_type, engine_type, inner_value)
-        return _descriptor(value_type, [source], engine_type)
-
-    return _sourceless_descriptor(ValueType.FILE, engine_type)
+    return str(result.absolute_path).replace("\\", "/")

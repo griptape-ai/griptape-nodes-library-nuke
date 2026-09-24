@@ -3,7 +3,7 @@
   const { EXECUTION_STATES, PREVIEWABLE, isMedia, isScalar } = Protocol;
   const { setState } = Store;
   const { doRerun } = Actions;
-  const { nukeNodePlan, paramKey } = Values;
+  const { nukeNodePlan, paramKey, valueItems } = Values;
   const { clock, copyButton, html, stateClass } = Ui;
 
   // Browsers load local files only from pages opened from disk.
@@ -34,93 +34,23 @@
     return html`<img src=${url} onError=${() => setFailed(true)} />`;
   }
 
-  function Source({ valueType, source }) {
-    const kind = source.kind || "?";
+  function Entry({ valueType, entry }) {
+    if (!entry || !entry.path) return html`<div class="src muted">Unset item.</div>`;
+    const padded = /#+/.test(entry.path);
     return html`
       <div class="src">
         <div class="stack">
-          <span class="badge">${kind}</span>
-          <span class="muted">${source.format || "format unknown"}</span>
-          ${
-            source.width && source.height
-              ? html`<span class="muted">${source.width}x${source.height}</span>`
-              : null
-          }
-          ${source.byte_count ? html`<span class="muted">${source.byte_count} B</span>` : null}
-          ${source.is_pattern ? html`<span class="badge warn">#### PATTERN</span>` : null}
+          <span class="muted">${entry.format || "format unknown"}</span>
+          ${padded ? html`<span class="badge warn">#### PATTERN</span>` : null}
         </div>
-
+        <div class="stack">
+          <span class="mono grow">${entry.path}</span>
+          ${copyButton(entry.path)}
+        </div>
         ${
-          kind === "url"
-            ? html`
-                <div class="stack">
-                  <a class="mono grow" href=${source.value || "#"} target="_blank" rel="noreferrer">
-                    ${source.value || ""}
-                  </a>
-                  ${copyButton(source.value)}
-                </div>
-                ${
-                  source.is_pattern
-                    ? null
-                    : html`<${Preview} valueType=${valueType} url=${source.value} />`
-                }
-              `
-            : null
-        }
-        ${
-          kind === "path"
-            ? html`
-                <div class="stack">
-                  <span class="mono grow">${source.value || ""}</span>
-                  ${copyButton(source.value)}
-                </div>
-                ${
-                  source.is_pattern
-                    ? html`<div class="muted">
-                        Frame padding: valid for a file knob, invalid for an open().
-                      </div>`
-                    : html`<${Preview}
-                        valueType=${valueType}
-                        url=${fileUrl(source.value)}
-                        local
-                      />`
-                }
-              `
-            : null
-        }
-        ${
-          kind === "inline"
-            ? html`<div class="muted">
-                Bytes stayed in the engine. Read the same value in its url or path form, or treat it
-                as unavailable.
-              </div>`
-            : null
-        }
-        ${
-          kind === "macro"
-            ? html`
-                <div class="stack">
-                  <span class="badge bad">UNRESOLVED</span>
-                  <span class="mono">${source.value || source.raw || ""}</span>
-                </div>
-                <div class="muted">
-                  A template that never resolved, usually a workflow variable. A configuration
-                  error, not a file.
-                </div>
-              `
-            : null
-        }
-        ${
-          ["url", "path", "inline", "macro"].indexOf(kind) === -1
-            ? html`<div class="muted">
-                Unrecognized source kind, left alone: ${JSON.stringify(source.value)}
-              </div>`
-            : null
-        }
-        ${
-          source.raw && source.raw !== source.value
-            ? html`<div class="diag">raw: ${source.raw}</div>`
-            : null
+          padded
+            ? html`<div class="muted">Frame padding: valid for a file knob, invalid for an open().</div>`
+            : html`<${Preview} valueType=${valueType} url=${fileUrl(entry.path)} local />`
         }
       </div>
     `;
@@ -129,7 +59,7 @@
   function OutputCard({ param, entry }) {
     const descriptor = (entry && entry.value) || null;
     const valueType = descriptor ? descriptor.value_type || "?" : null;
-    const sources = descriptor && Array.isArray(descriptor.sources) ? descriptor.sources : [];
+    const items = valueItems(descriptor);
     const scalar = valueType && isScalar(valueType);
 
     return html`
@@ -144,8 +74,8 @@
               : html`<span class="badge">declares ${param.type || "?"}</span>`
           }
           ${
-            valueType === "GTImage" && sources.length > 1
-              ? html`<span class="badge warn">${sources.length} SOURCES</span>`
+            descriptor && Array.isArray(descriptor.value) && descriptor.value.length > 1
+              ? html`<span class="badge warn">${descriptor.value.length} ITEMS</span>`
               : null
           }
           ${entry && entry.live ? html`<span class="badge">pushed</span>` : null}
@@ -156,31 +86,18 @@
               ? html`<div class="empty">No value yet.</div>`
               : html`
                   ${
-                    scalar
-                      ? html`<div class="flat mono">
-                          ${
-                          valueType === "GTNull"
-                            ? html`<span class="muted">Unset.</span>`
-                            : descriptor.value === null || descriptor.value === undefined
-                              ? html`<span class="muted">No value reported.</span>`
-                              : descriptor.value === ""
+                    !items.length
+                      ? html`<div class="flat muted">Unset.</div>`
+                      : scalar
+                        ? html`<div class="flat mono">
+                            ${
+                              items.length === 1 && items[0] === ""
                                 ? html`<span class="muted">Empty.</span>`
-                                : String(descriptor.value)
-                        }
-                        </div>`
-                      : null
+                                : items.map(String).join(", ")
+                            }
+                          </div>`
+                        : items.map((item) => html`<${Entry} valueType=${valueType} entry=${item} />`)
                   }
-                  ${
-                    !scalar && !sources.length
-                      ? html`<div class="flat muted">
-                          No sources, which should not happen: a value pointing at no bytes is
-                          reported as GTText.
-                        </div>`
-                      : null
-                  }
-                  ${sources.map(
-                    (source) => html`<${Source} valueType=${valueType} source=${source || {}} />`,
-                  )}
                   ${
                     isMedia(valueType)
                       ? html`<details class="plan">
@@ -194,10 +111,7 @@
                             </div>
                           `,
                         )}
-                          <div class="diag">
-                            engine_type ${descriptor.engine_type || "?"}, diagnostic only.
-                            colorspace ${descriptor.colorspace || "null in v1"}
-                          </div>
+                          <div class="diag">engine_type ${descriptor.engine_type || "?"}, diagnostic only.</div>
                         </details>`
                       : null
                   }

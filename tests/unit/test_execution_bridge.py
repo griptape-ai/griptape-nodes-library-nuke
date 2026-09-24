@@ -225,13 +225,28 @@ class TestTranslation:
                 node_name="Read",
                 parameter_name="image",
                 data_type="ImageUrlArtifact",
-                value=ImageUrlArtifact("http://localhost:8124/workspace/static_files/a.png"),
+                value=ImageUrlArtifact("/workspace/outputs/a.png"),
             )
         )
         payload = event_manager.payloads()[-1]
         assert isinstance(payload, NukeParameterValueEvent)
         assert payload.value["value_type"] == ValueType.IMAGE
-        assert payload.value["sources"][0]["format"] == "png"
+        assert payload.value["value"] == {"path": "/workspace/outputs/a.png", "format": "png"}
+
+    def test_a_value_with_no_host_form_is_not_forwarded(self, event_manager: FakeEventManager) -> None:
+        """A bulk read reports it as unavailable with a reason; a notification has nowhere to put one."""
+        bridge = ExecutionBridge()
+        bridge.install()
+        before = len(event_manager.payloads())
+        bridge._on_parameter_value(
+            ParameterValueUpdateEvent(
+                node_name="Read",
+                parameter_name="image",
+                data_type="ImageUrlArtifact",
+                value=ImageUrlArtifact("https://cdn.example.com/a.png"),
+            )
+        )
+        assert len(event_manager.payloads()) == before
 
     def test_a_control_flow_parameter_update_is_not_forwarded(self, event_manager: FakeEventManager) -> None:
         """The engine streams a value update for exec_in like any other parameter.

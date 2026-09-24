@@ -142,7 +142,7 @@ def respond_to_get_value(request: GetParameterValueRequest) -> Any:
         "topic": ("str", "a quiet harbour at dusk"),
         "plate": ("ImageUrlArtifact", None),
         "was_successful": ("bool", True),
-        "mixed_audio": ("AudioUrlArtifact", "http://x/audio.mp3"),
+        "mixed_audio": ("AudioUrlArtifact", "/show/audio/mix.mp3"),
     }
     if request.parameter_name not in answers:
         msg = f"no fake response configured for parameter '{request.parameter_name}'"

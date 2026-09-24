@@ -9,8 +9,13 @@ from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 
-from nuke_host_api.protocol import SourceKind
-from nuke_host_api.value_types import CONTROL_PARAM_TYPE, normalize_value, value_type_for_engine_type
+from nuke_host_api.value_types import (
+    CONTROL_PARAM_TYPE,
+    UnrepresentableValueError,
+    is_list_type,
+    normalize_value,
+    value_type_for_engine_type,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -85,6 +90,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         # `node` is separate; prefixing it would repeat the node in knob labels.
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
+        "is_list": is_list_type(parameter.get("type")),
         "default_value": _default_value(parameter),
         "choices": list(choices) if isinstance(choices, list) else [],
         "tooltip": str(parameter.get("tooltip") or ""),
@@ -94,20 +100,12 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
     }
 
 
-# Only these kinds name something a knob can be set to. An unresolved macro is a template and
-# inline bytes never left the engine, so neither is a default a host can use.
-_OPENABLE_SOURCE_KINDS = frozenset({SourceKind.PATH, SourceKind.URL})
-
-
 def _default_value(parameter: dict) -> Any:
-    descriptor = normalize_value(parameter.get("default_value"), parameter.get("type"))
-    if not descriptor["sources"]:
-        return descriptor["value"]
-    locators = [source["value"] for source in descriptor["sources"] if source["kind"] in _OPENABLE_SOURCE_KINDS]
-    if not locators:
-        return None
-    # A sequence default has a locator per frame and no single path to collapse them into.
-    return locators[0] if len(locators) == 1 else locators
+    """Same shape as a value descriptor's ``value``, so one host parser reads both."""
+    try:
+        return normalize_value(parameter.get("default_value"), parameter.get("type"))["value"]
+    except UnrepresentableValueError:
+        return [] if is_list_type(parameter.get("type")) else None
 
 
 def input_parameter_ids(entry: dict) -> set[tuple[str, str]]:

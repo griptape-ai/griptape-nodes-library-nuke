@@ -60,9 +60,12 @@ class TestGetParameterValues:
         assert result.outputs["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert result.outputs["End Flow"]["mixed_audio"]["value_type"] == ValueType.FILE
         # A value the engine genuinely holds as None is not a parameter it would not answer for:
-        # it lands in `inputs` as GTNull, not in `unavailable`. See handlers/values.py's
-        # third reason for not using GetAllNodeInfoRequest.
-        assert result.inputs["Start Flow"]["plate"]["value_type"] == ValueType.NULL
+        # it lands in `inputs` as a null value, not in `unavailable`.
+        assert result.inputs["Start Flow"]["plate"] == {
+            "value_type": ValueType.IMAGE,
+            "value": None,
+            "engine_type": "NoneType",
+        }
         assert result.unavailable == []
 
     async def test_a_single_section_reads_only_that_side(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,7 +140,7 @@ class TestGetParameterValues:
 
         assert isinstance(result, NukeGetParameterValuesResultSuccess)
         descriptor = result.outputs["End Flow"]["was_successful"]
-        assert set(descriptor) == {"value_type", "value", "sources", "colorspace", "engine_type"}
+        assert set(descriptor) == {"value_type", "value", "engine_type"}
 
 
 # execute_responses() already sets up an idle flow with "wf1" loaded and its declared shape
