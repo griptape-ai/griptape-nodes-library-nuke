@@ -1352,7 +1352,7 @@ reported in `unavailable` with a reason rather than guessed at:
 - Bytes the engine never saved to a file, such as an unsaved `ImageArtifact`.
 - A path template that did not resolve.
 - A list on a single parameter, a nested list, a dict, or a list mixing text with media.
-- A list with any such item. The whole parameter is unavailable, never a shortened list.
+- If any list item has no host form, the whole parameter is unavailable; items are never dropped.
 
 ## Errors
 
