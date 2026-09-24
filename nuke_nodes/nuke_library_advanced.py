@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from griptape_nodes.node_library.advanced_node_library import AdvancedNodeLibrary
 from griptape_nodes.node_library.library_registry import Library, LibrarySchema
@@ -11,13 +12,18 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
+from nuke_host_api import library_version
+from nuke_host_api.execution_bridge import uninstall as uninstall_host_api_bridge
+from nuke_host_api.handlers import ROUTES
+from nuke_host_api.protocol import PROTOCOL_VERSION
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 from publish_gizmo.nuke_publish_options import get_nuke_publish_options
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
 logger = logging.getLogger("griptape_nodes")
 
-# Same icon reference the library JSON gives every Nuke node, so the publish target
-# reads as belonging to this library rather than picking a generic Lucide glyph.
 PUBLISH_TARGET_ICON = "logos/nuke.png"
 
 
@@ -34,8 +40,6 @@ def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
 
 
 class NukeLibraryAdvanced(AdvancedNodeLibrary):
-    """Advanced library implementation for the Nuke Nodes Library."""
-
     def before_library_nodes_loaded(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
         msg = f"Starting to load nodes for '{library_data.name}' library..."
         logger.info(msg)
@@ -56,3 +60,21 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
                 icon=PUBLISH_TARGET_ICON,
             ),
         )
+
+        logger.info("Nuke host API ready on protocol version %d", PROTOCOL_VERSION)
+
+    def before_library_unregistered(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
+        # The engine does not deregister execution listeners on reload.
+        uninstall_host_api_bridge()
+        # A reload may replace the manifest without restarting the process.
+        library_version.reset()
+
+    def get_request_handlers(
+        self,
+    ) -> list[
+        tuple[
+            type[RequestPayload],
+            Callable[[RequestPayload], ResultPayload] | Callable[[RequestPayload], Awaitable[ResultPayload]],
+        ]
+    ]:
+        return list(ROUTES)

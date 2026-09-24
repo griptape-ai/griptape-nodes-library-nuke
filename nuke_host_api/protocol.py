@@ -1,0 +1,80 @@
+"""Host protocol names and compatibility rules."""
+
+from __future__ import annotations
+
+PROTOCOL_VERSION = 1
+
+# Oldest first; negotiation selects the highest mutual version.
+SUPPORTED_PROTOCOL_VERSIONS = (1,)
+
+
+class Verb:
+    """Wire request type names."""
+
+    CONNECT = "NukeConnectRequest"
+    LIST_WORKFLOWS = "NukeListWorkflowsRequest"
+    DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
+    LOAD_WORKFLOW = "NukeLoadWorkflowRequest"
+    EXECUTE_WORKFLOW = "NukeExecuteWorkflowRequest"
+    GET_EXECUTION_STATE = "NukeGetExecutionStateRequest"
+    GET_PARAMETER_VALUES = "NukeGetParameterValuesRequest"
+    SET_PARAMETER_VALUES = "NukeSetParameterValuesRequest"
+    CANCEL_EXECUTION = "NukeCancelExecutionRequest"
+    LIST_PROJECTS = "NukeListProjectsRequest"
+    GET_CURRENT_PROJECT = "NukeGetCurrentProjectRequest"
+    SET_CURRENT_PROJECT = "NukeSetCurrentProjectRequest"
+    DESCRIBE_PROJECT = "NukeDescribeProjectRequest"
+
+
+class Notification:
+    NODE_STATE = "NukeNodeStateEvent"
+    PARAMETER_VALUE = "NukeParameterValueEvent"
+    EXECUTION_STATE = "NukeExecutionStateEvent"
+    EXECUTION_NODES = "NukeExecutionNodesEvent"
+
+
+class NodeState:
+    UNRESOLVED = "unresolved"
+    RUNNING = "running"
+    RESOLVED = "resolved"
+    FAILED = "failed"
+
+
+class ParameterSection:
+    INPUTS = "inputs"
+    OUTPUTS = "outputs"
+
+
+PARAMETER_SECTIONS = (ParameterSection.INPUTS, ParameterSection.OUTPUTS)
+
+
+class ExecutionState:
+    """``COMPLETED`` has no outcome; execute's ``FAILED`` verdict can follow it for the same run."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ValueType:
+    """``INT`` and ``FLOAT`` are separate members because Nuke's Int_Knob and Double_Knob are."""
+
+    IMAGE = "GTImage"
+    MOVIE = "GTMovie"
+    FILE = "GTFile"
+    TEXT = "GTText"
+    INT = "GTInt"
+    FLOAT = "GTFloat"
+    BOOL = "GTBool"
+
+
+VALUE_TYPES = (
+    ValueType.IMAGE,
+    ValueType.MOVIE,
+    ValueType.FILE,
+    ValueType.TEXT,
+    ValueType.INT,
+    ValueType.FLOAT,
+    ValueType.BOOL,
+)

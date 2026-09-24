@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from nuke_host_api import shape
+from nuke_host_api.dispatch import failure, verb
+from nuke_host_api.engine import lookup_workflow, workflow_table
+from nuke_host_api.events import (
+    NukeDescribeWorkflowRequest,
+    NukeDescribeWorkflowResultFailure,
+    NukeDescribeWorkflowResultSuccess,
+    NukeListWorkflowsRequest,
+    NukeListWorkflowsResultFailure,
+    NukeListWorkflowsResultSuccess,
+)
+
+
+@verb(NukeListWorkflowsRequest)
+async def handle_list_workflows(
+    request: NukeListWorkflowsRequest,
+) -> NukeListWorkflowsResultSuccess | NukeListWorkflowsResultFailure:
+    table = await workflow_table()
+    if table is None:
+        return failure(
+            NukeListWorkflowsResultFailure,
+            attempted="to list workflows for a host",
+            because="the engine could not read the workflow registry.",
+        )
+
+    workflows = []
+    for workflow_id, entry in table.items():
+        if not isinstance(entry, dict):
+            continue
+        runnable, reason = shape.is_runnable(entry)
+        if request.runnable_only and not runnable:
+            continue
+        workflows.append(
+            {
+                "id": workflow_id,
+                "name": str(entry.get("name") or workflow_id),
+                "description": str(entry.get("description") or ""),
+                "runnable": runnable,
+                "unavailable_reason": reason,
+            }
+        )
+
+    return NukeListWorkflowsResultSuccess(
+        workflows=workflows,
+        result_details=f"Listed {len(workflows)} workflow(s) for a host client.",
+    )
+
+
+@verb(NukeDescribeWorkflowRequest)
+async def handle_describe_workflow(
+    request: NukeDescribeWorkflowRequest,
+) -> NukeDescribeWorkflowResultSuccess | NukeDescribeWorkflowResultFailure:
+    """Distinguish an unreadable registry from an unknown workflow ID."""
+    found = await lookup_workflow(request.workflow_id)
+    if not found.registry_readable:
+        return failure(
+            NukeDescribeWorkflowResultFailure,
+            attempted=f"to describe workflow '{request.workflow_id}'",
+            because="the engine could not read the workflow registry.",
+            workflow_id=request.workflow_id,
+        )
+
+    entry = found.entry
+    if entry is None:
+        return failure(
+            NukeDescribeWorkflowResultFailure,
+            attempted=f"to describe workflow '{request.workflow_id}'",
+            because="no workflow with that name is registered.",
+            error=KeyError,
+            workflow_id=request.workflow_id,
+        )
+
+    workflow_shape = shape.workflow_shape(entry)
+    return NukeDescribeWorkflowResultSuccess(
+        workflow_id=request.workflow_id,
+        name=str(entry.get("name") or request.workflow_id),
+        description=str(entry.get("description") or ""),
+        inputs=shape.declared_parameters(workflow_shape.get("inputs")),
+        outputs=shape.declared_parameters(workflow_shape.get("outputs")),
+        result_details=f"Described workflow '{request.workflow_id}' for a host client.",
+    )
