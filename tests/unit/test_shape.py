@@ -143,6 +143,11 @@ class TestDeclaredParameters:
         section = {"Start Flow": {"plate": {"type": engine_type, "default_value": "https://cdn.example.com/a.png"}}}
         assert shape.declared_parameters(section)[0]["default_value"] == expected
 
+    def test_a_list_default_with_one_item_of_no_host_form_is_empty(self) -> None:
+        default = ["/show/plate.0001.exr", "https://cdn.example.com/a.png"]
+        section = {"Start Flow": {"plate": {"type": "list[ImageUrlArtifact]", "default_value": default}}}
+        assert shape.declared_parameters(section)[0]["default_value"] == []
+
     @pytest.mark.parametrize(
         ("engine_type", "expected"),
         [("list[ImageUrlArtifact]", True), ("Sequence", True), ("ImageUrlArtifact", False), ("any", None)],

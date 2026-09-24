@@ -384,6 +384,10 @@ class TestUnrepresentable:
         with pytest.raises(UnrepresentableValueError, match="bytes"):
             value_types.normalize_value(value, "ImageUrlArtifact")
 
+    def test_one_item_with_no_host_form_voids_the_whole_list(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="URL"):
+            value_types.normalize_value(["/show/frame.1001.exr", URL], "list[ImageUrlArtifact]")
+
     def test_a_dict_that_is_not_an_artifact(self) -> None:
         with pytest.raises(UnrepresentableValueError, match="dict"):
             value_types.normalize_value({"width": 1920, "height": 1080}, "dict")
