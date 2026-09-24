@@ -226,9 +226,10 @@ class TestDescribe:
                 f"{addressed} label must not be prefixed with the node, which is already its own field"
             )
             assert declared["type"] in VALUE_TYPES, f"{addressed} escaped the closed set with {declared['type']!r}"
-            assert not isinstance(declared["default_value"], dict), (
-                f"{addressed} default must be a plain value, not a descriptor"
+            assert not (isinstance(declared["default_value"], dict) and "value_type" in declared["default_value"]), (
+                f"{addressed} default must be a value, not a descriptor"
             )
+            assert declared["is_list"] in {True, False, None}
             assert isinstance(declared["choices"], list)
             assert isinstance(declared["tooltip"], str)
             assert isinstance(declared["settable"], bool)
@@ -351,8 +352,7 @@ class TestExecute:
                 f"{event.body['node_name']}.{event.body['parameter_name']} "
                 f"escaped the closed set with {descriptor['value_type']!r}"
             )
-            assert "sources" in descriptor
-            assert "engine_type" in descriptor
+            assert set(descriptor) == {"value_type", "value", "engine_type"}
 
         streamed = {f"{event.body['node_name']}.{event.body['parameter_name']}" for event in value_events}
         wiring = {name for name in streamed if name.rsplit(".", 1)[-1] in {"exec_in", "exec_out"}}

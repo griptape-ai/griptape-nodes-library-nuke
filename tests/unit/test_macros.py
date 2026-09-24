@@ -1,9 +1,4 @@
-"""Tests for macro path resolution.
-
-Macros matter because a host always needs a real path. Two systems share the `{...}`
-syntax, so the risk is not failing to resolve, it is resolving the wrong thing or
-labelling an unresolved template as a path a host will try to open.
-"""
+"""Tests that shared brace syntax never exposes unresolved templates as paths."""
 
 from __future__ import annotations
 
@@ -20,7 +15,8 @@ from griptape_nodes.retained_mode.events.project_events import (
 )
 
 from nuke_host_api import value_types
-from nuke_host_api.protocol import SourceKind, ValueType
+from nuke_host_api.protocol import ValueType
+from nuke_host_api.value_types import UnrepresentableValueError
 
 
 class FakeEngine:
@@ -60,87 +56,53 @@ def resolving_engine(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 def test_a_macro_resolves_to_an_absolute_path(resolving_engine) -> None:  # noqa: ANN001
     resolving_engine("/workspace/outputs/render.png")
     descriptor = value_types.normalize_value("{outputs}/render.png", "ImageUrlArtifact")
-    source = descriptor["sources"][0]
-    assert source["kind"] == SourceKind.PATH
-    assert source["value"] == "/workspace/outputs/render.png"
-    assert source["format"] == "png"
-    assert source["raw"] == "{outputs}/render.png"
-    assert source["is_pattern"] is False
+    assert descriptor["value"] == {"path": "/workspace/outputs/render.png", "format": "png"}
 
 
-def test_a_sequence_macro_keeps_its_hash_padding_and_is_flagged(resolving_engine) -> None:  # noqa: ANN001
-    """Nuke reads `####` natively, but it is not openable, so it must be labelled.
-
-    The engine documents this rendering as presentation-only and warns it must not be
-    handed to an I/O primitive. For a Read knob it is the correct form, so `is_pattern`
-    distinguishes the two uses.
-    """
-    resolving_engine("/workspace/outputs/render.####.exr")
-    descriptor = value_types.normalize_value("{outputs}/render.{###}.exr", "ImageUrlArtifact")
-    source = descriptor["sources"][0]
-    assert source["is_pattern"] is True
-    assert "####" in source["value"]
-
-
-def test_sequence_slots_are_requested_as_patterns_not_failures(resolving_engine) -> None:  # noqa: ANN001
-    """The engine's default is FAIL, which would reject every sequence."""
+def test_a_sequence_slot_is_rendered_as_hash_padding(resolving_engine) -> None:  # noqa: ANN001
+    """A Read node expands `####` itself; the engine's default of FAIL would reject every sequence."""
     engine = resolving_engine("/workspace/outputs/render.####.exr")
-    value_types.normalize_value("{outputs}/render.{###}.exr", "ImageUrlArtifact")
-    request = engine.requests[0]
-    assert request.unresolved_sequence_slot_behavior == UnresolvedSequenceSlotBehavior.RENDER_SEQUENCE_PATTERN
+    descriptor = value_types.normalize_value("{outputs}/render.{###}.exr", "ImageUrlArtifact")
+    assert descriptor["value"] == {"path": "/workspace/outputs/render.####.exr", "format": "exr"}
+    assert (
+        engine.requests[0].unresolved_sequence_slot_behavior == UnresolvedSequenceSlotBehavior.RENDER_SEQUENCE_PATTERN
+    )
 
 
-def test_an_unresolvable_macro_is_never_labelled_a_path(resolving_engine) -> None:  # noqa: ANN001
-    """The failure mode that matters: a host opening a literal `{...}` string.
-
-    Happens for an unsubstituted `{VAR}` workflow variable, since substitution can be
-    disabled per-parameter or engine-wide.
-    """
+def test_an_unresolvable_path_template_is_never_handed_over_as_a_path(resolving_engine) -> None:  # noqa: ANN001
     resolving_engine(None)
-    descriptor = value_types.normalize_value("{MY_VAR}/plate.exr", "ImageUrlArtifact")
-    source = descriptor["sources"][0]
-    assert source["kind"] == SourceKind.MACRO
-    assert source["value"] == "{MY_VAR}/plate.exr"
-    assert source["raw"] == "{MY_VAR}/plate.exr"
+    with pytest.raises(UnrepresentableValueError, match=r"\{MY_VAR\}/plate\.exr"):
+        value_types.normalize_value("{MY_VAR}/plate.exr", "str")
 
 
 def test_a_macro_inside_an_artifact_value_resolves_too(resolving_engine) -> None:  # noqa: ANN001
-    """Macros are not confined to bare strings."""
     resolving_engine("/workspace/outputs/from_artifact.png")
     descriptor = value_types.normalize_value(ImageUrlArtifact("{outputs}/from_artifact.png"), "ImageUrlArtifact")
     assert descriptor["value_type"] == ValueType.IMAGE
-    assert descriptor["sources"][0]["kind"] == SourceKind.PATH
-    assert descriptor["sources"][0]["value"] == "/workspace/outputs/from_artifact.png"
+    assert descriptor["value"]["path"] == "/workspace/outputs/from_artifact.png"
+
+
+def test_a_macro_in_each_list_item_resolves(resolving_engine) -> None:  # noqa: ANN001
+    resolving_engine("/workspace/outputs/frame.png")
+    descriptor = value_types.normalize_value(["{outputs}/frame.png", "{outputs}/frame.png"], "list[str]")
+    assert [entry["path"] for entry in descriptor["value"]] == ["/workspace/outputs/frame.png"] * 2
 
 
 def test_a_plain_path_never_reaches_the_macro_resolver(resolving_engine) -> None:  # noqa: ANN001
-    """No braces, no engine request. Keeps the common case free."""
     engine = resolving_engine("/should/not/be/used")
     value_types.normalize_value("/mnt/show/plate.exr", "str")
     assert engine.requests == []
 
 
-def test_prose_containing_braces_does_not_become_a_path(resolving_engine) -> None:  # noqa: ANN001
-    """Text is a legitimate value; a stray brace with no extension must not turn it into a locator."""
+def test_prose_containing_braces_stays_text(resolving_engine) -> None:  # noqa: ANN001
     resolving_engine(None)
     descriptor = value_types.normalize_value("render {frame} of the shot", "str")
     assert descriptor["value_type"] == ValueType.TEXT
-    assert descriptor["sources"] == []
-
-
-def test_an_unresolved_macro_with_a_real_extension_still_keeps_its_source(resolving_engine) -> None:  # noqa: ANN001
-    """An extension makes an unresolved macro a genuine locator even though the variable never filled in."""
-    resolving_engine(None)
-    descriptor = value_types.normalize_value("{VAR}/out.exr", "str")
-    assert descriptor["value_type"] == ValueType.IMAGE
-    assert descriptor["sources"][0]["kind"] == SourceKind.MACRO
-    assert descriptor["sources"][0]["value"] == "{VAR}/out.exr"
+    assert descriptor["value"] == "render {frame} of the shot"
 
 
 def test_a_resolved_macro_path_uses_forward_slashes(resolving_engine) -> None:  # noqa: ANN001
     """Nuke's TCL layer treats backslashes as escapes, so a resolved path must not carry one."""
     resolving_engine("C:\\workspace\\outputs\\render.png")
     descriptor = value_types.normalize_value("{outputs}/render.png", "ImageUrlArtifact")
-    source = descriptor["sources"][0]
-    assert source["value"] == "C:/workspace/outputs/render.png"
-    assert "\\" not in source["value"]
+    assert descriptor["value"]["path"] == "C:/workspace/outputs/render.png"

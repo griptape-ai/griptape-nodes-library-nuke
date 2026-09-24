@@ -47,6 +47,7 @@ tests/unit/
   test_execution_bridge.py         subscription symmetry, event translation
 tests/integration/
   test_execution_rerun.py          resolved-node reuse and unresolve_first, real engine in-process
+  test_parameter_value_shapes.py   single, list, and sequence values off a real engine in-process
   test_host_api.py                 live smoke suite over a running engine's socket
 ```
 
@@ -218,9 +219,9 @@ next call; the other two are not the host's doing. Telling a host to save a work
 saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
 because then there is nothing to check against the allow-list.
 
-`NukeDescribeWorkflowRequest` carries each parameter's `default_value`, `choices`, `tooltip`,
-`settable`, and `hidden` alongside its type. The default is the value a host sets a knob to, with macros resolved;
-`kind`, `format`, and `is_pattern` stay on the `input_values` descriptors. `choices` is what an
+`NukeDescribeWorkflowRequest` carries each parameter's `is_list`, `default_value`, `choices`,
+`tooltip`, `settable`, and `hidden` alongside its type. The default is the value a host sets a knob
+to, in the same shape as a descriptor's `value`, with macros resolved. `choices` is what an
 `Enumeration_Knob` offers.
 
 `choices` carries the values, and nothing carries whether the engine enforces them. The `Options`
@@ -240,14 +241,13 @@ so a host reads a start node's parameters, an end node's parameters, or everythi
 call instead of one `GetParameterValueRequest` per parameter. `requested_sections` echoes what
 was actually read, so a host can tell a section it did not ask for from a section that came
 back empty. `unavailable` reports, rather than silently omits, any declared parameter the engine
-would not answer for, because an absent entry and an empty one mean different things when
-a host is deciding what to show on a knob.
+would not answer for or whose value has no host form, because an absent entry and an empty one
+mean different things when a host is deciding what to show on a knob.
 
 Answered by one engine request per declared parameter rather than the engine's own
 `GetAllNodeInfoRequest`, which batches a node's info into one call but keys its parameter
-values by internal element id, hands artifacts back display-serialized into plain dicts
-rather than the instances the normalizer inspects, and drops any parameter whose value is
-`None`. See `parameter_values.py` for the full comparison.
+values by internal element id, hands artifacts back display-serialized, and drops any
+parameter whose value is `None`. See `parameter_values.py` for the full comparison.
 
 The reading itself lives in `parameter_values.py`, shared with `NukeLoadWorkflowRequest`, so
 the values a host is handed at load and the values it reads back later cannot disagree, and
@@ -408,17 +408,14 @@ engine's instruction that execution event listeners stay cheap and non-blocking.
 
 ## Value contract
 
-Closed set, eight members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
-`GTBool`, `GTNull`.
+Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
+`GTBool`.
 
 ```json
 {"value_type": "GTImage",
- "value": null,
- "sources": [{"kind": "url|path|inline|macro", "value": "...", "format": "exr",
-              "width": null, "height": null, "byte_count": null,
-              "is_pattern": true, "raw": "{outputs}/render.{###}.exr"}],
- "colorspace": null,
- "engine_type": "ImageUrlArtifact"}
+ "value": [{"path": "/proj/outputs/frame_1001.png", "format": "png"},
+           {"path": "/proj/outputs/frame_1002.png", "format": "png"}],
+ "engine_type": "Sequence"}
 ```
 
 The engine expresses "an image" in at least six shapes, and the artifact vocabulary
@@ -429,46 +426,44 @@ types the Nuke library already consumes are not in the SDK at all: `ThreeDUrlArt
 `BlobArtifact`, and `GenericArtifact` are structurally identical, all carrying a single
 `value`, so the class name is the only discriminator.
 
-14 representative shapes, all landing in the eight-member set:
+Representative shapes:
 
 ```
-GTImage    <- ImageUrlArtifact, static server URL          [url/png]
-GTImage    <- ImageUrlArtifact, remote URL no extension    [url/?]
-GTImage    <- ImageArtifact, inline bytes                  [inline/png]
-GTImage    <- "Sequence" or list[ImageUrlArtifact]         [many sources]
-GTMovie    <- VideoUrlArtifact                             [url/mov]
-GTImage    <- bare string, absolute path                   [path/exr]
-GTText     <- bare string, prose                           [no sources]
-GTImage    <- ListArtifact of images                       [url/exr, url/exr, url/exr]
-GTFile     <- BlobArtifact                                 [inline/?]
-GTImage    <- GenericArtifact wrapping a jpg URL           [url/jpg]
-GTImage    <- macro, project outputs dir                   [path/png]
-GTImage    <- macro with sequence slot                     [path/exr/pattern]
-GTImage    <- macro with unbound directory                 [macro/png]
-GTImage    <- unresolved workflow variable                 [macro/exr]
+GTImage    <- ImageUrlArtifact, saved path                 {path, format}
+GTImage    <- "Sequence" or list[ImageUrlArtifact]         [{path, format}, ...]
+GTMovie    <- VideoUrlArtifact                             {path, format}
+GTImage    <- bare string, absolute path                   {path, format}
+GTText     <- bare string, prose                           "..."
+GTInt      <- list[int]                                    [42, 43]
+GTImage    <- GenericArtifact wrapping a jpg path          {path, format}
+GTImage    <- macro, project outputs dir                   {path, format}
+GTImage    <- macro with sequence slot                     {path: ".../render.####.exr", ...}
+GTImage    <- unset ImageUrlArtifact                       null
+unavailable <- URL on a media parameter, unsaved bytes, unresolved template
 ```
 
 Rules:
 
 - **Moves no bytes.** No downloads, no copies, no header sniffing. The engine writes
   wherever it writes; this layer makes the shape predictable.
-- **One place per value.** `value` carries scalars, `sources` carries locators, and nothing
-  carries both. A scalar has no locator to point at, so without `value` a host could read an
-  image output but not the string saying why a run failed.
+- **One field.** `value` holds a scalar or a media entry, or an array of them for a list
+  parameter. A host reads every type the same way.
+- **Cardinality is declared.** Describe's `is_list` comes from the declared type, and a value's
+  shape follows it, so a host knows the shape before a value arrives. Only a wildcard (`any`)
+  lets the value decide.
+- **Local paths only.** A URL on a media parameter, bytes the engine never saved, and a template
+  that did not resolve have no host form in this version. The parameter is reported in
+  `unavailable` with a reason rather than guessed at.
 - **Does perform pure resolution.** Project macros resolve through
   `GetPathForMacroRequest`, which has no disk writes.
 - **Never guesses a format.** Unknown is `null`.
-- **`kind` is explicit**, so a host never sniffs whether a string is a URL, path, macro,
-  or prose.
-- **A locator's extension outranks the declared type, except `GTImage` and `GTMovie`.** Those
-  two keep their declared type. Any other declared type holding a locator, including `GTText`,
+- **A path's extension outranks the declared type, except `GTImage` and `GTMovie`.** Those
+  two keep their declared type. Any other declared type holding a path, including `GTText`,
   `GTFile`, and an artifact class this version does not map, classifies from the extension: a
-  `str` parameter holding `plate.exr` describes as `GTImage`. A value carrying a source narrows
-  only within the sourced types.
-- **Sourceless is never media.** An unset value is `GTNull` and a value pointing at no bytes is
-  `GTText`, whatever the parameter declared, so `GTImage`, `GTMovie`, and `GTFile` never arrive
-  with an empty `sources`.
-- **Sequences are source count, not a host type**, so sequence support costs no version bump.
+  `str` parameter holding `plate.exr` describes as `GTImage`.
+- **Pathless is never media.** An unset value keeps its declared type with a `null` value, and a
+  string that is not a path is `GTText`, so `GTImage`, `GTMovie`, and `GTFile` always carry a
+  path.
 - **Int and float are separate types**, because Nuke's Int_Knob and Double_Knob are separate
   knobs and a knob built from "a number" is neither. A `float` declaration outranks a whole
   number sitting in it, so a knob built from `type` survives the next value; an `int`
@@ -483,8 +478,8 @@ Free: adding a field, mapping a new engine artifact class onto an existing host 
 adding a verb or notification type. **Verified**: an unknown request field is ignored, so
 additive change safety is real rather than aspirational.
 
-Bumps: removing or renaming a verb, event, field, host type, or source kind, or changing
-the meaning of one.
+Bumps: removing or renaming a verb, event, field, or host type, or changing the meaning of
+one.
 
 `SUPPORTED_PROTOCOL_VERSIONS` is the support window. Studios keep plugin binaries in
 service for years, so entries leave on a stated schedule.
@@ -496,7 +491,7 @@ The surface remains mutable until a plugin binary binds to it. Before shipping a
 | Change | Result |
 |---|---|
 | Add a verb, notification, or field | passes, no version bump |
-| Add a value type or source kind | passes the subset check, but the policy is a bump: a host switches on a closed set, so a new member is a case an old plugin has no branch for |
+| Add a value type | passes the subset check, but the policy is a bump: a host switches on a closed set, so a new member is a case an old plugin has no branch for |
 | Remove or rename any of them | **fails** |
 | Make an optional field required | **fails** |
 | Drop a version from the support window | **fails** |
@@ -569,20 +564,20 @@ Without that guard, a rename propagated through the tests can leave the suite gr
     `RGBA`, `Grayscale`, `CMYK`. That is channel layout, not a transfer function, so
     nothing can say whether pixels are sRGB or scene-linear. Nuke works scene-linear, so
     untagged 8-bit output is silently wrong and reads as a tool bug.
-    `GTImage.colorspace` is reserved and always null because adding it later as required would
-    require a version bump.
+    A media entry has no colorspace field yet. When the engine can report one, it belongs on
+    each entry, since a batch can mix colorspaces.
 
 9. **Two brace systems share one syntax.** Directory macros (`{outputs}`) and workflow
     variables (`{MY_VAR}`) are syntactically identical, and only name resolution separates
     them. Substitution normally runs during `aprocess()` but can be disabled per-parameter
     or engine-wide, so a `"{" in value` test cannot tell a resolvable path from a leftover
-    variable. Unresolvable tokens are reported as `kind="macro"` with `raw` preserved.
+    variable. A template that does not resolve is reported in `unavailable`, never as a path.
 
 10. **Nuke inverts the engine's own warning about sequence patterns.**
     `RENDER_SEQUENCE_PATTERN` is documented as presentation-only, "NOT a valid filesystem
     path ... must not be opened". For a Nuke Read node that form is the *operationally
-    correct* one, since Nuke expands the padding itself. Both are true, so the descriptor
-    carries `is_pattern`: safe for a Read knob, not for `open()`. The alternatives were
+    correct* one, since Nuke expands the padding itself. So an unfilled slot is rendered as
+    `####` in the entry's path: safe for a Read knob, not for `open()`. The alternatives were
     both wrong for Nuke, since `FAIL` rejects every sequence and resolving to one frame
     loses the range.
 

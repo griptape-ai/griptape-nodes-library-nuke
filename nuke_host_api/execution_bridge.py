@@ -26,7 +26,7 @@ from nuke_host_api.events import (
     NukeParameterValueEvent,
 )
 from nuke_host_api.protocol import ExecutionState, NodeState
-from nuke_host_api.value_types import CONTROL_PARAM_TYPE, normalize_value
+from nuke_host_api.value_types import CONTROL_PARAM_TYPE, UnrepresentableValueError, normalize_value
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -114,11 +114,15 @@ class ExecutionBridge:
         self._emit_node_state(event.node_name, NodeState.FAILED, event.error_message)
 
     def _on_parameter_value(self, event: ParameterValueUpdateEvent) -> None:
-        """Drop control wiring and normalize data values before emission."""
+        """Drop control wiring and values with no host form; a bulk read reports the latter as unavailable."""
         if event.data_type == CONTROL_PARAM_TYPE:
             return
 
-        descriptor = normalize_value(event.value, event.data_type)
+        try:
+            descriptor = normalize_value(event.value, event.data_type)
+        except UnrepresentableValueError as e:
+            logger.debug("Not notifying %s.%s: %s", event.node_name, event.parameter_name, e)
+            return
         self._emit(
             NukeParameterValueEvent(
                 node_name=event.node_name,

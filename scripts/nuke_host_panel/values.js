@@ -27,64 +27,39 @@ const Values = (function () {
     return byNode;
   }
 
-  // Prefer a source locator; scalars carry no source, so fall back to the descriptor's value.
+  function valueItems(descriptor) {
+    if (!descriptor || descriptor.value === null || descriptor.value === undefined) return [];
+    return Array.isArray(descriptor.value) ? descriptor.value : [descriptor.value];
+  }
+
+  const itemText = (item) => (item && typeof item === "object" ? item.path : item);
+
   function fieldValueFrom(descriptor) {
-    if (!descriptor || typeof descriptor !== "object") return undefined;
-    const sources = Array.isArray(descriptor.sources) ? descriptor.sources : [];
-    const first = sources.length ? sources[0] || {} : null;
-    if (first && first.kind !== "inline" && first.value) return first.value;
-    if (descriptor.value !== null && descriptor.value !== undefined) {
-      return String(descriptor.value);
-    }
-    return undefined;
+    const items = valueItems(descriptor).filter((item) => item !== null && item !== undefined);
+    if (!items.length) return undefined;
+    return items.map((item) => String(itemText(item))).join(", ");
   }
 
   // Use value_type because unmapped artifact parameters may produce a different runtime type.
   function nukeNodePlan(descriptor) {
     if (!descriptor || typeof descriptor !== "object") return [];
     const valueType = descriptor.value_type || "?";
-    const sources = Array.isArray(descriptor.sources) ? descriptor.sources : [];
-
-    if (valueType === "GTNull") return [{ note: "Unset. Nothing to create." }];
     if (isScalar(valueType)) return [{ note: "A scalar. It belongs on a knob, not in the DAG." }];
-    if (!sources.length) {
-      return [
-        {
-          note:
-            valueType +
-            " with no sources should not happen: a value pointing at no bytes is reported as GTText. " +
-            "Treat it as unavailable rather than creating an empty Read.",
-        },
-      ];
-    }
 
-    return sources.map((source) => {
-      const kind = source.kind || "?";
-      if (kind === "macro") {
-        return { note: "An unresolved template. A configuration error, not a file to read." };
-      }
-      if (kind === "inline") {
-        return { note: "No locator. Read the url or path form of the same value." };
-      }
-      if (kind === "url") {
-        return {
-          call: 'nuke.nodes.Read(file="<localized>")',
-          note: "This layer moves no bytes, and a Read node cannot take an http path: fetch it first.",
-          source: source.value || "",
-        };
-      }
-      if (kind === "path") {
-        return {
-          call: source.is_pattern
-            ? 'nuke.nodes.Read(file="' + (source.value || "") + '", first=<first>, last=<last>)'
-            : 'nuke.nodes.Read(file="' + (source.value || "") + '")',
-          note: source.is_pattern
-            ? "The frame range is not in the descriptor: scan the directory or ask."
-            : "A single frame.",
-          source: source.value || "",
-        };
-      }
-      return { note: "Unrecognized source kind. Never fatal: a new kind costs a version bump." };
+    const items = valueItems(descriptor);
+    if (!items.length) return [{ note: "Unset. Nothing to create." }];
+
+    return items.map((item) => {
+      const path = item && item.path;
+      if (!path) return { note: "An unset item. Nothing to create." };
+      const padded = /#+/.test(path);
+      return {
+        call: padded
+          ? 'nuke.nodes.Read(file="' + path + '", first=<first>, last=<last>)'
+          : 'nuke.nodes.Read(file="' + path + '")',
+        note: padded ? "Frame padding. The frame range is not in the descriptor: scan the directory or ask." : "A single file.",
+        source: path,
+      };
     });
   }
 
@@ -92,6 +67,7 @@ const Values = (function () {
     paramKey,
     flattenValues,
     unflatten,
+    valueItems,
     fieldValueFrom,
     nukeNodePlan,
   };

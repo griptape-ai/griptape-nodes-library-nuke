@@ -29,8 +29,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
-| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool`, `GTNull` |
-| Source kinds | `path`, `url`, `inline`, `macro` |
+| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `running`, `completed`, `failed`, `cancelled` |
@@ -41,7 +40,7 @@ Binding rules:
 |---|---|
 | Bind to nothing outside the table above | Engine request and event types travel the same connection and change every release |
 | Ignore unknown fields | Fields are added without a version bump; a strict parser breaks on a routine engine upgrade |
-| Ignore unknown enum values, never treat as fatal | A node or execution state may gain a member within a version, and a plugin binary outlives the version bump a new value type or source kind costs |
+| Ignore unknown enum values, never treat as fatal | A node or execution state may gain a member within a version, and a plugin binary outlives the version bump a new value type costs |
 | Never branch on `engine_version` or `engine_type` | Both are diagnostic only |
 
 ### Which verbs need a loaded workflow
@@ -361,7 +360,7 @@ yet.
   "engine_version": "0.99.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
-  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool", "GTNull"],
+  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool"],
   "engine_id": "a69c283e-...",
   "session_id": "50c24f47-...",
   "engine_name": "Dan's workstation"
@@ -436,20 +435,17 @@ Parameter descriptor fields:
 | `node` | Node name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
-| `type` | Always one of the eight value types |
-| `default_value` | The workflow author's default, as one plain value with its macros already resolved. Initialize the knob to this |
+| `type` | Always one of the seven value types. For a list parameter, the type of each item |
+| `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
+| `default_value` | The workflow author's default, in the same shape as a value descriptor's `value`, macros resolved. Initialize the knob to this |
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 | `hidden` | True when the author hid the parameter in the editor. Still declared, still settable |
 
-`default_value` is a plain value, not a descriptor: a scalar for a scalar parameter, a resolved path or
-URL for one that points at bytes, a list of them for a sequence, and `null` when there is nothing a
-host can open. `null` covers three cases a bare value cannot tell apart: the author set no default,
-the default is bytes the engine never wrote out, and the default is a macro that did not resolve.
-A frame a host cannot open is dropped from a sequence rather than sent as a `null` inside the list.
-What a bare value cannot carry, a source's `kind`, `format`, and `is_pattern`, is on `input_values`
-instead, which a fresh load fills with these same defaults.
+`default_value` has the same shape as a value descriptor's `value`, so one parser reads both,
+and sending it back through `NukeSetParameterValuesRequest` resets the knob. It is `null`, or
+`[]` for a list parameter, when the author set no default or the default has no host form.
 
 Non-empty `choices` is the set of values the workflow author offers, so build an
 `Enumeration_Knob` from them. Treat the list as what to offer, not as a guarantee: the engine can
@@ -466,7 +462,7 @@ workflow shape does not describe at all. Either reports `hidden: false`, so read
 author hid this parameter" rather than "the editor shows nothing here".
 
 Every field is always present. A parameter the engine gave no metadata for reports a `null`
-default, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
+default, `is_list: null`, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
 keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
@@ -477,20 +473,20 @@ direction only, by narrowing:
 |---|---|---|
 | A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
-| `str` / `string`, or a wildcard (`any`, `all`) | `GTText` | anything: a locator classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
+| `str` / `string`, or a wildcard (`any`, `all`) | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
 | `float` | `GTFloat` | `GTFloat`, whatever the value holds: a float parameter the engine happens to hold `4` in is still a float parameter |
 | `int` | `GTInt` | `GTInt`, or `GTFloat` when the engine hands over a float, because reporting `GTInt` would invite a host to truncate it |
 
-Two overrides apply to every parameter, whatever it declares:
+Two rules apply to every parameter, whatever it declares:
 
-- **Unset is `GTNull`.** An image parameter holding nothing reports `GTNull` with no sources,
-  not `GTImage`.
-- **Pointing at no bytes is `GTText`.** A value with no usable locator reports `GTText`, because
-  prose on an image parameter is still prose and `GTImage` with an empty `sources` would promise
-  bytes that do not exist. So `GTImage`, `GTMovie`, and `GTFile` never arrive sourceless.
+- **Unset keeps its declared type.** An image parameter holding nothing reports `GTImage` with a
+  `null` value, or `[]` for a list parameter. An empty string on a media parameter is unset.
+- **Pointing at no file is `GTText`.** A string that is not a local path reports `GTText`,
+  because prose on an image parameter is still prose. So `GTImage`, `GTMovie`, and `GTFile`
+  always carry a path.
 
-A `GenericArtifact` parameter holding `https://cdn.example.com/still.jpg` is genuinely an image,
-and nothing at describe time can know that, because no value exists yet. So build the knob
+A `GenericArtifact` parameter holding `/show/still.jpg` is genuinely an image, and nothing at
+describe time can know that, because no value exists yet. So build the knob
 from `type` and always switch on the descriptor's `value_type` when a value actually
 arrives. Never branch on the declared type at runtime.
 
@@ -505,6 +501,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "topic",
       "name": "Topic",
       "type": "GTText",
+      "is_list": false,
       "default_value": "a quiet harbour at dusk",
       "choices": [],
       "tooltip": "What the shot is about.",
@@ -516,6 +513,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "size",
       "name": "Size",
       "type": "GTText",
+      "is_list": false,
       "default_value": "1024x1024",
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
       "tooltip": "",
@@ -527,6 +525,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "frame_rate",
       "name": "Frame Rate",
       "type": "GTFloat",
+      "is_list": false,
       "default_value": 23.976,
       "choices": [],
       "tooltip": "",
@@ -540,6 +539,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "was_successful",
       "name": "was_successful",
       "type": "GTBool",
+      "is_list": false,
       "default_value": null,
       "choices": [],
       "tooltip": "",
@@ -551,6 +551,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "result_details",
       "name": "result_details",
       "type": "GTText",
+      "is_list": false,
       "default_value": null,
       "choices": [],
       "tooltip": "",
@@ -562,6 +563,7 @@ arrives. Never branch on the declared type at runtime.
       "parameter": "summary",
       "name": "summary",
       "type": "GTText",
+      "is_list": false,
       "default_value": null,
       "choices": [],
       "tooltip": "",
@@ -604,7 +606,7 @@ workflows; neither is refused too.
 | `outputs` | `list[dict]` | Declared end-flow parameter descriptors |
 | `input_values` | `dict` | `{node: {parameter: value_descriptor}}`, identical in shape to `NukeGetParameterValuesResultSuccess.inputs`. Initialize knobs to these |
 | `output_values` | `dict` | Same shape, end-flow side. Carries real values for a workflow that has run before, empty descriptors for one that has not |
-| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not read. Reported, not omitted |
+| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not read, or whose value has no host form. Reported, not omitted |
 
 Four fields separate declarations, which are fixed for the workflow, from values, which change on every run. Their shapes match the describe and bulk-read verbs.
 
@@ -627,6 +629,7 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "parameter": "topic",
       "name": "Topic",
       "type": "GTText",
+      "is_list": false,
       "default_value": "a quiet harbour at dusk",
       "choices": [],
       "tooltip": "What the shot is about.",
@@ -640,6 +643,7 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "parameter": "was_successful",
       "name": "was_successful",
       "type": "GTBool",
+      "is_list": false,
       "default_value": null,
       "choices": [],
       "tooltip": "",
@@ -652,8 +656,6 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "topic": {
         "value_type": "GTText",
         "value": "[SUCCEEDED] the run reported no failures",
-        "sources": [],
-        "colorspace": null,
         "engine_type": "str"
       }
     }
@@ -661,10 +663,8 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
   "output_values": {
     "End Flow": {
       "was_successful": {
-        "value_type": "GTNull",
+        "value_type": "GTBool",
         "value": null,
-        "sources": [],
-        "colorspace": null,
         "engine_type": "NoneType"
       }
     }
@@ -725,7 +725,7 @@ no verdict event.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `workflow_id` | `str` | `""` | Optional. Empty runs whatever is loaded. Set, it must be the loaded workflow or the request is refused |
-| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values |
+| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path` |
 | `unresolve_first` | `bool` | `false` | Unresolve every node in the flow before starting, so nodes left resolved by an earlier run compute again instead of being reused |
 
 Send `workflow_id` if the host tracks what it loaded. It costs nothing and turns a graph
@@ -889,7 +889,7 @@ through one reader in the library, so they cannot disagree.
 | `requested_sections` | `list[str]` | The sections actually read, so a host can tell "not asked for" from "asked for, got nothing" |
 | `inputs` | `dict` | `{node: {parameter: value_descriptor}}` for the start-flow side, matching describe's `inputs`. Empty when `inputs` was not requested or the workflow declares none |
 | `outputs` | `dict` | Same shape, for the end-flow side, matching describe's `outputs` |
-| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not answer for. Reported, not omitted: an absent entry and an empty one mean different things to a host building a knob |
+| `unavailable` | `list[dict]` | `{section, node, parameter, reason}` for declared parameters the engine would not answer for, or whose value has no host form. Reported, not omitted: an absent entry and an empty one mean different things to a host building a knob |
 
 ```json
 {
@@ -900,8 +900,6 @@ through one reader in the library, so they cannot disagree.
       "topic": {
         "value_type": "GTText",
         "value": "a quiet harbour at dusk",
-        "sources": [],
-        "colorspace": null,
         "engine_type": "str"
       }
     }
@@ -911,22 +909,16 @@ through one reader in the library, so they cannot disagree.
       "was_successful": {
         "value_type": "GTBool",
         "value": true,
-        "sources": [],
-        "colorspace": null,
         "engine_type": "bool"
       },
       "result_details": {
         "value_type": "GTText",
         "value": "[SUCCEEDED] the run reported no failures",
-        "sources": [],
-        "colorspace": null,
         "engine_type": "str"
       },
       "summary": {
         "value_type": "GTText",
         "value": "the run wrote 1 image",
-        "sources": [],
-        "colorspace": null,
         "engine_type": "str"
       }
     }
@@ -970,7 +962,7 @@ an artist edits a knob rather than only diverging locally until the next
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
-| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values. A request with no pair to act on is refused, not answered as a trivial success: that covers an empty `inputs` and one where every node maps to an empty parameter dict |
+| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path`. A request with no pair to act on is refused, not answered as a trivial success: that covers an empty `inputs` and one where every node maps to an empty parameter dict |
 
 | `NukeSetParameterValuesResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -1209,7 +1201,7 @@ collapse into these four notifications.
 |---|---|---|
 | `node_name` | `str` | |
 | `parameter_name` | `str` | |
-| `value` | `dict` | Normalized value descriptor. Never a raw engine artifact |
+| `value` | `dict` | Normalized value descriptor. Never a raw engine artifact. A value with no host form is not notified; `NukeGetParameterValuesRequest` reports it in `unavailable` |
 
 ```json
 {
@@ -1218,8 +1210,6 @@ collapse into these four notifications.
   "value": {
     "value_type": "GTBool",
     "value": true,
-    "sources": [],
-    "colorspace": null,
     "engine_type": "bool"
   }
 }
@@ -1297,76 +1287,72 @@ has this shape:
 ```json
 {
   "value_type": "GTImage",
-  "value": null,
-  "sources": [
-    {
-      "kind": "path",
-      "value": "/…/outputs/render.####.exr",
-      "format": "exr",
-      "width": null,
-      "height": null,
-      "byte_count": null,
-      "is_pattern": true,
-      "raw": "{outputs}/render.{###}.exr"
-    }
-  ],
-  "colorspace": null,
-  "engine_type": "ImageUrlArtifact"
+  "value": {"path": "/proj/outputs/hero_v003.png", "format": "png"},
+  "engine_type": "str"
 }
 ```
 
 | Field | Notes |
 |---|---|
-| `value_type` | The only field to switch on |
-| `value` | The value itself, for `GTText`, `GTInt`, `GTFloat`, and `GTBool`. Null for `GTNull` and for every sourced type, where the locator is in `sources` |
-| `sources` | Zero or more locators. Multiple sources means a sequence |
-| `colorspace` | Always null in v1, reserved |
+| `value_type` | What each value is. The only field to switch on |
+| `value` | The value. An array for a list parameter, a single value otherwise, `null` when unset |
 | `engine_type` | Support diagnostics only. Will change; never branch on it |
+
+A parameter declared `is_list: true` always carries an array, `[]` when empty, so its shape is
+known before a value arrives. `is_list: false` always carries a single value or `null`. Only a
+wildcard (`is_list: null`) decides per value, so check whether it is an array.
+
+```json
+{
+  "value_type": "GTImage",
+  "value": [
+    {"path": "/proj/outputs/nuke/Read1/plate/frame_1001.png", "format": "png"},
+    {"path": "/proj/outputs/nuke/Read1/plate/frame_1002.png", "format": "png"}
+  ],
+  "engine_type": "Sequence"
+}
+```
+
+```json
+{
+  "value_type": "GTInt",
+  "value": [42, 43, 44],
+  "engine_type": "list"
+}
+```
 
 ### Value types
 
-| `value_type` | Meaning |
+| `value_type` | Each value is |
 |---|---|
-| `GTImage` | One or more images. Multiple sources means a sequence. `value` null |
-| `GTMovie` | A movie file. `value` null |
-| `GTFile` | A file this protocol version does not classify, including audio. `value` null |
-| `GTText` | A string, in `value`. No sources |
-| `GTInt` | A whole number, in `value`. No sources. An Int_Knob on the host side |
-| `GTFloat` | A real number, in `value`. No sources. A Double_Knob on the host side. JSON writes `4.0` as `4`, so read the type rather than the literal |
-| `GTBool` | A bool, in `value`. No sources |
-| `GTNull` | Unset or empty. No sources, `value` null |
+| `GTImage` | A media entry. A sequence is a list parameter with one entry per frame |
+| `GTMovie` | A media entry |
+| `GTFile` | A media entry for a file this protocol version does not classify, including audio |
+| `GTText` | A string |
+| `GTInt` | A whole number. An Int_Knob on the host side |
+| `GTFloat` | A real number. A Double_Knob on the host side. JSON writes `4.0` as `4`, so read the type rather than the literal |
+| `GTBool` | A bool |
 
-A value is in exactly one place: `value` for a scalar, `sources` for anything pointing at
-bytes. Nothing carries both, so a host never has to decide which one wins. A string that is
-not a locator, an unresolvable template included, reports as `GTText` and its text is readable
-in `value`.
-
-A sequence is one `GTImage` with several sources rather than its own type. Handle "many
-sources" from the start.
-
-### Source kinds
-
-| `kind` | Handling |
-|---|---|
-| `path` | Filesystem path. Feed to a Read node |
-| `url` | HTTP(S) URL. The host fetches it; this layer moves no bytes |
-| `inline` | Bytes stayed in the engine. `value` is null, `byte_count` gives the size. Read via the url or path form of the same value, or treat as unavailable |
-| `macro` | Unresolved template. `value` holds raw text. Not a path, do not open. Show as a configuration error |
-
-### Source fields
+### Media entries
 
 | Field | Notes |
 |---|---|
-| `value` | Locator, null for `inline` |
-| `format` | Reported only when known, never guessed. Null on an extensionless URL. Sniff locally if certainty is required |
-| `width`, `height`, `byte_count` | Null unless the engine reported them |
-| `is_pattern` | True means frame padding (`####`) in the path. Correct for a Read node `file` knob, invalid for a direct file open. Check before any `fopen` |
-| `raw` | Pre-resolution text, diagnostic |
+| `path` | Absolute or relative local path, forward slashes, macros resolved. Feed to a Read node |
+| `format` | The path's extension, lowercased. Null when there is none. Sniff locally if certainty is required |
 
-`colorspace` is always null in v1. The engine's own colour field reports channel layout
-(`RGB`, `RGBA`, `Grayscale`) rather than a transfer function, so it cannot express whether
-pixels are sRGB or scene-linear. Nuke works scene-linear: pick a host default, make it
-visible to the artist, and read the field defensively for when it starts carrying a value.
+A `####` run in a path is frame padding, whether literal or rendered from an unfilled `{###}`
+slot. It is correct for a Read node `file` knob and invalid for a direct file open.
+
+### Values with no host form
+
+This protocol version reports local paths only. A parameter whose value is none of the above is
+reported in `unavailable` with a reason rather than guessed at:
+
+- A URL on a media parameter. On a text parameter a URL is text.
+- Bytes the engine never saved to a file, such as an unsaved `ImageArtifact`.
+- A path template that did not resolve.
+- A list on a single parameter, a nested list, a dict, or a list mixing text with media.
+- If any list item has no host form, the whole parameter is unavailable; items are never dropped.
 
 ## Errors
 
@@ -1405,6 +1391,6 @@ Read from the engine's `websocket_direct` implementation, as noted under
 | New field on a request, result, or event | No | None, if unknown fields are ignored |
 | New verb or notification type | No | None, if unknown `payload_type` is ignored |
 | New engine artifact class mapped to an existing value type | No | None |
-| New value type or source kind | Yes | Breaks; a host switches on a closed set |
-| Verb, notification, field, value type, or source kind removed or renamed | Yes | Breaks; a new version is published |
+| New value type | Yes | Breaks; a host switches on a closed set |
+| Verb, notification, field, or value type removed or renamed | Yes | Breaks; a new version is published |
 | Optional field becomes required | Yes | Breaks |

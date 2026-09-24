@@ -37,10 +37,8 @@ const Protocol = (function () {
     "GTInt",
     "GTFloat",
     "GTBool",
-    "GTNull",
   ];
-  // Types that carry no sources: the descriptor reports the type, not the value.
-  const SCALAR_TYPES = ["GTText", "GTInt", "GTFloat", "GTBool", "GTNull"];
+  const SCALAR_TYPES = ["GTText", "GTInt", "GTFloat", "GTBool"];
   const NUMERIC_TYPES = ["GTInt", "GTFloat"];
   const MEDIA_TYPES = ["GTImage", "GTMovie", "GTFile"];
   const PREVIEWABLE = { GTImage: "img", GTMovie: "video" };
