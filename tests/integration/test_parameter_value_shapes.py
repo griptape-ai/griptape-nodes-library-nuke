@@ -1,9 +1,4 @@
-"""Values read back off a real engine in-process, in the shape a host parses.
-
-No Nuke and no engine process. Unit tests feed the normalizer what the engine is believed to
-hand back; this checks what it actually does after a run, including its serialization of lists
-and of a scanned ``Sequence``.
-"""
+"""Checks in-process engine serialization of scalar, list, and sequence values without Nuke."""
 
 from __future__ import annotations
 

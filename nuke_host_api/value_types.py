@@ -56,7 +56,6 @@ _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
 
 _LIST_ENGINE_TYPES = frozenset({"list", "Sequence", "ImageSequenceArtifact", "ListArtifact"})
 
-# Declares nothing about cardinality, so the runtime value decides.
 _WILDCARD_ENGINE_TYPES = frozenset({"any", "all"})
 
 # griptape's BlobArtifact family. Serialized, their bytes are base64 text indistinguishable from prose.
@@ -68,7 +67,7 @@ MEDIA_ENTRY_FIELDS = frozenset({"path", "format"})
 
 
 class UnrepresentableValueError(ValueError):
-    """A value this protocol version has no form for, reported as unavailable rather than guessed at."""
+    """Raised when this protocol cannot represent a value."""
 
 
 def value_type_for_engine_type(engine_type: str | None) -> str:
@@ -144,7 +143,6 @@ def _engine_type(value: Any, plain: Any, declared_engine_type: str | None) -> st
 
 
 def _list_items(plain: Any) -> list[Any] | None:
-    """Recognize every list shape a read hands back: plain lists, ListArtifacts, and Sequences."""
     if isinstance(plain, (list, tuple)):
         return list(plain)
     if not isinstance(plain, dict):
@@ -219,7 +217,6 @@ def _normalize_artifact_dict(value: dict[str, Any], declared_engine_type: str | 
 
 
 def _normalize_string(value: str, declared_engine_type: str | None) -> tuple[str | None, Any]:
-    """Only local paths become media. URLs, prose, and unresolved templates do not."""
     declared_value_type = value_type_for_engine_type(declared_engine_type)
     if not value and declared_value_type in _SOURCED_VALUE_TYPES:
         return None, None
@@ -249,7 +246,6 @@ def _normalize_string(value: str, declared_engine_type: str | None) -> tuple[str
 
 
 def _path_entry(path: str, declared_value_type: str) -> tuple[str, dict[str, Any]]:
-    """A declared image or movie keeps its type; anything else is classified by extension."""
     extension = _extension_of(path)
     if declared_value_type in {ValueType.IMAGE, ValueType.MOVIE}:
         value_type = declared_value_type
@@ -273,7 +269,6 @@ def _extension_of(locator: str) -> str | None:
 
 
 def _resolve_macro(value: str) -> str | None:
-    """None when the braces are not a macro or the macro does not resolve."""
     try:
         parsed = ParsedMacro(value)
     except MacroSyntaxError:

@@ -71,7 +71,6 @@ def _sequence(*paths: str) -> Sequence:
         ("bool", ValueType.BOOL),
         ("Sequence", ValueType.IMAGE),
         ("ImageSequenceArtifact", ValueType.IMAGE),
-        # A list's value type is its element type.
         ("list[ImageUrlArtifact]", ValueType.IMAGE),
         ("list[VideoUrlArtifact]", ValueType.MOVIE),
         ("list[int]", ValueType.INT),
@@ -125,7 +124,6 @@ def test_list_cardinality_is_read_from_the_declared_type(engine_type: str | None
     ],
 )
 def test_declared_parameter_type_agrees_with_the_type_its_values_normalize_to(declared: str, value: Any) -> None:
-    """A host builds a knob from the declared type, then receives values on it."""
     assert (
         value_types.value_type_for_engine_type(declared) == value_types.normalize_value(value, declared)["value_type"]
     )
@@ -279,7 +277,6 @@ class TestLists:
 
     @pytest.mark.parametrize("serialize", [False, True])
     def test_a_sequence_carries_every_frame(self, serialize: bool) -> None:
-        """A NukeScriptNode sequence output, raw or as a read hands it back."""
         sequence = _sequence("/show/plate/frame_1001.png", "/show/plate/frame_1002.png")
         value = safe_unstructure(sequence) if serialize else sequence
 
@@ -369,8 +366,6 @@ class TestLocators:
 
 
 class TestUnrepresentable:
-    """No host form, so the parameter is reported unavailable instead of guessed at."""
-
     @pytest.mark.parametrize("value", [URL, ImageUrlArtifact(URL), {"type": "ImageUrlArtifact", "value": URL}])
     def test_a_url_on_a_media_parameter(self, value: Any) -> None:
         with pytest.raises(UnrepresentableValueError, match="URL"):

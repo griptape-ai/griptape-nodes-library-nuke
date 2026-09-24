@@ -1,8 +1,4 @@
-"""Tests for macro path resolution.
-
-Two systems share the `{...}` syntax, so the risk is not failing to resolve, it is resolving
-the wrong thing or handing a host an unresolved template as a path to open.
-"""
+"""Tests that shared brace syntax never exposes unresolved templates as paths."""
 
 from __future__ import annotations
 
@@ -74,7 +70,6 @@ def test_a_sequence_slot_is_rendered_as_hash_padding(resolving_engine) -> None: 
 
 
 def test_an_unresolvable_path_template_is_never_handed_over_as_a_path(resolving_engine) -> None:  # noqa: ANN001
-    """The failure mode that matters: a host opening a literal `{...}` string."""
     resolving_engine(None)
     with pytest.raises(UnrepresentableValueError, match=r"\{MY_VAR\}/plate\.exr"):
         value_types.normalize_value("{MY_VAR}/plate.exr", "str")

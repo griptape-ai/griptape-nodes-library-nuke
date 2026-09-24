@@ -57,7 +57,6 @@ class ExecutionState:
     CANCELLED = "cancelled"
 
 
-# A list is a cardinality, declared as ``is_list``, not a separate value type.
 class ValueType:
     """``INT`` and ``FLOAT`` are separate members because Nuke's Int_Knob and Double_Knob are."""
 

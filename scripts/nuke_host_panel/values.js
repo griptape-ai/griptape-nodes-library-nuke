@@ -27,7 +27,6 @@ const Values = (function () {
     return byNode;
   }
 
-  // A list parameter's value is an array, and a media entry is an object with a path.
   function valueItems(descriptor) {
     if (!descriptor || descriptor.value === null || descriptor.value === undefined) return [];
     return Array.isArray(descriptor.value) ? descriptor.value : [descriptor.value];

@@ -38,7 +38,6 @@ const Protocol = (function () {
     "GTFloat",
     "GTBool",
   ];
-  // Types whose values are plain JSON rather than media entries.
   const SCALAR_TYPES = ["GTText", "GTInt", "GTFloat", "GTBool"];
   const NUMERIC_TYPES = ["GTInt", "GTFloat"];
   const MEDIA_TYPES = ["GTImage", "GTMovie", "GTFile"];
