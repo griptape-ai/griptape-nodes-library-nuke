@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from nuke_host_api import shape
-from nuke_host_api.protocol import VALUE_TYPES, SourceKind, ValueType
+from nuke_host_api.protocol import VALUE_TYPES, ValueType
 from tests.unit.host_api_fakes import SHAPE
 
 
@@ -105,20 +105,26 @@ class TestDeclaredParameters:
             ({"type": "float", "default_value": 23.976}, 23.976),
             ({"type": "bool", "default_value": True}, True),
             ({"type": "ImageUrlArtifact", "default_value": None}, None),
-            ({"type": "ImageUrlArtifact", "default_value": "/show/plate.exr"}, "/show/plate.exr"),
+            ({"type": "ImageUrlArtifact", "default_value": ""}, None),
+            (
+                {"type": "ImageUrlArtifact", "default_value": "/show/plate.exr"},
+                {"path": "/show/plate.exr", "format": "exr"},
+            ),
+            ({"type": "list[int]", "default_value": [42]}, [42]),
+            ({"type": "list[int]", "default_value": None}, []),
             ({"type": "str"}, None),
         ],
     )
-    def test_a_default_is_one_plain_value(self, parameter: dict, expected: Any) -> None:
+    def test_a_default_has_the_same_shape_as_a_value(self, parameter: dict, expected: Any) -> None:
         declared = shape.declared_parameters({"Start Flow": {"p": parameter}})[0]
         assert declared["default_value"] == expected
 
     def test_a_windows_default_path_is_slash_normalized(self) -> None:
         """Nuke's TCL layer reads a backslash as an escape."""
         section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "C:\\show\\plate.exr"}}}
-        assert shape.declared_parameters(section)[0]["default_value"] == "C:/show/plate.exr"
+        assert shape.declared_parameters(section)[0]["default_value"]["path"] == "C:/show/plate.exr"
 
-    def test_a_sequence_default_keeps_one_locator_per_frame(self) -> None:
+    def test_a_sequence_default_keeps_one_entry_per_frame(self) -> None:
         section = {
             "Start Flow": {
                 "plate": {
@@ -127,70 +133,23 @@ class TestDeclaredParameters:
                 }
             }
         }
-        assert shape.declared_parameters(section)[0]["default_value"] == [
+        assert [entry["path"] for entry in shape.declared_parameters(section)[0]["default_value"]] == [
             "/show/plate.0001.exr",
             "/show/plate.0002.exr",
         ]
 
-    def test_a_default_that_names_nothing_openable_is_null(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """An unresolved macro is a template and inline bytes never left the engine.
+    @pytest.mark.parametrize(("engine_type", "expected"), [("ImageUrlArtifact", None), ("list[ImageUrlArtifact]", [])])
+    def test_a_default_with_no_host_form_is_empty(self, engine_type: str, expected: Any) -> None:
+        section = {"Start Flow": {"plate": {"type": engine_type, "default_value": "https://cdn.example.com/a.png"}}}
+        assert shape.declared_parameters(section)[0]["default_value"] == expected
 
-        Either would reach a host as a string it cannot open, indistinguishable from a real path.
-        """
-
-        def unresolvable(value: Any, declared: Any = None) -> dict[str, Any]:  # noqa: ARG001
-            return {
-                "value_type": ValueType.IMAGE,
-                "value": None,
-                "sources": [
-                    {
-                        "kind": SourceKind.MACRO,
-                        "value": "{VAR}/plate.exr",
-                        "format": "exr",
-                        "width": None,
-                        "height": None,
-                        "byte_count": None,
-                        "is_pattern": False,
-                        "raw": "{VAR}/plate.exr",
-                    }
-                ],
-                "colorspace": None,
-                "engine_type": "str",
-            }
-
-        monkeypatch.setattr(shape, "normalize_value", unresolvable)
-        section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "{VAR}/plate.exr"}}}
-
-        assert shape.declared_parameters(section)[0]["default_value"] is None
-
-    def test_a_sequence_default_drops_frames_a_host_cannot_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A null in the middle of a frame list would land in a per-frame knob as a literal null."""
-
-        def mixed(value: Any, declared: Any = None) -> dict[str, Any]:  # noqa: ARG001
-            def source(kind: str, locator: str | None) -> dict[str, Any]:
-                return {
-                    "kind": kind,
-                    "value": locator,
-                    "format": "png",
-                    "width": None,
-                    "height": None,
-                    "byte_count": None,
-                    "is_pattern": False,
-                    "raw": None,
-                }
-
-            return {
-                "value_type": ValueType.IMAGE,
-                "value": None,
-                "sources": [source(SourceKind.URL, "http://x/one.png"), source(SourceKind.INLINE, None)],
-                "colorspace": None,
-                "engine_type": "ListArtifact",
-            }
-
-        monkeypatch.setattr(shape, "normalize_value", mixed)
-        section = {"Start Flow": {"plate": {"type": "Sequence", "default_value": ["http://x/one.png", b"\x89PNG"]}}}
-
-        assert shape.declared_parameters(section)[0]["default_value"] == "http://x/one.png"
+    @pytest.mark.parametrize(
+        ("engine_type", "expected"),
+        [("list[ImageUrlArtifact]", True), ("Sequence", True), ("ImageUrlArtifact", False), ("any", None)],
+    )
+    def test_list_cardinality_is_declared(self, engine_type: str, expected: bool | None) -> None:
+        section = {"Start Flow": {"p": {"type": engine_type}}}
+        assert shape.declared_parameters(section)[0]["is_list"] is expected
 
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}

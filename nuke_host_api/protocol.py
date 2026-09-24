@@ -57,7 +57,7 @@ class ExecutionState:
     CANCELLED = "cancelled"
 
 
-# Image sequences use multiple sources rather than a separate value type.
+# A list is a cardinality, declared as ``is_list``, not a separate value type.
 class ValueType:
     """``INT`` and ``FLOAT`` are separate members because Nuke's Int_Knob and Double_Knob are."""
 
@@ -68,7 +68,6 @@ class ValueType:
     INT = "GTInt"
     FLOAT = "GTFloat"
     BOOL = "GTBool"
-    NULL = "GTNull"
 
 
 VALUE_TYPES = (
@@ -79,16 +78,4 @@ VALUE_TYPES = (
     ValueType.INT,
     ValueType.FLOAT,
     ValueType.BOOL,
-    ValueType.NULL,
 )
-
-
-class SourceKind:
-    URL = "url"
-    PATH = "path"
-    INLINE = "inline"
-    # Reserved for unresolved `{VAR}` macros. `value` is the raw template, not an openable path.
-    MACRO = "macro"
-
-
-SOURCE_KINDS = (SourceKind.URL, SourceKind.PATH, SourceKind.INLINE, SourceKind.MACRO)

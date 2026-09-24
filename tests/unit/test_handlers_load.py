@@ -75,6 +75,7 @@ class TestLoadWorkflow:
             "parameter",
             "name",
             "type",
+            "is_list",
             "default_value",
             "choices",
             "tooltip",
@@ -101,7 +102,7 @@ class TestLoadWorkflow:
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
-        keys = {"value_type", "value", "sources", "colorspace", "engine_type"}
+        keys = {"value_type", "value", "engine_type"}
         assert set(result.input_values["Start Flow"]["topic"]) == keys
         topic = next(declared for declared in result.inputs if declared["parameter"] == "topic")
         assert topic["default_value"] == "a quiet harbour at dusk"

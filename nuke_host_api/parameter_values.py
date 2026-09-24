@@ -13,7 +13,7 @@ from griptape_nodes.retained_mode.events.parameter_events import (
 
 from nuke_host_api import engine, shape
 from nuke_host_api.protocol import ParameterSection
-from nuke_host_api.value_types import normalize_value
+from nuke_host_api.value_types import UnrepresentableValueError, engine_value, normalize_value
 
 
 async def read_sections(
@@ -47,9 +47,12 @@ async def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list
         if attempt.value is None:
             missing.append({"node": declared["node"], "parameter": declared["parameter"], "reason": attempt.details})
             continue
-        values.setdefault(declared["node"], {})[declared["parameter"]] = normalize_value(
-            attempt.value.value, attempt.value.type
-        )
+        try:
+            descriptor = normalize_value(attempt.value.value, attempt.value.type)
+        except UnrepresentableValueError as e:
+            missing.append({"node": declared["node"], "parameter": declared["parameter"], "reason": str(e)})
+            continue
+        values.setdefault(declared["node"], {})[declared["parameter"]] = descriptor
 
     return values, missing
 
@@ -121,7 +124,7 @@ async def apply_inputs(
                 )
                 continue
             attempt = await engine.request(
-                SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=value),
+                SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=engine_value(value)),
                 SetParameterValueResultSuccess,
             )
             if attempt.value is None:

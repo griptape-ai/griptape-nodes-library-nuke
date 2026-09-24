@@ -11,26 +11,23 @@ from griptape.artifacts import (
     ListArtifact,
     VideoUrlArtifact,
 )
+from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence, SequenceEntry
+from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroResultFailure,
     PathResolutionFailureReason,
 )
 
 from nuke_host_api import value_types
-from nuke_host_api.protocol import VALUE_TYPES, SourceKind, ValueType
+from nuke_host_api.protocol import VALUE_TYPES, ValueType
+from nuke_host_api.value_types import UnrepresentableValueError
 
-STATIC_URL = "http://localhost:8124/workspace/static_files/render.png"
+URL = "https://cdn.example.com/render.png"
 
 
 @pytest.fixture(autouse=True)
 def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Answer macro resolution with a refusal instead of reaching the real engine.
-
-    One parametrized value below carries a ``{frame}`` template, and resolving one is an
-    engine request. Test subject here is what the normalizer does with a template it cannot
-    resolve, so the engine that refuses may as well be a fake; see tests/unit/conftest.py
-    for what booting the real one costs.
-    """
+    """Refuse macro resolution instead of reaching the real engine, which unit tests must not boot."""
 
     class RefusingEngine:
         @staticmethod
@@ -44,6 +41,23 @@ def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(value_types, "GriptapeNodes", RefusingEngine)
 
 
+def _sequence(*paths: str) -> Sequence:
+    return Sequence(
+        entries=[
+            SequenceEntry(number=number, padded_number=f"{number:04d}", path=path)
+            for number, path in enumerate(paths, start=1001)
+        ],
+        first=1001,
+        last=1000 + len(paths),
+        discovered_first=1001,
+        discovered_last=1000 + len(paths),
+        padding=4,
+        pattern="/show/plate/frame_####.png",
+        directory="/show/plate",
+        policy=MissingItemPolicy.SKIP,
+    )
+
+
 @pytest.mark.parametrize(
     ("engine_type", "expected"),
     [
@@ -55,18 +69,15 @@ def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
         ("int", ValueType.INT),
         ("float", ValueType.FLOAT),
         ("bool", ValueType.BOOL),
-        # An image sequence is an image with many sources, under either name in use for one.
         ("Sequence", ValueType.IMAGE),
         ("ImageSequenceArtifact", ValueType.IMAGE),
-        # The engine wraps a container parameter's element type, and the brackets must not defeat
-        # the mapping table or the Artifact suffix test.
+        # A list's value type is its element type.
         ("list[ImageUrlArtifact]", ValueType.IMAGE),
         ("list[VideoUrlArtifact]", ValueType.MOVIE),
         ("list[int]", ValueType.INT),
         ("list[str]", ValueType.TEXT),
         ("list[AudioUrlArtifact]", ValueType.FILE),
-        # A wildcard parameter declares only that it accepts anything, so the most permissive
-        # host control is the honest answer and the runtime descriptor is authoritative.
+        ("list", ValueType.TEXT),
         ("any", ValueType.TEXT),
         ("all", ValueType.TEXT),
         # Unknown artifact classes degrade to a file rather than leaking the engine name.
@@ -80,24 +91,41 @@ def test_engine_type_names_map_into_the_closed_set(engine_type: str | None, expe
 
 
 @pytest.mark.parametrize(
+    ("engine_type", "expected"),
+    [
+        ("list", True),
+        ("list[ImageUrlArtifact]", True),
+        ("list[int]", True),
+        ("Sequence", True),
+        ("ImageSequenceArtifact", True),
+        ("ListArtifact", True),
+        ("ImageUrlArtifact", False),
+        ("str", False),
+        ("int", False),
+        ("any", None),
+        ("Any", None),
+        ("all", None),
+        (None, None),
+    ],
+)
+def test_list_cardinality_is_read_from_the_declared_type(engine_type: str | None, expected: bool | None) -> None:
+    assert value_types.is_list_type(engine_type) is expected
+
+
+@pytest.mark.parametrize(
     ("declared", "value"),
     [
-        ("Sequence", ["/show/plate.0001.exr", "/show/plate.0002.exr"]),
-        ("list[ImageUrlArtifact]", ["http://x/a.exr", "http://x/b.exr"]),
+        ("Sequence", _sequence("/show/plate/frame_1001.png", "/show/plate/frame_1002.png")),
+        ("list[ImageUrlArtifact]", [ImageUrlArtifact("/x/a.exr"), ImageUrlArtifact("/x/b.exr")]),
         ("list[int]", [1, 2, 3]),
-        ("ImageUrlArtifact", "http://x/render.png"),
+        ("ImageUrlArtifact", "/x/render.png"),
         ("VideoUrlArtifact", "/show/cut.mov"),
         ("bool", True),
         ("int", 7),
     ],
 )
 def test_declared_parameter_type_agrees_with_the_type_its_values_normalize_to(declared: str, value: Any) -> None:
-    """A host builds a knob from the declared type and then receives values on it.
-
-    The two disagreeing is worse than either being wrong alone: the plugin builds a text
-    field for a parameter that goes on to stream image sequences. Sequence parameters are the case
-    this library itself produces, so they are the case most likely to regress.
-    """
+    """A host builds a knob from the declared type, then receives values on it."""
     assert (
         value_types.value_type_for_engine_type(declared) == value_types.normalize_value(value, declared)["value_type"]
     )
@@ -106,42 +134,31 @@ def test_declared_parameter_type_agrees_with_the_type_its_values_normalize_to(de
 @pytest.mark.parametrize(
     ("declared", "value", "runtime"),
     [
-        ("GenericArtifact", GenericArtifact("https://cdn.example.com/still.jpg"), ValueType.IMAGE),
-        ("GenericArtifact", GenericArtifact("https://cdn.example.com/notes.bin"), ValueType.FILE),
-        ("AudioUrlArtifact", "https://cdn.example.com/take.mov", ValueType.MOVIE),
+        ("GenericArtifact", GenericArtifact("/show/still.jpg"), ValueType.IMAGE),
+        ("GenericArtifact", GenericArtifact("/show/notes.bin"), ValueType.FILE),
+        ("AudioUrlArtifact", "/show/take.mov", ValueType.MOVIE),
         ("ThreeDUrlArtifact", "/show/model.obj", ValueType.FILE),
     ],
 )
 def test_a_parameter_whose_declared_type_carries_no_media_information_may_narrow_at_runtime(
     declared: str, value: Any, runtime: str
 ) -> None:
-    """An unmapped artifact class describes as GTFile, and its values may narrow to media.
-
-    Nothing at describe time can know a GenericArtifact holds a jpg, because no value exists
-    yet, and throwing that away once one does would be worse than the mismatch. So the
-    narrowing is documented rather than removed, and pinned here: it must stay inside the
-    sourced types and never become GTText, GTInt, GTFloat or GTBool. That is the mismatch that
-    actually breaks a host, because it makes it build a text field for media.
-    """
+    """Narrowing stays inside the sourced types, so a host never gets a text field for media."""
     assert value_types.value_type_for_engine_type(declared) == ValueType.FILE
     assert value_types.normalize_value(value, declared)["value_type"] == runtime
-    assert runtime in {ValueType.FILE, ValueType.IMAGE, ValueType.MOVIE}
 
 
 @pytest.mark.parametrize(
     ("value", "declared", "expected"),
     [
-        (ImageUrlArtifact(STATIC_URL), "ImageUrlArtifact", ValueType.IMAGE),
-        (VideoUrlArtifact("http://x/plate.mov"), "VideoUrlArtifact", ValueType.MOVIE),
-        (ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2), "ImageArtifact", ValueType.IMAGE),
+        (ImageUrlArtifact("/show/render.png"), "ImageUrlArtifact", ValueType.IMAGE),
+        (VideoUrlArtifact("/show/plate.mov"), "VideoUrlArtifact", ValueType.MOVIE),
         ("/mnt/show/plate.exr", "str", ValueType.IMAGE),
         ("/mnt/show/plate.mov", "str", ValueType.MOVIE),
         ("/mnt/show/notes.txt", "str", ValueType.FILE),
         ("a hazy afternoon", "str", ValueType.TEXT),
         ("3/4 cup", "str", ValueType.TEXT),
-        ("aspect 16/9", "str", ValueType.TEXT),
-        (BlobArtifact(value=b"\x00\x01"), "BlobArtifact", ValueType.FILE),
-        (None, "ImageUrlArtifact", ValueType.NULL),
+        (None, "ImageUrlArtifact", ValueType.IMAGE),
         (True, "bool", ValueType.BOOL),
         (23.976, "float", ValueType.FLOAT),
         (7, "int", ValueType.INT),
@@ -151,24 +168,6 @@ def test_values_normalize_into_the_closed_set(value: Any, declared: str, expecte
     descriptor = value_types.normalize_value(value, declared)
     assert descriptor["value_type"] == expected
     assert descriptor["value_type"] in VALUE_TYPES
-
-
-def test_every_descriptor_reports_a_member_of_the_closed_set() -> None:
-    inputs: list[Any] = [
-        None,
-        "",
-        "prose",
-        b"bytes",
-        0,
-        False,
-        [],
-        {},
-        object(),
-        ListArtifact([]),
-        GenericArtifact("https://x/y.jpg"),
-    ]
-    for value in inputs:
-        assert value_types.normalize_value(value)["value_type"] in VALUE_TYPES
 
 
 def test_bool_is_not_reported_as_a_number() -> None:
@@ -199,207 +198,204 @@ class TestNumericTypes:
         assert value_types.normalize_value(value, declared)["value_type"] == expected
 
     def test_a_list_of_ints_and_floats_is_one_float_rather_than_a_conflict(self) -> None:
-        # A float declaration would type both items FLOAT before the merge, so the mixed set this
-        # covers needs an int declaration or none at all.
         descriptor = value_types.normalize_value([1, 2.5], "list[int]")
         assert descriptor["value_type"] == ValueType.FLOAT
-        assert descriptor["sources"] == []
-        assert value_types.normalize_value([1, 2.5])["value_type"] == ValueType.FLOAT
+        assert descriptor["value"] == [1, 2.5]
 
 
-def test_format_is_never_guessed() -> None:
-    """A URL with no extension must report null, not a plausible default.
+class TestDescriptorShape:
+    def test_a_descriptor_has_exactly_three_fields(self) -> None:
+        for value in [None, "prose", "/a/b.exr", ImageUrlArtifact("/a/b.png"), 1, True, [1, 2]]:
+            assert set(value_types.normalize_value(value)) == {"value_type", "value", "engine_type"}
 
-    `_artifact_to_path` in the Nuke library defaults to `.png` here, which mislabels a
-    JPEG served without an extension.
-    """
-    descriptor = value_types.normalize_value(ImageUrlArtifact("https://cdn.example.com/asset"), "ImageUrlArtifact")
-    assert descriptor["value_type"] == ValueType.IMAGE
-    assert descriptor["sources"][0]["format"] is None
+    def test_a_media_entry_carries_path_and_format(self) -> None:
+        descriptor = value_types.normalize_value("/mnt/show/plate.exr", "ImageUrlArtifact")
+        assert descriptor["value"] == {"path": "/mnt/show/plate.exr", "format": "exr"}
 
+    def test_engine_type_is_carried_for_diagnostics(self) -> None:
+        descriptor = value_types.normalize_value(ImageUrlArtifact("/a/b.png"), "ImageUrlArtifact")
+        assert descriptor["engine_type"] == "ImageUrlArtifact"
 
-def test_declared_type_outranks_the_extension() -> None:
-    """The parameter author knew the media type; the filename may not carry it."""
-    descriptor = value_types.normalize_value("/mnt/show/no_extension", "ImageUrlArtifact")
-    assert descriptor["value_type"] == ValueType.IMAGE
-
-
-def test_unknown_artifact_class_is_classified_by_extension() -> None:
-    """GenericArtifact means nothing to the contract, but its locator still does.
-
-    ImageUrlArtifact, VideoUrlArtifact, BlobArtifact and GenericArtifact are structurally
-    identical, all carrying a single `value`, so the class name is the only discriminator
-    and it has to be allowed to be useless.
-    """
-    descriptor = value_types.normalize_value(GenericArtifact("https://cdn.example.com/still.jpg"))
-    assert descriptor["value_type"] == ValueType.IMAGE
-    assert descriptor["sources"][0]["format"] == "jpg"
+    @pytest.mark.parametrize("declared", ["str", "ImageUrlArtifact", "VideoUrlArtifact", "GenericArtifact", None])
+    @pytest.mark.parametrize(
+        "value", ["just prose", "3/4 cup", "shots/plate", "/mnt/show/plate.exr", "shots/plate.exr", 7, True]
+    )
+    def test_a_media_or_file_type_always_carries_a_path(self, value: Any, declared: str | None) -> None:
+        """GTImage, GTMovie and GTFile promise a host a file to open."""
+        descriptor = value_types.normalize_value(value, declared)
+        if descriptor["value_type"] in {ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE}:
+            assert isinstance(descriptor["value"], dict)
+            assert descriptor["value"]["path"]
+        else:
+            assert not isinstance(descriptor["value"], dict)
 
 
-@pytest.mark.parametrize(
-    "extension",
-    ["mp4", "mov", "avi", "mkv", "webm", "m4v", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"],
-)
-def test_a_movie_container_nuke_reads_is_a_movie(extension: str) -> None:
-    descriptor = value_types.normalize_value(f"/show/cut.{extension}", "str")
-    assert descriptor["value_type"] == ValueType.MOVIE
+class TestCardinality:
+    def test_a_single_parameter_carries_one_value(self) -> None:
+        assert value_types.normalize_value("a quiet harbour", "str")["value"] == "a quiet harbour"
+
+    def test_a_list_parameter_carries_an_array_even_for_one_item(self) -> None:
+        descriptor = value_types.normalize_value([ImageUrlArtifact("/a/one.png")], "list[ImageUrlArtifact]")
+        assert descriptor["value"] == [{"path": "/a/one.png", "format": "png"}]
+
+    def test_a_single_value_on_a_list_parameter_is_wrapped(self) -> None:
+        descriptor = value_types.normalize_value(ImageUrlArtifact("/a/one.png"), "list[ImageUrlArtifact]")
+        assert descriptor["value"] == [{"path": "/a/one.png", "format": "png"}]
+
+    @pytest.mark.parametrize("unset", [None, ""])
+    def test_an_unset_list_parameter_is_an_empty_array(self, unset: Any) -> None:
+        descriptor = value_types.normalize_value(unset, "list[ImageUrlArtifact]")
+        assert descriptor == {"value_type": ValueType.IMAGE, "value": [], "engine_type": type(unset).__name__}
+
+    @pytest.mark.parametrize("unset", [None, "", {"type": "ImageUrlArtifact", "value": None}])
+    def test_an_unset_single_media_parameter_is_null_with_its_declared_type(self, unset: Any) -> None:
+        descriptor = value_types.normalize_value(unset, "ImageUrlArtifact")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert descriptor["value"] is None
+
+    def test_a_list_of_scalars_keeps_every_value(self) -> None:
+        assert value_types.normalize_value([42, 43], "list[int]")["value"] == [42, 43]
+        assert value_types.normalize_value(["sh010", "sh020"], "list[str]")["value"] == ["sh010", "sh020"]
+
+    def test_a_list_on_a_single_parameter_is_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="single value"):
+            value_types.normalize_value(["/a/one.png", "/a/two.png"], "ImageUrlArtifact")
+
+    def test_a_wildcard_takes_its_shape_from_the_value(self) -> None:
+        assert value_types.normalize_value("/a/one.png", "any")["value"] == {"path": "/a/one.png", "format": "png"}
+        assert value_types.normalize_value(["/a/one.png"], "any")["value"] == [{"path": "/a/one.png", "format": "png"}]
+
+    def test_a_nested_list_is_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="nested"):
+            value_types.normalize_value([[1, 2], [3]], "list[int]")
 
 
-def test_an_ambiguous_container_stays_a_file_until_a_declared_type_says_otherwise() -> None:
-    """MXF wraps audio-only essence too, so the extension alone cannot promise a movie."""
-    assert value_types.normalize_value("/show/master.mxf", "str")["value_type"] == ValueType.FILE
-    assert value_types.normalize_value("/show/master.mxf", "VideoArtifact")["value_type"] == ValueType.MOVIE
+class TestLists:
+    def test_a_list_artifact_carries_every_frame(self) -> None:
+        frames = ListArtifact([ImageUrlArtifact(f"/x/frame.{n:04d}.exr") for n in (1, 2, 3)])
+        descriptor = value_types.normalize_value(frames, "ListArtifact")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert [entry["path"] for entry in descriptor["value"]] == [f"/x/frame.{n:04d}.exr" for n in (1, 2, 3)]
+
+    @pytest.mark.parametrize("serialize", [False, True])
+    def test_a_sequence_carries_every_frame(self, serialize: bool) -> None:
+        """A NukeScriptNode sequence output, raw or as a read hands it back."""
+        sequence = _sequence("/show/plate/frame_1001.png", "/show/plate/frame_1002.png")
+        value = safe_unstructure(sequence) if serialize else sequence
+
+        descriptor = value_types.normalize_value(value, "Sequence")
+
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert descriptor["value"] == [
+            {"path": "/show/plate/frame_1001.png", "format": "png"},
+            {"path": "/show/plate/frame_1002.png", "format": "png"},
+        ]
+
+    def test_a_list_of_images_and_movies_degrades_to_files(self) -> None:
+        mixed = [ImageUrlArtifact("/x/a.png"), VideoUrlArtifact("/x/b.mov")]
+        assert value_types.normalize_value(mixed, "list")["value_type"] == ValueType.FILE
+
+    def test_a_list_mixing_text_and_media_is_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="mixes"):
+            value_types.normalize_value(["a cat", "/x/a.png"], "list[str]")
+
+    def test_an_empty_list_takes_the_declared_element_type(self) -> None:
+        assert value_types.normalize_value([], "list[VideoUrlArtifact]") == {
+            "value_type": ValueType.MOVIE,
+            "value": [],
+            "engine_type": "list",
+        }
 
 
-def test_locator_kinds_are_explicit() -> None:
-    assert value_types.normalize_value(STATIC_URL, "str")["sources"][0]["kind"] == SourceKind.URL
-    assert value_types.normalize_value("/mnt/show/plate.exr", "str")["sources"][0]["kind"] == SourceKind.PATH
-    inline = value_types.normalize_value(ImageArtifact(value=b"\x89PNG", format="png", width=1, height=1))
-    assert inline["sources"][0]["kind"] == SourceKind.INLINE
-    assert inline["sources"][0]["byte_count"] == 4
+class TestLocators:
+    def test_declared_type_outranks_the_extension(self) -> None:
+        """The parameter author knew the media type; the filename may not carry it."""
+        descriptor = value_types.normalize_value("/mnt/show/no_extension", "ImageUrlArtifact")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert descriptor["value"]["format"] is None
+
+    def test_unknown_artifact_class_is_classified_by_extension(self) -> None:
+        descriptor = value_types.normalize_value(GenericArtifact("/show/still.jpg"))
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert descriptor["value"]["format"] == "jpg"
+
+    @pytest.mark.parametrize(
+        "extension",
+        ["mp4", "mov", "avi", "mkv", "webm", "m4v", "mpg", "mpeg", "m2v", "wmv", "ogv", "mts", "m2ts", "r3d"],
+    )
+    def test_a_movie_container_nuke_reads_is_a_movie(self, extension: str) -> None:
+        assert value_types.normalize_value(f"/show/cut.{extension}", "str")["value_type"] == ValueType.MOVIE
+
+    def test_an_ambiguous_container_stays_a_file_until_a_declared_type_says_otherwise(self) -> None:
+        """MXF wraps audio-only essence too, so the extension alone cannot promise a movie."""
+        assert value_types.normalize_value("/show/master.mxf", "str")["value_type"] == ValueType.FILE
+        assert value_types.normalize_value("/show/master.mxf", "VideoArtifact")["value_type"] == ValueType.MOVIE
+
+    def test_a_literal_windows_path_is_slash_normalized(self) -> None:
+        descriptor = value_types.normalize_value("C:\\workspace\\outputs\\render.png", "str")
+        assert descriptor["value"]["path"] == "C:/workspace/outputs/render.png"
+
+    @pytest.mark.parametrize(
+        ("value", "expected_type", "expect_path"),
+        [
+            ("/mnt/show/plate.exr", ValueType.IMAGE, True),
+            ("/mnt/show/notes.txt", ValueType.FILE, True),
+            ("/mnt/show/renders", ValueType.FILE, True),
+            # A relative path is the ordinary form in a Nuke script.
+            ("shots/plate.exr", ValueType.IMAGE, True),
+            ("renders/out.mov", ValueType.MOVIE, True),
+            ("notes/readme.txt", ValueType.FILE, True),
+            # Prose that merely contains a slash stays prose.
+            ("3/4 cup", ValueType.TEXT, False),
+            ("aspect 16/9", ValueType.TEXT, False),
+            ("shots/plate", ValueType.TEXT, False),
+            # This protocol version has no URL concept, so a URL on a text parameter is text.
+            (URL, ValueType.TEXT, False),
+        ],
+    )
+    def test_locator_fallback_matrix_on_a_text_parameter(
+        self, value: str, expected_type: str, expect_path: bool
+    ) -> None:
+        descriptor = value_types.normalize_value(value, "str")
+        assert descriptor["value_type"] == expected_type
+        if expect_path:
+            assert descriptor["value"]["path"] == value
+        else:
+            assert descriptor["value"] == value
+
+    def test_prose_declared_as_media_is_text(self) -> None:
+        descriptor = value_types.normalize_value("not a path at all", "ImageUrlArtifact")
+        assert descriptor == {"value_type": ValueType.TEXT, "value": "not a path at all", "engine_type": "str"}
 
 
-def test_a_literal_windows_path_is_slash_normalized_without_going_through_a_macro() -> None:
-    descriptor = value_types.normalize_value("C:\\workspace\\outputs\\render.png", "str")
-    source = descriptor["sources"][0]
-    assert source["value"] == "C:/workspace/outputs/render.png"
-    assert "\\" not in source["value"]
+class TestUnrepresentable:
+    """No host form, so the parameter is reported unavailable instead of guessed at."""
 
+    @pytest.mark.parametrize("value", [URL, ImageUrlArtifact(URL), {"type": "ImageUrlArtifact", "value": URL}])
+    def test_a_url_on_a_media_parameter(self, value: Any) -> None:
+        with pytest.raises(UnrepresentableValueError, match="URL"):
+            value_types.normalize_value(value, "ImageUrlArtifact")
 
-def test_a_frame_list_is_one_image_with_many_sources() -> None:
-    frames = ListArtifact([ImageUrlArtifact(f"http://x/frame.{n:04d}.exr") for n in (1, 2, 3)])
-    descriptor = value_types.normalize_value(frames, "ImageUrlArtifact")
-    assert descriptor["value_type"] == ValueType.IMAGE
-    assert len(descriptor["sources"]) == 3
-    assert {source["format"] for source in descriptor["sources"]} == {"exr"}
+    @pytest.mark.parametrize(
+        "value",
+        [
+            ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2),
+            safe_unstructure(ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2)),
+            BlobArtifact(value=b"\x00\x01"),
+            b"raw",
+        ],
+    )
+    def test_bytes_the_engine_never_saved(self, value: Any) -> None:
+        with pytest.raises(UnrepresentableValueError, match="bytes"):
+            value_types.normalize_value(value, "ImageUrlArtifact")
 
-
-def test_a_mixed_list_degrades_rather_than_picking_a_winner() -> None:
-    mixed = ListArtifact([ImageUrlArtifact("http://x/a.png"), VideoUrlArtifact("http://x/b.mov")])
-    assert value_types.normalize_value(mixed)["value_type"] == ValueType.FILE
-
-
-def test_an_empty_list_is_null_not_an_empty_image() -> None:
-    assert value_types.normalize_value(ListArtifact([]))["value_type"] == ValueType.NULL
-
-
-def test_a_slash_alone_does_not_make_prose_a_file() -> None:
-    assert value_types.normalize_value("3/4 cup", "str")["value_type"] == ValueType.TEXT
-    assert value_types.normalize_value("3/4 cup", "str")["sources"] == []
-    assert value_types.normalize_value("aspect 16/9", "str")["value_type"] == ValueType.TEXT
-    assert value_types.normalize_value("aspect 16/9", "str")["sources"] == []
-
-
-@pytest.mark.parametrize(
-    ("value", "declared", "expected_type", "expect_source"),
-    [
-        # Genuine locator shapes: extension known or not, the source is real and is kept.
-        ("/mnt/show/plate.exr", "str", ValueType.IMAGE, True),
-        ("/mnt/show/notes.txt", "str", ValueType.FILE, True),
-        ("/mnt/show/renders", "str", ValueType.FILE, True),
-        ("https://host/asset", "str", ValueType.FILE, True),
-        ("/render/mix_final", "AudioUrlArtifact", ValueType.FILE, True),
-        # A relative path is the ordinary form in a Nuke script, so an extension alongside a
-        # separator is enough to make it a locator.
-        ("shots/plate.exr", "str", ValueType.IMAGE, True),
-        ("renders/out.mov", "str", ValueType.MOVIE, True),
-        ("notes/readme.txt", "str", ValueType.FILE, True),
-        # Prose that merely contains a slash: no locator shape, so the declared type wins
-        # and no source is manufactured.
-        ("3/4 cup", "str", ValueType.TEXT, False),
-        ("aspect 16/9", "str", ValueType.TEXT, False),
-        ("plain prose here", "str", ValueType.TEXT, False),
-        # A separator with no extension and no absolute shape stays prose.
-        ("shots/plate", "str", ValueType.TEXT, False),
-    ],
-)
-def test_locator_fallback_matrix(value: str, declared: str, expected_type: str, expect_source: bool) -> None:
-    descriptor = value_types.normalize_value(value, declared)
-    assert descriptor["value_type"] == expected_type
-    if expect_source:
-        assert len(descriptor["sources"]) == 1
-        assert descriptor["sources"][0]["value"] == value
-    else:
-        assert descriptor["sources"] == []
-
-
-SOURCELESS_VALUE_TYPES = {ValueType.TEXT, ValueType.INT, ValueType.FLOAT, ValueType.BOOL, ValueType.NULL}
-
-
-@pytest.mark.parametrize(
-    "declared",
-    ["str", "int", "ImageUrlArtifact", "VideoUrlArtifact", "AudioUrlArtifact", "GenericArtifact", None],
-)
-@pytest.mark.parametrize(
-    "value",
-    [
-        "just prose",
-        "",
-        "3/4 cup",
-        "render {frame} of the shot",
-        "shots/plate",
-        "/mnt/show/plate.exr",
-        "shots/plate.exr",
-        "https://host/asset",
-        None,
-        7,
-        True,
-        ["note one", "note two"],
-        ["/a/one.exr", "/a/two.exr"],
-        object(),
-    ],
-)
-def test_a_media_or_file_type_never_arrives_without_a_source(value: Any, declared: str | None) -> None:
-    """GTImage, GTMovie and GTFile promise a host somewhere to get bytes, so they must carry a source.
-
-    Both docs publish the inverse rule too: only GTText, GTInt, GTFloat, GTBool and GTNull arrive
-    sourceless. A declared media type describes what a parameter is for, not what a value turned out
-    to be, so prose on an image parameter must not be announced as an image a host can open.
-    """
-    descriptor = value_types.normalize_value(value, declared)
-    value_type = descriptor["value_type"]
-    has_source = bool(descriptor["sources"])
-
-    if value_type in SOURCELESS_VALUE_TYPES:
-        assert not has_source, f"{value_type} carried a source for {value!r} declared {declared!r}"
-    else:
-        assert has_source, f"{value_type} carried no source for {value!r} declared {declared!r}"
-
-
-def test_colorspace_is_present_and_reserved() -> None:
-    """Reserved now so that filling it in later is additive rather than a version bump.
-
-    The engine's own `color_space` is a PIL mode (RGB, RGBA, Grayscale), which is channel
-    layout rather than a transfer function, so it cannot answer sRGB versus scene-linear.
-    """
-    descriptor = value_types.normalize_value(ImageUrlArtifact(STATIC_URL), "ImageUrlArtifact")
-    assert "colorspace" in descriptor
-    assert descriptor["colorspace"] is None
-
-
-def test_engine_type_is_carried_for_diagnostics() -> None:
-    descriptor = value_types.normalize_value(ImageUrlArtifact(STATIC_URL), "ImageUrlArtifact")
-    assert descriptor["engine_type"] == "ImageUrlArtifact"
-
-
-def test_descriptor_shape_is_stable_across_inputs() -> None:
-    expected_top = {"value_type", "value", "sources", "colorspace", "engine_type"}
-    expected_source = {"kind", "value", "format", "width", "height", "byte_count", "is_pattern", "raw"}
-    for value in [None, "prose", "/a/b.exr", b"x", ImageUrlArtifact(STATIC_URL), 1, True]:
-        descriptor = value_types.normalize_value(value)
-        assert set(descriptor) == expected_top
-        for source in descriptor["sources"]:
-            assert set(source) == expected_source
+    def test_a_dict_that_is_not_an_artifact(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="dict"):
+            value_types.normalize_value({"width": 1920, "height": 1080}, "dict")
 
 
 class TestSerializedArtifacts:
-    """A read hands back an artifact as a dict, where `getattr(value, "value")` finds nothing.
-
-    The engine answers GetParameterValueRequest for an artifact-typed parameter with
-    `{"type": "ImageUrlArtifact", "value": "..."}` rather than the artifact object, so a
-    normalizer that only reaches for attributes reports an image output as sourceless text
-    and the host has nothing to open.
-    """
+    """A read hands back an artifact as a dict rather than the artifact object."""
 
     SERIALIZED = {
         "type": "ImageUrlArtifact",
@@ -407,96 +403,37 @@ class TestSerializedArtifacts:
         "reference": None,
         "meta": {},
         "name": "5c8be9c5889b442689bb34db168ec903",
-        "value": STATIC_URL,
+        "value": "/show/render.png",
     }
 
-    def test_a_serialized_artifact_keeps_its_locator(self) -> None:
+    def test_a_serialized_artifact_keeps_its_path(self) -> None:
         descriptor = value_types.normalize_value(self.SERIALIZED, "ImageUrlArtifact")
-
-        assert descriptor["value_type"] == ValueType.IMAGE
-        assert [source["value"] for source in descriptor["sources"]] == [STATIC_URL]
+        assert descriptor["value"] == {"path": "/show/render.png", "format": "png"}
 
     def test_the_dicts_own_type_is_reported(self) -> None:
-        """`engine_type` is diagnostic, and "dict" tells support nothing about the value."""
         assert value_types.normalize_value(self.SERIALIZED)["engine_type"] == "ImageUrlArtifact"
 
-    def test_a_serialized_sequence_carries_every_frame(self) -> None:
-        frames = {
-            "type": "ImageSequenceArtifact",
-            "value": [f"/mnt/show/frame.{number:04d}.exr" for number in (1, 2, 3)],
-        }
-
-        descriptor = value_types.normalize_value(frames)
-
+    def test_a_serialized_image_sequence_carries_every_frame(self) -> None:
+        frames = {"type": "ImageSequenceArtifact", "value": [f"/show/frame.{n:04d}.exr" for n in (1, 2, 3)]}
+        descriptor = value_types.normalize_value(frames, "ImageSequenceArtifact")
         assert descriptor["value_type"] == ValueType.IMAGE
-        assert len(descriptor["sources"]) == 3
-
-    def test_a_dict_that_is_not_an_artifact_stays_sourceless_text(self) -> None:
-        descriptor = value_types.normalize_value({"width": 1920, "height": 1080})
-
-        assert descriptor["value_type"] == ValueType.TEXT
-        assert descriptor["sources"] == []
-
-    def test_an_artifact_serialized_without_a_value_is_sourceless(self) -> None:
-        descriptor = value_types.normalize_value({"type": "ImageUrlArtifact", "value": None})
-
-        assert descriptor["sources"] == []
-        assert descriptor["engine_type"] == "ImageUrlArtifact"
+        assert len(descriptor["value"]) == 3
 
 
-class TestScalarValues:
-    """A scalar has no locator, so without this field a host cannot read it at all.
+class TestEngineValue:
+    """A host sends back what it read, and the engine is handed what it holds."""
 
-    Reading one back is also what keeps a host from having to remember what it last sent:
-    `sources` answers for media, and this answers for everything else.
-    """
+    def test_a_media_entry_becomes_its_path(self) -> None:
+        assert value_types.engine_value({"path": "/a/b.png", "format": "png"}) == "/a/b.png"
 
-    @pytest.mark.parametrize(
-        ("value", "expected"),
-        [
-            (True, True),
-            (False, False),
-            (7, 7),
-            (1.5, 1.5),
-            ("[SUCCEEDED] no connection provided", "[SUCCEEDED] no connection provided"),
-            ("", ""),
-        ],
-    )
-    def test_a_scalar_is_carried(self, value: Any, expected: Any) -> None:
-        assert value_types.normalize_value(value)["value"] == expected
+    def test_a_list_of_entries_becomes_a_list_of_paths(self) -> None:
+        entries = [{"path": "/a/1.png", "format": "png"}, {"path": "/a/2.png", "format": None}]
+        assert value_types.engine_value(entries) == ["/a/1.png", "/a/2.png"]
 
-    def test_unset_is_null(self) -> None:
-        descriptor = value_types.normalize_value(None)
-        assert descriptor["value_type"] == ValueType.NULL
-        assert descriptor["value"] is None
+    @pytest.mark.parametrize("value", ["prose", 7, True, None, [1, 2], {"path": "/a", "other": 1}])
+    def test_anything_else_passes_through(self, value: Any) -> None:
+        assert value_types.engine_value(value) == value
 
-    @pytest.mark.parametrize(
-        "value",
-        [
-            STATIC_URL,
-            "/mnt/show/plate.exr",
-            ImageUrlArtifact(STATIC_URL),
-            ImageArtifact(value=b"\x89PNG", format="png", width=1, height=1),
-            ListArtifact([ImageUrlArtifact("http://x/a.png")]),
-            {"type": "ImageUrlArtifact", "value": STATIC_URL},
-        ],
-    )
-    def test_a_sourced_value_stays_null(self, value: Any) -> None:
-        """The locator belongs in `sources`. Two places to look for one value is one too many."""
-        descriptor = value_types.normalize_value(value)
-        assert descriptor["sources"]
-        assert descriptor["value"] is None
-
-    def test_prose_declared_as_media_keeps_its_text(self) -> None:
-        """Downgraded to GTText because it points at no bytes, and still readable as text."""
-        descriptor = value_types.normalize_value("not a path at all", "ImageUrlArtifact")
-
-        assert descriptor["value_type"] == ValueType.TEXT
-        assert descriptor["value"] == "not a path at all"
-
-    def test_an_unresolvable_macro_that_is_not_a_locator_keeps_its_template(self) -> None:
-        """Prose with a brace token is text, and the text is the only thing a host can show."""
-        descriptor = value_types.normalize_value("shot {SHOT} approved", "str")
-
-        assert descriptor["value_type"] == ValueType.TEXT
-        assert descriptor["value"] == "shot {SHOT} approved"
+    def test_a_read_value_round_trips(self) -> None:
+        read = value_types.normalize_value([ImageUrlArtifact("/a/1.png")], "list[ImageUrlArtifact]")["value"]
+        assert value_types.engine_value(read) == ["/a/1.png"]

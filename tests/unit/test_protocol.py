@@ -85,19 +85,6 @@ def test_value_type_wire_strings_are_exactly_these() -> None:
     assert protocol.ValueType.INT == "GTInt"
     assert protocol.ValueType.FLOAT == "GTFloat"
     assert protocol.ValueType.BOOL == "GTBool"
-    assert protocol.ValueType.NULL == "GTNull"
-
-
-def test_source_kind_wire_strings_are_exactly_these() -> None:
-    assert protocol.SourceKind.URL == "url"
-    assert protocol.SourceKind.PATH == "path"
-    assert protocol.SourceKind.INLINE == "inline"
-    assert protocol.SourceKind.MACRO == "macro"
-
-
-def test_source_kind_set_is_closed_and_consistent() -> None:
-    declared = {value for name, value in vars(protocol.SourceKind).items() if not name.startswith("_")}
-    assert set(protocol.SOURCE_KINDS) == declared
 
 
 def test_parameter_section_wire_strings_are_exactly_these() -> None:
