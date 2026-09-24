@@ -116,6 +116,10 @@ const Actions = (function () {
   }
 
   function coerce(param, raw) {
+    if (param.type === "GTBool" && typeof raw === "string") {
+      const lowered = raw.toLowerCase();
+      return lowered === "true" ? true : lowered === "false" ? false : undefined;
+    }
     if (!isNumeric(param.type)) return raw;
     const value = Number(raw);
     if (Number.isNaN(value)) return undefined;
@@ -134,8 +138,10 @@ const Actions = (function () {
       const value = param.is_list
         ? String(raw)
             .split(",")
-            .map((part) => coerce(param, part.trim()))
-            .filter((item) => item !== undefined && item !== "")
+            .map((part) => part.trim())
+            .filter((part) => part !== "")
+            .map((part) => coerce(param, part))
+            .filter((item) => item !== undefined)
         : coerce(param, raw);
       if (value === undefined) return;
       if (!inputs[param.node]) inputs[param.node] = {};
