@@ -153,15 +153,16 @@ Set `foundry_LICENSE` in the Griptape Secrets panel. It is injected into the Nuk
          ...                     # libraries, config, .env, pyproject.toml
    ```
 
-4. **The first gizmo published into a given install directory requires restarting Nuke.** That publish adds the Griptape plugin path to `<install_dir>/init.py`, and Nuke only reads `init.py` at startup. Until it restarts there is no `Griptape` menu at all, since `griptape/menu.py` is found only via that path.
+4. **Restart Nuke once after the first gizmo published into a given install directory.** That publish adds the Griptape plugin path to `<install_dir>/init.py`, and Nuke picks up that file only at startup. Until it restarts there is no `Griptape` menu at all, since `griptape/menu.py` is found only via that path.
 
    This is per install directory, not once ever. Publishing to `~/.nuke` and later to a custom path means a restart for each.
 
 5. Inside Nuke, create the gizmo from the `Griptape` menu on the Nodes toolbar. A single published version appears as a flat entry; multiple versions are grouped under a per-workflow submenu. The `.gizmo` is a node class, not a file to open directly.
 
-6. Later publishes into the same install directory need no restart. `menu.py` watches the `griptape/` directory and refreshes itself.
+6. Later publishes into the same install directory need no restart. `menu.py` watches the `griptape/` directory and refreshes itself. If the menu doesn't update:
 
-   When that watcher doesn't fire, run `Griptape > Refresh Griptape Gizmos` from the main menu bar. That's usually needed when the install directory is on a network mount, where `QFileSystemWatcher` silently delivers nothing.
+   - **The `Griptape` menu is there, but the new version is missing.** Run `Griptape > Refresh Griptape Gizmos` from the main menu bar. Network mounts usually need this, because `QFileSystemWatcher` silently delivers nothing there.
+   - **There is no `Griptape` menu at all.** That Nuke session started before this install directory existed, so it never ran `pluginAddPath`. Restart it once.
 
 ## Repository Layout
 

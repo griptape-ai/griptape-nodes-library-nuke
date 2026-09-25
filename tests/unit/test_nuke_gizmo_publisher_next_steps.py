@@ -63,14 +63,18 @@ class TestNextSteps:
     def test_first_publish_step_says_the_restart_is_per_install_directory(self) -> None:
         """Not once ever: a later publish to a different install dir needs its own restart."""
         step = _steps(first_time_setup=True)[0]
-        assert "this install directory" in step
-        assert "Later publishes here don't need one." in step
+        assert "Later publishes to this directory don't need a restart." in step
 
     def test_republish_mentions_the_refresh_fallback(self) -> None:
         """The watcher misses changes on network mounts; the menu command is the way out."""
         steps = _steps()
         assert any("Refresh Griptape Gizmos" in step for step in steps)
-        assert any("network mount" in step for step in steps)
+        assert any("Network mounts" in step for step in steps)
+
+    def test_republish_fallback_puts_each_case_on_its_own_line(self) -> None:
+        """Two unrelated situations, so a single run of prose makes the artist sort them out."""
+        step = next(step for step in _steps() if "Refresh Griptape Gizmos" in step)
+        assert len([line for line in step.splitlines() if line.startswith("- ")]) == 2
 
     def test_republish_still_offers_a_restart_when_there_is_no_griptape_menu(self) -> None:
         """A session predating the very first publish here has no menu to refresh.
@@ -79,7 +83,8 @@ class TestNextSteps:
         one -- so pointing only at Refresh Griptape Gizmos would name a command that
         session never loaded.
         """
-        assert any("no" in step and "Griptape menu" in step and "restart Nuke" in step for step in _steps())
+        case = next(line for step in _steps() for line in step.splitlines() if "No Griptape menu at all" in line)
+        assert "Restart it once." in case
 
     def test_first_publish_omits_the_refresh_fallback(self) -> None:
         """Nothing to refresh before the restart that first loads the plugin path."""

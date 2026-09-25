@@ -209,10 +209,9 @@ class NukeGizmoPublisher:
             # pluginAddPath lives in init.py, which Nuke reads only at startup, so this
             # first publish into this install dir is the one case a restart is required.
             steps.append(
-                "Restart Nuke. This is the first gizmo published into this install directory, so the "
-                f"publish added the Griptape plugin path to {install_dir / 'init.py'}. Nuke only reads "
-                "that file at startup, so the menu won't appear until you restart. Later publishes "
-                "here don't need one."
+                "Restart Nuke once. This is the first gizmo published here, and Nuke picks up the new "
+                f"plugin path ({install_dir / 'init.py'}) only at startup. Later publishes to this "
+                "directory don't need a restart."
             )
         location = f"Nodes > Griptape > {label}" + (f" > v{version}" if published_count > 1 else "")
         steps.append(
@@ -221,12 +220,14 @@ class NukeGizmoPublisher:
         )
         steps.append("Fill in the node's Inputs tab, then press Run Workflow on its Run tab.")
         if not first_time_setup:
+            # One line per case: the artist has to pick their situation out of this before
+            # they can act, so it cannot be a single run of prose.
             steps.append(
-                "An already-running Nuke should pick this up on its own. If the menu doesn't update, "
-                "run Griptape > Refresh Griptape Gizmos from Nuke's menu bar. That's usually needed "
-                "when the install directory is on a network mount. If there's no Griptape menu at "
-                "all, that session started before this install directory was set up, so restart "
-                "Nuke once."
+                "The menu should update on its own. If it doesn't:\n"
+                "- Menu is there, but this version is missing: run Griptape > Refresh Griptape Gizmos "
+                "from Nuke's menu bar. Network mounts usually need this.\n"
+                "- No Griptape menu at all: that Nuke session started before this install directory "
+                "existed. Restart it once."
             )
         return steps
 
