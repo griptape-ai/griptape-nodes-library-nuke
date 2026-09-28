@@ -45,7 +45,6 @@ from publish_gizmo.constants import (
     PRESERVED_ON_REPUBLISH,
     menu_label,
     versioned_gizmo_filename,
-    versioned_gizmo_glob,
 )
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
 from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder
@@ -169,9 +168,6 @@ class NukeGizmoPublisher:
                 workflow_stem=workflow_stem,
                 install_dir=install_dir,
                 version=version,
-                # Count the gizmos the menu will actually see, not the version subdirs:
-                # re-publishing over an existing version adds no new menu entry.
-                published_count=len(list(griptape_dir.glob(versioned_gizmo_glob(workflow_stem)))),
                 first_time_setup=first_time_setup,
             )
             return PublishWorkflowResultSuccess(
@@ -194,15 +190,9 @@ class NukeGizmoPublisher:
         workflow_stem: str,
         install_dir: Path,
         version: int,
-        published_count: int,
         first_time_setup: bool,
     ) -> list[str]:
-        """Return the ordered "what do I do now" steps for a successful publish.
-
-        A gizmo isn't opened like a published workflow file. It's a Nuke node the artist
-        creates from a menu, so the dialog has to say that, or the path it shows reads
-        like something to double-click.
-        """
+        """Return the ordered steps the artist takes in Nuke after a successful publish."""
         label = menu_label(workflow_stem)
         steps = []
         if first_time_setup:
@@ -213,21 +203,22 @@ class NukeGizmoPublisher:
                 f"plugin path ({install_dir / 'init.py'}) only at startup. Later publishes to this "
                 "directory don't need a restart."
             )
-        location = f"Nodes > Griptape > {label}" + (f" > v{version}" if published_count > 1 else "")
+        # Whether the entry is flat or a version submenu can't be known here: the menu
+        # merges this workflow's gizmos across every plugin path Nuke loads, not just
+        # this install dir. So the step names both rather than guessing.
         steps.append(
-            f"In Nuke, create the node from the Nodes toolbar: {location}. "
+            f"In Nuke, create the node from the Nodes toolbar: Nodes > Griptape > {label}. "
+            f"If it has more than one version, pick v{version} from its submenu. "
             "The .gizmo is a node class, not a file to open."
         )
         steps.append("Fill in the node's Inputs tab, then press Run Workflow on its Run tab.")
         if not first_time_setup:
-            # One line per case: the artist has to pick their situation out of this before
-            # they can act, so it cannot be a single run of prose.
             steps.append(
                 "The menu should update on its own. If it doesn't:\n"
                 "- Menu is there, but this version is missing: run Griptape > Refresh Griptape Gizmos "
                 "from Nuke's menu bar. Network mounts usually need this.\n"
-                "- No Griptape menu at all: that Nuke session started before this install directory "
-                "existed. Restart it once."
+                "- No Griptape menu at all: that Nuke session started before the first gizmo was "
+                "published here. Restart it once."
             )
         return steps
 

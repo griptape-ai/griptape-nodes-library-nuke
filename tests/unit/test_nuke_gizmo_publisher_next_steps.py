@@ -29,7 +29,6 @@ def _steps(**overrides) -> list[str]:
         "workflow_stem": "my_workflow",
         "install_dir": Path("/home/user/.nuke"),
         "version": 1,
-        "published_count": 1,
         "first_time_setup": False,
     }
     kwargs.update(overrides)
@@ -86,16 +85,25 @@ class TestNextSteps:
         case = next(line for step in _steps() for line in step.splitlines() if "No Griptape menu at all" in line)
         assert "Restart it once." in case
 
+    def test_no_menu_case_blames_the_first_publish_not_the_directory(self) -> None:
+        """The default ~/.nuke almost always exists already, so its existence isn't the condition.
+
+        What matters is whether the session started before the publish that wrote the
+        INIT_MARKER line; naming the directory would tell ~/.nuke users it doesn't apply.
+        """
+        case = next(line for step in _steps() for line in step.splitlines() if "No Griptape menu at all" in line)
+        assert "before the first gizmo was published here" in case
+        assert "directory existed" not in case
+
     def test_first_publish_omits_the_refresh_fallback(self) -> None:
         """Nothing to refresh before the restart that first loads the plugin path."""
         assert not any("Refresh Griptape Gizmos" in step for step in _steps(first_time_setup=True))
 
-    def test_single_version_points_at_a_flat_entry(self) -> None:
-        assert any("Nodes > Griptape > My Workflow." in step for step in _steps())
-
-    def test_multiple_versions_point_into_the_version_submenu(self) -> None:
-        """The generated menu nests versions once more than one gizmo exists."""
-        assert any("Nodes > Griptape > My Workflow > v2" in step for step in _steps(version=2, published_count=2))
+    def test_menu_step_names_both_the_flat_entry_and_the_version_submenu(self) -> None:
+        """The menu merges versions across every plugin path, so the publisher can't tell which shape it gets."""
+        step = next(step for step in _steps(version=2) if "Nodes > Griptape" in step)
+        assert "Nodes > Griptape > My Workflow." in step
+        assert "pick v2 from its submenu" in step
 
     def test_run_step_names_the_run_button_knob(self) -> None:
         assert any("Run Workflow" in step for step in _steps())

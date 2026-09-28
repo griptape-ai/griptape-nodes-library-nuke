@@ -162,7 +162,7 @@ Set `foundry_LICENSE` in the Griptape Secrets panel. It is injected into the Nuk
 6. Later publishes into the same install directory need no restart. `menu.py` watches the `griptape/` directory and refreshes itself. If the menu doesn't update:
 
    - **The `Griptape` menu is there, but the new version is missing.** Run `Griptape > Refresh Griptape Gizmos` from the main menu bar. Network mounts usually need this, because `QFileSystemWatcher` silently delivers nothing there.
-   - **There is no `Griptape` menu at all.** That Nuke session started before this install directory existed, so it never ran `pluginAddPath`. Restart it once.
+   - **There is no `Griptape` menu at all.** That Nuke session started before the first gizmo was published into this install directory, so it never ran the `pluginAddPath` that publish added. Restart it once.
 
 ## Repository Layout
 
