@@ -231,7 +231,12 @@ class TestTranslation:
         payload = event_manager.payloads()[-1]
         assert isinstance(payload, NukeParameterValueEvent)
         assert payload.value["value_type"] == ValueType.IMAGE
-        assert payload.value["value"] == {"path": "/workspace/outputs/a.png", "format": "png"}
+        assert payload.value["value"] == {
+            "path": "/workspace/outputs/a.png",
+            "format": "png",
+            "first": None,
+            "last": None,
+        }
 
     def test_a_value_with_no_host_form_is_not_forwarded(self, event_manager: FakeEventManager) -> None:
         """A bulk read reports it as unavailable with a reason; a notification has nowhere to put one."""

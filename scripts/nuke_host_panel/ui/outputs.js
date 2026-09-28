@@ -42,6 +42,11 @@
         <div class="stack">
           <span class="muted">${entry.format || "format unknown"}</span>
           ${padded ? html`<span class="badge warn">#### PATTERN</span>` : null}
+          ${
+            entry.first !== null && entry.first !== undefined
+              ? html`<span class="badge">${entry.first}-${entry.last}</span>`
+              : null
+          }
         </div>
         <div class="stack">
           <span class="mono grow">${entry.path}</span>

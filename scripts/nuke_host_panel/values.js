@@ -53,11 +53,19 @@ const Values = (function () {
       const path = item && item.path;
       if (!path) return { note: "An unset item. Nothing to create." };
       const padded = /#+/.test(path);
+      const ranged = item.first !== null && item.first !== undefined && item.last !== null && item.last !== undefined;
+      if (ranged) {
+        return {
+          call: 'nuke.nodes.Read(file="' + path + '", first=' + item.first + ", last=" + item.last + ")",
+          note: "A sequence, frames " + item.first + " to " + item.last + ".",
+          source: path,
+        };
+      }
       return {
         call: padded
           ? 'nuke.nodes.Read(file="' + path + '", first=<first>, last=<last>)'
           : 'nuke.nodes.Read(file="' + path + '")',
-        note: padded ? "Frame padding. The frame range is not in the descriptor: scan the directory or ask." : "A single file.",
+        note: padded ? "Frame padding with no range: scan the directory or ask." : "A single file.",
         source: path,
       };
     });

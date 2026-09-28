@@ -98,7 +98,7 @@ async def handle_set_parameter_values(
         )
 
     found = await engine.lookup_workflow(loaded_id)
-    declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
+    declared = shape.input_parameter_types(found.entry) if found.entry is not None else {}
 
     refusal = parameter_values.unaddressable_inputs_reason(loaded_id, found, declared)
     if refusal is not None:

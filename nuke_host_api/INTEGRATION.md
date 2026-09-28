@@ -725,7 +725,7 @@ no verdict event.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `workflow_id` | `str` | `""` | Optional. Empty runs whatever is loaded. Set, it must be the loaded workflow or the request is refused |
-| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path` |
+| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path`. See [Setting a sequence](#setting-a-sequence) |
 | `unresolve_first` | `bool` | `false` | Unresolve every node in the flow before starting, so nodes left resolved by an earlier run compute again instead of being reused |
 
 Send `workflow_id` if the host tracks what it loaded. It costs nothing and turns a graph
@@ -962,7 +962,7 @@ an artist edits a knob rather than only diverging locally until the next
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
-| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path`. A request with no pair to act on is refused, not answered as a trivial success: that covers an empty `inputs` and one where every node maps to an empty parameter dict |
+| `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path`. See [Setting a sequence](#setting-a-sequence). A request with no pair to act on is refused, not answered as a trivial success: that covers an empty `inputs` and one where every node maps to an empty parameter dict |
 
 | `NukeSetParameterValuesResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -1287,7 +1287,7 @@ has this shape:
 ```json
 {
   "value_type": "GTImage",
-  "value": {"path": "/proj/outputs/hero_v003.png", "format": "png"},
+  "value": {"path": "/proj/outputs/hero_v003.png", "format": "png", "first": null, "last": null},
   "engine_type": "str"
 }
 ```
@@ -1304,17 +1304,6 @@ wildcard (`is_list: null`) decides per value, so check whether it is an array.
 
 ```json
 {
-  "value_type": "GTImage",
-  "value": [
-    {"path": "/proj/outputs/nuke/Read1/plate/frame_1001.png", "format": "png"},
-    {"path": "/proj/outputs/nuke/Read1/plate/frame_1002.png", "format": "png"}
-  ],
-  "engine_type": "Sequence"
-}
-```
-
-```json
-{
   "value_type": "GTInt",
   "value": [42, 43, 44],
   "engine_type": "list"
@@ -1325,7 +1314,7 @@ wildcard (`is_list: null`) decides per value, so check whether it is an array.
 
 | `value_type` | Each value is |
 |---|---|
-| `GTImage` | A media entry. A sequence is a list parameter with one entry per frame |
+| `GTImage` | A media entry. A sequence is one entry with a frame range |
 | `GTMovie` | A media entry |
 | `GTFile` | A media entry for a file this protocol version does not classify, including audio |
 | `GTText` | A string |
@@ -1339,9 +1328,44 @@ wildcard (`is_list: null`) decides per value, so check whether it is an array.
 |---|---|
 | `path` | Absolute or relative local path, forward slashes, macros resolved. Feed to a Read node |
 | `format` | The path's extension, lowercased. Null when there is none. Sniff locally if certainty is required |
+| `first` | A sequence's first frame. Null for anything that is not a sequence |
+| `last` | A sequence's last frame, inclusive. Null for anything that is not a sequence |
 
 A `####` run in a path is frame padding, whether literal or rendered from an unfilled `{###}`
 slot. It is correct for a Read node `file` knob and invalid for a direct file open.
+
+A `Sequence` parameter is not a list. Its value is one entry whose `path` is the pattern, with
+any `%04d`, `@@@@`, or `$F4` token written as `####`, and whose `first` and `last` give the
+range, so it maps onto one Read node:
+
+```json
+{
+  "value_type": "GTImage",
+  "value": {"path": "/proj/outputs/nuke/Read1/plate/frame_####.png", "format": "png", "first": 1001, "last": 1002},
+  "engine_type": "Sequence"
+}
+```
+
+```python
+nuke.nodes.Read(file=entry["path"], first=entry["first"], last=entry["last"])
+```
+
+Frames inside the range can be missing on disk. Set the Read's `on_error` for them. A `####`
+path with a null range came from a template rather than a scan, so the range is unknown: scan
+the directory or ask the artist. A `list[Sequence]` parameter is an array of these entries.
+
+### Setting a sequence
+
+A host holds no `Sequence` to send back, so on a `Sequence` input the engine rescans what the
+host sends with `ScanSequencesRequest`. A range with gaps stays one sequence. Send the entry a
+read returned, any `{path, first, last}`, or a bare pattern string to take every frame on disk:
+
+```json
+{"Start Flow": {"plate": {"path": "/show/plate/frame_####.exr", "first": 1001, "last": 1100}}}
+```
+
+A scan that finds no frames, or a pattern the engine cannot parse, is reported in
+`rejected_inputs` with the reason. `null` or `""` unsets the parameter.
 
 ### Values with no host form
 

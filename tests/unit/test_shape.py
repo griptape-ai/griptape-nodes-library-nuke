@@ -108,7 +108,7 @@ class TestDeclaredParameters:
             ({"type": "ImageUrlArtifact", "default_value": ""}, None),
             (
                 {"type": "ImageUrlArtifact", "default_value": "/show/plate.exr"},
-                {"path": "/show/plate.exr", "format": "exr"},
+                {"path": "/show/plate.exr", "format": "exr", "first": None, "last": None},
             ),
             ({"type": "list[int]", "default_value": [42]}, [42]),
             ({"type": "list[int]", "default_value": None}, []),
@@ -124,19 +124,22 @@ class TestDeclaredParameters:
         section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "C:\\show\\plate.exr"}}}
         assert shape.declared_parameters(section)[0]["default_value"]["path"] == "C:/show/plate.exr"
 
-    def test_a_sequence_default_keeps_one_entry_per_frame(self) -> None:
-        section = {
-            "Start Flow": {
-                "plate": {
-                    "type": "Sequence",
-                    "default_value": ["/show/plate.0001.exr", "/show/plate.0002.exr"],
-                }
-            }
+    def test_a_sequence_default_is_one_entry_with_its_range(self) -> None:
+        default = {
+            "entries": [{"number": 1, "padded_number": "0001", "path": "/show/plate/frame_0001.exr"}],
+            "first": 1,
+            "last": 1,
+            "padding": 4,
+            "pattern": "frame_####.exr",
+            "directory": "/show/plate",
         }
-        assert [entry["path"] for entry in shape.declared_parameters(section)[0]["default_value"]] == [
-            "/show/plate.0001.exr",
-            "/show/plate.0002.exr",
-        ]
+        section = {"Start Flow": {"plate": {"type": "Sequence", "default_value": default}}}
+        assert shape.declared_parameters(section)[0]["default_value"] == {
+            "path": "/show/plate/frame_####.exr",
+            "format": "exr",
+            "first": 1,
+            "last": 1,
+        }
 
     @pytest.mark.parametrize(("engine_type", "expected"), [("ImageUrlArtifact", None), ("list[ImageUrlArtifact]", [])])
     def test_a_default_with_no_host_form_is_empty(self, engine_type: str, expected: Any) -> None:
@@ -150,7 +153,7 @@ class TestDeclaredParameters:
 
     @pytest.mark.parametrize(
         ("engine_type", "expected"),
-        [("list[ImageUrlArtifact]", True), ("Sequence", True), ("ImageUrlArtifact", False), ("any", None)],
+        [("list[ImageUrlArtifact]", True), ("Sequence", False), ("ImageUrlArtifact", False), ("any", None)],
     )
     def test_list_cardinality_is_declared(self, engine_type: str, expected: bool | None) -> None:
         section = {"Start Flow": {"p": {"type": engine_type}}}
@@ -171,26 +174,26 @@ class TestDeclaredParameters:
         assert shape.declared_parameters(section) == []
 
 
-class TestInputParameterIds:
-    def test_only_input_side_data_parameters_are_listed(self) -> None:
-        assert shape.input_parameter_ids({"workflow_shape": SHAPE}) == {
-            ("Start Flow", "topic"),
-            ("Start Flow", "plate"),
+class TestInputParameterTypes:
+    def test_only_input_side_data_parameters_are_listed_with_their_engine_type(self) -> None:
+        assert shape.input_parameter_types({"workflow_shape": SHAPE}) == {
+            ("Start Flow", "topic"): "str",
+            ("Start Flow", "plate"): "ImageUrlArtifact",
         }
 
     def test_a_workflow_with_no_shape_allows_nothing(self) -> None:
-        assert shape.input_parameter_ids({}) == set()
+        assert shape.input_parameter_types({}) == {}
 
-    def test_identity_is_read_without_normalizing_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_types_are_read_without_normalizing_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Normalizing a macro-templated default issues an engine request this caller discards."""
 
         def explode(*_args: Any, **_kwargs: Any) -> Any:
-            msg = "input_parameter_ids must not normalize defaults; it needs identity only"
+            msg = "input_parameter_types must not normalize defaults; it needs identity and type only"
             raise AssertionError(msg)
 
         monkeypatch.setattr(shape, "normalize_value", explode)
 
-        assert shape.input_parameter_ids({"workflow_shape": SHAPE})
+        assert shape.input_parameter_types({"workflow_shape": SHAPE})
 
 
 class TestIsRunnable:

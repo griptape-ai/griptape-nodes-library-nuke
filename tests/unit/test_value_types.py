@@ -41,20 +41,24 @@ def _unresolvable_macros(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(value_types, "GriptapeNodes", RefusingEngine)
 
 
-def _sequence(*paths: str) -> Sequence:
+def _sequence(
+    pattern: str = "frame_####.png", *, directory: str = "/show/plate", frames: tuple[int, ...] = (1001, 1002)
+) -> Sequence:
+    """Shaped like a scan result: ``pattern`` is a filename and ``directory`` holds it."""
     return Sequence(
         entries=[
-            SequenceEntry(number=number, padded_number=f"{number:04d}", path=path)
-            for number, path in enumerate(paths, start=1001)
+            SequenceEntry(number=number, padded_number=f"{number:04d}", path=f"{directory}/frame_{number:04d}.png")
+            for number in frames
         ],
-        first=1001,
-        last=1000 + len(paths),
-        discovered_first=1001,
-        discovered_last=1000 + len(paths),
-        padding=4,
-        pattern="/show/plate/frame_####.png",
-        directory="/show/plate",
+        first=frames[0] if frames else 0,
+        last=frames[-1] if frames else -1,
+        discovered_first=frames[0] if frames else 0,
+        discovered_last=frames[-1] if frames else -1,
+        padding=4 if frames else 0,
+        pattern=pattern if frames else "",
+        directory=directory if frames else "",
         policy=MissingItemPolicy.SKIP,
+        present_numbers=set(frames),
     )
 
 
@@ -95,7 +99,8 @@ def test_engine_type_names_map_into_the_closed_set(engine_type: str | None, expe
         ("list", True),
         ("list[ImageUrlArtifact]", True),
         ("list[int]", True),
-        ("Sequence", True),
+        ("list[Sequence]", True),
+        ("Sequence", False),
         ("ImageSequenceArtifact", True),
         ("ListArtifact", True),
         ("ImageUrlArtifact", False),
@@ -112,9 +117,17 @@ def test_list_cardinality_is_read_from_the_declared_type(engine_type: str | None
 
 
 @pytest.mark.parametrize(
+    ("engine_type", "expected"),
+    [("Sequence", True), ("list[Sequence]", True), ("ImageSequenceArtifact", False), ("str", False), (None, False)],
+)
+def test_a_sequence_parameter_is_read_from_the_declared_type(engine_type: str | None, expected: bool) -> None:
+    assert value_types.is_sequence_type(engine_type) is expected
+
+
+@pytest.mark.parametrize(
     ("declared", "value"),
     [
-        ("Sequence", _sequence("/show/plate/frame_1001.png", "/show/plate/frame_1002.png")),
+        ("Sequence", _sequence()),
         ("list[ImageUrlArtifact]", [ImageUrlArtifact("/x/a.exr"), ImageUrlArtifact("/x/b.exr")]),
         ("list[int]", [1, 2, 3]),
         ("ImageUrlArtifact", "/x/render.png"),
@@ -208,7 +221,7 @@ class TestDescriptorShape:
 
     def test_a_media_entry_carries_path_and_format(self) -> None:
         descriptor = value_types.normalize_value("/mnt/show/plate.exr", "ImageUrlArtifact")
-        assert descriptor["value"] == {"path": "/mnt/show/plate.exr", "format": "exr"}
+        assert descriptor["value"] == {"path": "/mnt/show/plate.exr", "format": "exr", "first": None, "last": None}
 
     def test_engine_type_is_carried_for_diagnostics(self) -> None:
         descriptor = value_types.normalize_value(ImageUrlArtifact("/a/b.png"), "ImageUrlArtifact")
@@ -234,11 +247,11 @@ class TestCardinality:
 
     def test_a_list_parameter_carries_an_array_even_for_one_item(self) -> None:
         descriptor = value_types.normalize_value([ImageUrlArtifact("/a/one.png")], "list[ImageUrlArtifact]")
-        assert descriptor["value"] == [{"path": "/a/one.png", "format": "png"}]
+        assert descriptor["value"] == [{"path": "/a/one.png", "format": "png", "first": None, "last": None}]
 
     def test_a_single_value_on_a_list_parameter_is_wrapped(self) -> None:
         descriptor = value_types.normalize_value(ImageUrlArtifact("/a/one.png"), "list[ImageUrlArtifact]")
-        assert descriptor["value"] == [{"path": "/a/one.png", "format": "png"}]
+        assert descriptor["value"] == [{"path": "/a/one.png", "format": "png", "first": None, "last": None}]
 
     @pytest.mark.parametrize("unset", [None, ""])
     def test_an_unset_list_parameter_is_an_empty_array(self, unset: Any) -> None:
@@ -260,8 +273,15 @@ class TestCardinality:
             value_types.normalize_value(["/a/one.png", "/a/two.png"], "ImageUrlArtifact")
 
     def test_a_wildcard_takes_its_shape_from_the_value(self) -> None:
-        assert value_types.normalize_value("/a/one.png", "any")["value"] == {"path": "/a/one.png", "format": "png"}
-        assert value_types.normalize_value(["/a/one.png"], "any")["value"] == [{"path": "/a/one.png", "format": "png"}]
+        assert value_types.normalize_value("/a/one.png", "any")["value"] == {
+            "path": "/a/one.png",
+            "format": "png",
+            "first": None,
+            "last": None,
+        }
+        assert value_types.normalize_value(["/a/one.png"], "any")["value"] == [
+            {"path": "/a/one.png", "format": "png", "first": None, "last": None}
+        ]
 
     def test_a_nested_list_is_unrepresentable(self) -> None:
         with pytest.raises(UnrepresentableValueError, match="nested"):
@@ -274,19 +294,6 @@ class TestLists:
         descriptor = value_types.normalize_value(frames, "ListArtifact")
         assert descriptor["value_type"] == ValueType.IMAGE
         assert [entry["path"] for entry in descriptor["value"]] == [f"/x/frame.{n:04d}.exr" for n in (1, 2, 3)]
-
-    @pytest.mark.parametrize("serialize", [False, True])
-    def test_a_sequence_carries_every_frame(self, serialize: bool) -> None:
-        sequence = _sequence("/show/plate/frame_1001.png", "/show/plate/frame_1002.png")
-        value = safe_unstructure(sequence) if serialize else sequence
-
-        descriptor = value_types.normalize_value(value, "Sequence")
-
-        assert descriptor["value_type"] == ValueType.IMAGE
-        assert descriptor["value"] == [
-            {"path": "/show/plate/frame_1001.png", "format": "png"},
-            {"path": "/show/plate/frame_1002.png", "format": "png"},
-        ]
 
     def test_a_list_of_images_and_movies_degrades_to_files(self) -> None:
         mixed = [ImageUrlArtifact("/x/a.png"), VideoUrlArtifact("/x/b.mov")]
@@ -302,6 +309,49 @@ class TestLists:
             "value": [],
             "engine_type": "list",
         }
+
+
+class TestSequences:
+    """A Read takes one pattern and a range, so a sequence arrives as one entry, not one per frame."""
+
+    @pytest.mark.parametrize("serialize", [False, True])
+    def test_a_sequence_is_one_entry_with_its_frame_range(self, serialize: bool) -> None:
+        value = safe_unstructure(_sequence()) if serialize else _sequence()
+
+        descriptor = value_types.normalize_value(value, "Sequence")
+
+        assert descriptor == {
+            "value_type": ValueType.IMAGE,
+            "value": {"path": "/show/plate/frame_####.png", "format": "png", "first": 1001, "last": 1002},
+            "engine_type": "Sequence",
+        }
+
+    @pytest.mark.parametrize("pattern", ["frame_####.png", "frame_%04d.png", "frame_@@@@.png", "frame_$F4.png"])
+    def test_a_frame_token_is_written_as_hashes(self, pattern: str) -> None:
+        """Nuke reads no `@` or `$F` token, and `#` is the one form this protocol reports."""
+        descriptor = value_types.normalize_value(_sequence(pattern), "Sequence")
+        assert descriptor["value"]["path"] == "/show/plate/frame_####.png"
+
+    def test_an_empty_scan_is_unset(self) -> None:
+        descriptor = value_types.normalize_value(_sequence(frames=()), "Sequence")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert descriptor["value"] is None
+
+    def test_a_list_of_sequences_is_one_entry_each(self) -> None:
+        split = [_sequence(frames=(1, 2)), _sequence(frames=(5, 9))]
+
+        descriptor = value_types.normalize_value(split, "list[Sequence]")
+
+        assert [(entry["first"], entry["last"]) for entry in descriptor["value"]] == [(1, 2), (5, 9)]
+
+    def test_a_sequence_on_a_wildcard_is_one_value(self) -> None:
+        descriptor = value_types.normalize_value(_sequence(), "any")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert descriptor["value"]["first"] == 1001
+
+    def test_a_sequence_with_no_directory_is_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="not a local path"):
+            value_types.normalize_value(_sequence(directory=""), "Sequence")
 
 
 class TestLocators:
@@ -407,7 +457,7 @@ class TestSerializedArtifacts:
 
     def test_a_serialized_artifact_keeps_its_path(self) -> None:
         descriptor = value_types.normalize_value(self.SERIALIZED, "ImageUrlArtifact")
-        assert descriptor["value"] == {"path": "/show/render.png", "format": "png"}
+        assert descriptor["value"] == {"path": "/show/render.png", "format": "png", "first": None, "last": None}
 
     def test_the_dicts_own_type_is_reported(self) -> None:
         assert value_types.normalize_value(self.SERIALIZED)["engine_type"] == "ImageUrlArtifact"
@@ -424,6 +474,10 @@ class TestEngineValue:
 
     def test_a_media_entry_becomes_its_path(self) -> None:
         assert value_types.engine_value({"path": "/a/b.png", "format": "png"}) == "/a/b.png"
+
+    def test_a_sequence_entry_becomes_its_pattern(self) -> None:
+        entry = {"path": "/a/frame_####.png", "format": "png", "first": 1001, "last": 1002}
+        assert value_types.engine_value(entry) == "/a/frame_####.png"
 
     def test_a_list_of_entries_becomes_a_list_of_paths(self) -> None:
         entries = [{"path": "/a/1.png", "format": "png"}, {"path": "/a/2.png", "format": None}]

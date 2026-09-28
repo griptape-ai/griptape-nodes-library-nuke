@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from griptape_nodes.retained_mode.events.os_events import ScanSequencesRequest, ScanSequencesResultSuccess
-from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest, SetParameterValueRequest
+from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest
 from griptape_nodes.retained_mode.events.workflow_events import SaveWorkflowRequest, SaveWorkflowResultSuccess
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
@@ -70,14 +69,6 @@ async def _outputs_after_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     frames.mkdir()
     for number in (1001, 1002):
         (frames / f"frame_{number}.png").write_bytes(b"x")
-    scanned = GriptapeNodes.handle_request(ScanSequencesRequest(path=str(frames / "frame_####.png")))
-    assert isinstance(scanned, ScanSequencesResultSuccess), scanned
-    # A host has no Sequence to send, so the scanned one is set engine-side, as a node output would be.
-    result = GriptapeNodes.handle_request(
-        SetParameterValueRequest(node_name="Start", parameter_name="plate", value=scanned.sequences[0])  # pyright: ignore[reportArgumentType]
-    )
-    assert result.succeeded(), result
-
     applied = await handle_set_parameter_values(
         NukeSetParameterValuesRequest(
             inputs={
@@ -85,6 +76,7 @@ async def _outputs_after_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
                     "image": {"path": str(frames / "frame_1001.png"), "format": "png"},
                     "images": [str(frames / "frame_1001.png"), str(frames / "frame_1002.png")],
                     "seeds": [42, 43],
+                    "plate": {"path": str(frames / "frame_####.png"), "first": 1001, "last": 1002},
                 }
             }
         )
@@ -108,7 +100,12 @@ async def test_values_come_back_single_or_as_an_array_by_declaration(
     outputs = await _outputs_after_run(tmp_path, monkeypatch)
     frames = str(outputs["frames"]).replace("\\", "/")
 
-    assert outputs["image"]["value"] == {"path": f"{frames}/frame_1001.png", "format": "png"}
+    assert outputs["image"]["value"] == {
+        "path": f"{frames}/frame_1001.png",
+        "format": "png",
+        "first": None,
+        "last": None,
+    }
     assert outputs["images"]["value_type"] == ValueType.IMAGE
     assert [entry["path"] for entry in outputs["images"]["value"]] == [
         f"{frames}/frame_1001.png",
@@ -118,12 +115,14 @@ async def test_values_come_back_single_or_as_an_array_by_declaration(
     assert outputs["was_successful"]["value"] is True
 
 
-async def test_a_scanned_sequence_carries_every_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_sequence_set_as_a_pattern_comes_back_as_one_ranged_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     outputs = await _outputs_after_run(tmp_path, monkeypatch)
     frames = str(outputs["frames"]).replace("\\", "/")
 
-    assert outputs["plate"]["value_type"] == ValueType.IMAGE
-    assert [entry["path"] for entry in outputs["plate"]["value"]] == [
-        f"{frames}/frame_1001.png",
-        f"{frames}/frame_1002.png",
-    ]
+    assert outputs["plate"] == {
+        "value_type": ValueType.IMAGE,
+        "value": {"path": f"{frames}/frame_####.png", "format": "png", "first": 1001, "last": 1002},
+        "engine_type": "Sequence",
+    }

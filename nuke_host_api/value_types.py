@@ -54,7 +54,13 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
 # Strip the engine's ``list[T]`` wrapper before mapping the element type.
 _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
 
-_LIST_ENGINE_TYPES = frozenset({"list", "Sequence", "ImageSequenceArtifact", "ListArtifact"})
+SEQUENCE_ENGINE_TYPE = "Sequence"
+
+# ImageSequenceArtifact predates the engine's Sequence and holds bare frame paths with no pattern.
+_LIST_ENGINE_TYPES = frozenset({"list", "ImageSequenceArtifact", "ListArtifact"})
+
+# Every frame token the engine's scanner accepts. Nuke reads only `#` and `%0Nd`.
+_FRAME_TOKEN = re.compile(r"#+|%0?\d*d|@+|\$F\d*")
 
 _WILDCARD_ENGINE_TYPES = frozenset({"any", "all"})
 
@@ -63,7 +69,7 @@ _BYTE_ARTIFACT_TYPES = frozenset({"BlobArtifact", "ImageArtifact", "AudioArtifac
 
 _SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
 
-MEDIA_ENTRY_FIELDS = frozenset({"path", "format"})
+MEDIA_ENTRY_FIELDS = frozenset({"path", "format", "first", "last"})
 
 
 class UnrepresentableValueError(ValueError):
@@ -92,6 +98,14 @@ def is_list_type(engine_type: str | None) -> bool | None:
     if not engine_type or engine_type.lower() in _WILDCARD_ENGINE_TYPES:
         return None
     return engine_type in _LIST_ENGINE_TYPES or _LIST_TYPE.match(engine_type) is not None
+
+
+def is_sequence_type(engine_type: str | None) -> bool:
+    """True for a declared ``Sequence`` or a list of them."""
+    if not engine_type:
+        return False
+    list_match = _LIST_TYPE.match(engine_type)
+    return (list_match.group(1) if list_match else engine_type) == SEQUENCE_ENGINE_TYPE
 
 
 def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict[str, Any]:
@@ -137,6 +151,8 @@ def _descriptor(value_type: str, value: Any, engine_type: str) -> dict[str, Any]
 
 
 def _engine_type(value: Any, plain: Any, declared_engine_type: str | None) -> str:
+    if isinstance(plain, dict) and _is_sequence(plain):
+        return SEQUENCE_ENGINE_TYPE
     if isinstance(plain, dict):
         return str(plain.get("type") or declared_engine_type or "dict")
     return type(value).__name__
@@ -147,9 +163,6 @@ def _list_items(plain: Any) -> list[Any] | None:
         return list(plain)
     if not isinstance(plain, dict):
         return None
-    entries = plain.get("entries")
-    if isinstance(entries, list) and "pattern" in plain:
-        return [entry.get("path") if isinstance(entry, dict) else entry for entry in entries]
     inner = plain.get("value")
     if plain.get("type") and isinstance(inner, list):
         return list(inner)
@@ -181,6 +194,8 @@ def _normalize_item(item: Any, declared_engine_type: str | None) -> tuple[str | 
         return _numeric_value_type(item, declared_engine_type), item
     if isinstance(item, str):
         return _normalize_string(item, declared_engine_type)
+    if isinstance(item, dict) and _is_sequence(item):
+        return _normalize_sequence(item, declared_engine_type)
     if isinstance(item, dict):
         return _normalize_artifact_dict(item, declared_engine_type)
     if isinstance(item, (list, tuple)):
@@ -195,6 +210,27 @@ def _numeric_value_type(value: int | float, declared_engine_type: str | None) ->
     if isinstance(value, float) or value_type_for_engine_type(declared_engine_type) == ValueType.FLOAT:
         return ValueType.FLOAT
     return ValueType.INT
+
+
+def _is_sequence(value: dict[str, Any]) -> bool:
+    return "pattern" in value and "entries" in value
+
+
+def _normalize_sequence(value: dict[str, Any], declared_engine_type: str | None) -> tuple[str | None, Any]:
+    """One entry for the whole sequence, so a host builds one Read rather than one per frame."""
+    pattern = value.get("pattern")
+    # An empty scan result has no pattern and no entries.
+    if not pattern or not value.get("entries"):
+        return None, None
+    padding = "#" * max(value.get("padding") or 0, 1)
+    filename = _FRAME_TOKEN.sub(padding, str(pattern), count=1)
+    directory = value.get("directory")
+    path = f"{directory}/{filename}" if directory else filename
+    value_type, entry = _normalize_string(path, declared_engine_type)
+    if not isinstance(entry, dict):
+        msg = f"It holds a sequence at '{path}', which is not a local path."
+        raise UnrepresentableValueError(msg)
+    return value_type, {**entry, "first": value.get("first"), "last": value.get("last")}
 
 
 def _normalize_artifact_dict(value: dict[str, Any], declared_engine_type: str | None) -> tuple[str | None, Any]:
@@ -255,7 +291,7 @@ def _path_entry(path: str, declared_value_type: str) -> tuple[str, dict[str, Any
         value_type = ValueType.MOVIE
     else:
         value_type = ValueType.FILE
-    return value_type, {"path": path, "format": extension}
+    return value_type, {"path": path, "format": extension, "first": None, "last": None}
 
 
 def _extension_of(locator: str) -> str | None:

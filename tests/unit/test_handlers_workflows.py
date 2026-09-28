@@ -146,4 +146,4 @@ async def test_describe_lists_the_same_parameters_execute_will_accept(monkeypatc
 
     assert isinstance(result, NukeDescribeWorkflowResultSuccess)
     described = {(declared["node"], declared["parameter"]) for declared in result.inputs}
-    assert described == shape.input_parameter_ids({"workflow_shape": SHAPE})
+    assert described == set(shape.input_parameter_types({"workflow_shape": SHAPE}))

@@ -10,6 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence, SequenceEntry
+from griptape_nodes.retained_mode.events.os_events import (
+    ScanSequencesRequest,
+    ScanSequencesResultFailure,
+    ScanSequencesResultSuccess,
+    SequenceScanFailureReason,
+)
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultFailure,
@@ -133,7 +140,7 @@ class TestApplyInputs:
         use_engine(monkeypatch, {SetParameterValueRequest: respond})
 
         applied, rejected = await parameter_values.apply_inputs(
-            {"Node A": {"good": 1, "bad": "nope"}}, {("Node A", "good"), ("Node A", "bad")}
+            {"Node A": {"good": 1, "bad": "nope"}}, {("Node A", "good"): "int", ("Node A", "bad"): "int"}
         )
 
         assert applied == [{"node": "Node A", "parameter": "good"}]
@@ -152,7 +159,8 @@ class TestApplyInputs:
         )
 
         await parameter_values.apply_inputs(
-            {"Start Flow": {"plate": {"path": "/show/plate.exr", "format": "exr"}}}, {("Start Flow", "plate")}
+            {"Start Flow": {"plate": {"path": "/show/plate.exr", "format": "exr", "first": None, "last": None}}},
+            {("Start Flow", "plate"): "ImageUrlArtifact"},
         )
 
         assert [request.value for request in engine_fake.requests] == ["/show/plate.exr"]
@@ -162,7 +170,7 @@ class TestApplyInputs:
     ) -> None:
         engine_fake = use_engine(monkeypatch, {})
 
-        applied, rejected = await parameter_values.apply_inputs({"Node A": "not a dict"}, {("Node A", "good")})  # type: ignore[arg-type]
+        applied, rejected = await parameter_values.apply_inputs({"Node A": "not a dict"}, {("Node A", "good"): "int"})  # type: ignore[arg-type]
 
         assert applied == []
         assert rejected == [{"node": "Node A", "parameter": "*", "reason": "Expected an object of parameters."}]
@@ -173,13 +181,137 @@ class TestApplyInputs:
     ) -> None:
         engine_fake = use_engine(monkeypatch, {})
 
-        applied, rejected = await parameter_values.apply_inputs({"Node A": {"secret": 1}}, set())
+        applied, rejected = await parameter_values.apply_inputs({"Node A": {"secret": 1}}, {})
 
         assert applied == []
         assert rejected == [
             {"node": "Node A", "parameter": "secret", "reason": "Not a declared input parameter of this workflow."}
         ]
         assert engine_fake.requests == []
+
+
+class TestApplySequenceInputs:
+    """A host holds no Sequence, so the path and range it read are rescanned into one."""
+
+    PLATE = {("Start Flow", "plate"): "Sequence"}
+
+    @staticmethod
+    def _scanned(*, has_entries: bool = True) -> ScanSequencesResultSuccess:
+        sequence = Sequence(
+            entries=[SequenceEntry(number=1001, padded_number="1001", path="/show/plate/frame_1001.png")]
+            if has_entries
+            else [],
+            first=1001,
+            last=1002,
+            discovered_first=1001,
+            discovered_last=1002,
+            padding=4,
+            pattern="frame_####.png",
+            directory="/show/plate",
+            policy=MissingItemPolicy.SKIP,
+        )
+        return ScanSequencesResultSuccess(
+            sequences=[sequence],
+            has_entries=has_entries,
+            directory_had_matching_files=has_entries,
+            discovered_first=1001,
+            discovered_last=1002,
+            result_details="scanned",
+        )
+
+    @staticmethod
+    def _engine(monkeypatch: pytest.MonkeyPatch, scan: Any) -> Any:
+        return use_engine(
+            monkeypatch,
+            {
+                ScanSequencesRequest: scan,
+                SetParameterValueRequest: lambda req: SetParameterValueResultSuccess(
+                    finalized_value=req.value, data_type="Sequence", result_details="set"
+                ),
+            },
+        )
+
+    async def test_an_entry_a_host_read_back_is_rescanned_over_its_range(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        scanned = self._scanned()
+        engine_fake = self._engine(monkeypatch, scanned)
+        entry = {"path": "/show/plate/frame_####.png", "format": "png", "first": 1001, "last": 1002}
+
+        applied, rejected = await parameter_values.apply_inputs({"Start Flow": {"plate": entry}}, self.PLATE)
+
+        scan, set_value = engine_fake.requests
+        assert (scan.path, scan.start_number, scan.end_number) == ("/show/plate/frame_####.png", 1001, 1002)
+        assert scan.policy == MissingItemPolicy.SKIP
+        assert set_value.value is scanned.sequences[0]
+        assert (applied, rejected) == ([{"node": "Start Flow", "parameter": "plate"}], [])
+
+    async def test_a_bare_pattern_is_rescanned_over_every_frame(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine_fake = self._engine(monkeypatch, self._scanned())
+
+        await parameter_values.apply_inputs({"Start Flow": {"plate": "/show/plate/frame_####.png"}}, self.PLATE)
+
+        scan = engine_fake.requests[0]
+        assert (scan.path, scan.start_number, scan.end_number) == ("/show/plate/frame_####.png", None, None)
+
+    @pytest.mark.parametrize("unset", [None, ""])
+    async def test_an_unset_sequence_is_set_without_a_scan(self, monkeypatch: pytest.MonkeyPatch, unset: Any) -> None:
+        engine_fake = self._engine(monkeypatch, self._scanned())
+
+        await parameter_values.apply_inputs({"Start Flow": {"plate": unset}}, self.PLATE)
+
+        assert [type(request) for request in engine_fake.requests] == [SetParameterValueRequest]
+        assert engine_fake.requests[0].value is None
+
+    async def test_a_list_parameter_scans_each_entry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine_fake = self._engine(monkeypatch, self._scanned())
+        entries = [{"path": "/a/x_####.png", "first": 1, "last": 2}, {"path": "/a/y_####.png"}]
+
+        await parameter_values.apply_inputs(
+            {"Start Flow": {"plates": entries}}, {("Start Flow", "plates"): "list[Sequence]"}
+        )
+
+        scans = [request.path for request in engine_fake.requests if isinstance(request, ScanSequencesRequest)]
+        assert scans == ["/a/x_####.png", "/a/y_####.png"]
+        assert len(engine_fake.requests[-1].value) == 2
+
+    @pytest.mark.parametrize(
+        ("value", "reason"),
+        [
+            ({"format": "png"}, "media entry or a path"),
+            (7, "media entry or a path"),
+            ({"path": "/a/x_####.png", "first": "1001"}, "whole numbers"),
+            ({"path": "/a/x_####.png", "last": True}, "whole numbers"),
+        ],
+    )
+    async def test_a_malformed_sequence_is_rejected_without_a_scan(
+        self, monkeypatch: pytest.MonkeyPatch, value: Any, reason: str
+    ) -> None:
+        engine_fake = self._engine(monkeypatch, self._scanned())
+
+        applied, rejected = await parameter_values.apply_inputs({"Start Flow": {"plate": value}}, self.PLATE)
+
+        assert applied == []
+        assert reason in rejected[0]["reason"]
+        assert engine_fake.requests == []
+
+    async def test_a_scan_that_finds_no_frames_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine_fake = self._engine(monkeypatch, self._scanned(has_entries=False))
+
+        _, rejected = await parameter_values.apply_inputs({"Start Flow": {"plate": "/a/x_####.png"}}, self.PLATE)
+
+        assert rejected == [
+            {"node": "Start Flow", "parameter": "plate", "reason": "No frames found at '/a/x_####.png'."}
+        ]
+        assert not any(isinstance(request, SetParameterValueRequest) for request in engine_fake.requests)
+
+    async def test_a_scan_the_engine_refuses_is_rejected_with_its_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        refusal = ScanSequencesResultFailure(
+            failure_reason=SequenceScanFailureReason.INVALID_TEMPLATE, result_details="two frame tokens"
+        )
+        self._engine(monkeypatch, refusal)
+
+        _, rejected = await parameter_values.apply_inputs({"Start Flow": {"plate": "/a/x_##_##.png"}}, self.PLATE)
+
+        assert rejected[0]["reason"] == "two frame tokens"
 
 
 class TestUnaddressableInputsReason:

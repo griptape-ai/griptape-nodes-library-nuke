@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
+from griptape_nodes.common.sequences.models import MissingItemPolicy
+from griptape_nodes.retained_mode.events.os_events import ScanSequencesRequest, ScanSequencesResultSuccess
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultSuccess,
@@ -13,7 +15,16 @@ from griptape_nodes.retained_mode.events.parameter_events import (
 
 from nuke_host_api import engine, shape
 from nuke_host_api.protocol import ParameterSection
-from nuke_host_api.value_types import UnrepresentableValueError, engine_value, normalize_value
+from nuke_host_api.value_types import (
+    UnrepresentableValueError,
+    engine_value,
+    is_list_type,
+    is_sequence_type,
+    normalize_value,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Mapping
 
 
 async def read_sections(
@@ -65,7 +76,7 @@ class InputRefusal(NamedTuple):
 def unaddressable_inputs_reason(
     loaded_id: str,
     found: engine.WorkflowLookup,
-    declared: set[tuple[str, str]],
+    declared: Collection[tuple[str, str]],
     *,
     no_inputs_remedy: str | None = None,
 ) -> InputRefusal | None:
@@ -103,9 +114,9 @@ def unaddressable_inputs_reason(
 
 
 async def apply_inputs(
-    inputs: dict[str, dict[str, Any]], allowed: set[tuple[str, str]]
+    inputs: dict[str, dict[str, Any]], allowed: Mapping[tuple[str, str], str | None]
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """Forward only declared inputs because the engine accepts parameters on any loaded node."""
+    """Forward only declared inputs, keyed to their engine type, because the engine accepts parameters on any node."""
     applied: list[dict[str, str]] = []
     rejected: list[dict[str, str]] = []
 
@@ -123,8 +134,13 @@ async def apply_inputs(
                     }
                 )
                 continue
+            try:
+                value_for_engine = await _engine_input(value, allowed[(node_name, parameter_name)])
+            except UnrepresentableValueError as e:
+                rejected.append({"node": node_name, "parameter": parameter_name, "reason": str(e)})
+                continue
             attempt = await engine.request(
-                SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=engine_value(value)),
+                SetParameterValueRequest(parameter_name=parameter_name, node_name=node_name, value=value_for_engine),
                 SetParameterValueResultSuccess,
             )
             if attempt.value is None:
@@ -133,3 +149,41 @@ async def apply_inputs(
                 applied.append({"node": node_name, "parameter": parameter_name})
 
     return applied, rejected
+
+
+async def _engine_input(value: Any, engine_type: str | None) -> Any:
+    """Raises UnrepresentableValueError when a sequence input names no frames to rebuild it from."""
+    if not is_sequence_type(engine_type):
+        return engine_value(value)
+    if not is_list_type(engine_type):
+        return await _scan_sequence(value)
+    if value is None or value == "":
+        return []
+    items = value if isinstance(value, list) else [value]
+    return [await _scan_sequence(item) for item in items]
+
+
+async def _scan_sequence(value: Any) -> Any:
+    """Rebuild the engine's Sequence from the path and range a host read, since a host holds no Sequence."""
+    if value is None or value == "":
+        return None
+    entry = value if isinstance(value, dict) else {"path": value}
+    path, first, last = entry.get("path"), entry.get("first"), entry.get("last")
+    if not isinstance(path, str) or not path:
+        msg = "A sequence input takes a media entry or a path."
+        raise UnrepresentableValueError(msg)
+    for bound in (first, last):
+        if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
+            msg = f"A sequence's first and last are whole numbers or null, not {bound!r}."
+            raise UnrepresentableValueError(msg)
+    # SKIP keeps a gap-ridden range as one Sequence, as a Read with first and last would.
+    attempt = await engine.request(
+        ScanSequencesRequest(path=path, policy=MissingItemPolicy.SKIP, start_number=first, end_number=last),
+        ScanSequencesResultSuccess,
+    )
+    if attempt.value is None:
+        raise UnrepresentableValueError(attempt.details)
+    if not attempt.value.has_entries:
+        msg = f"No frames found at '{path}'."
+        raise UnrepresentableValueError(msg)
+    return attempt.value.sequences[0]

@@ -74,7 +74,7 @@ async def _start_loaded_workflow(
         )
 
     found = await engine.lookup_workflow(loaded_id)
-    declared = shape.input_parameter_ids(found.entry) if found.entry is not None else set()
+    declared = shape.input_parameter_types(found.entry) if found.entry is not None else {}
 
     # Shapeless graphs remain executable when no inputs need validation.
     if request.inputs:

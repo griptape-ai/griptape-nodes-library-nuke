@@ -258,7 +258,7 @@ engine as an artist edits a knob rather than only diverging locally until the ne
 `NukeExecuteWorkflowRequest`. Loaded-state-addressed like the read verb, so it takes no
 `workflow_id` either. It takes the same `{node: {parameter: value}}` shape
 `NukeExecuteWorkflowRequest.inputs` does, checks it against the same allow-list, built from
-`shape.input_parameter_ids`, and reports `applied_inputs`/`rejected_inputs` with the same
+`shape.input_parameter_types`, and reports `applied_inputs`/`rejected_inputs` with the same
 wording, so a rejection reads the same way whether a host got it from setting a value live or
 from starting a run. `parameter_values.unaddressable_inputs_reason` and
 `parameter_values.apply_inputs` are the two functions that make that sharing real rather than
@@ -413,8 +413,7 @@ Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `G
 
 ```json
 {"value_type": "GTImage",
- "value": [{"path": "/proj/outputs/frame_1001.png", "format": "png"},
-           {"path": "/proj/outputs/frame_1002.png", "format": "png"}],
+ "value": {"path": "/proj/outputs/frame_####.png", "format": "png", "first": 1001, "last": 1002},
  "engine_type": "Sequence"}
 ```
 
@@ -430,7 +429,8 @@ Representative shapes:
 
 ```
 GTImage    <- ImageUrlArtifact, saved path                 {path, format}
-GTImage    <- "Sequence" or list[ImageUrlArtifact]         [{path, format}, ...]
+GTImage    <- Sequence                                     {path: ".../frame_####.png", first, last}
+GTImage    <- list[ImageUrlArtifact]                       [{path, format}, ...]
 GTMovie    <- VideoUrlArtifact                             {path, format}
 GTImage    <- bare string, absolute path                   {path, format}
 GTText     <- bare string, prose                           "..."
@@ -448,6 +448,9 @@ Rules:
   wherever it writes; this layer makes the shape predictable.
 - **One field.** `value` holds a scalar or a media entry, or an array of them for a list
   parameter. A host reads every type the same way.
+- **A sequence is one entry.** A `Sequence` reports its `####` pattern and frame range, the
+  form a Read node takes, rather than a path per frame. Setting one rescans that pattern
+  through `ScanSequencesRequest`, since a host holds no `Sequence` to send back.
 - **Cardinality is declared.** Describe's `is_list` comes from the declared type, and a value's
   shape follows it, so a host knows the shape before a value arrives. Only a wildcard (`any`)
   lets the value decide.

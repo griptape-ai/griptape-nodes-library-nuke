@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from griptape.artifacts import ImageUrlArtifact
+from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence, SequenceEntry
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroResultFailure,
     GetPathForMacroResultSuccess,
@@ -56,14 +57,24 @@ def resolving_engine(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 def test_a_macro_resolves_to_an_absolute_path(resolving_engine) -> None:  # noqa: ANN001
     resolving_engine("/workspace/outputs/render.png")
     descriptor = value_types.normalize_value("{outputs}/render.png", "ImageUrlArtifact")
-    assert descriptor["value"] == {"path": "/workspace/outputs/render.png", "format": "png"}
+    assert descriptor["value"] == {
+        "path": "/workspace/outputs/render.png",
+        "format": "png",
+        "first": None,
+        "last": None,
+    }
 
 
 def test_a_sequence_slot_is_rendered_as_hash_padding(resolving_engine) -> None:  # noqa: ANN001
     """A Read node expands `####` itself; the engine's default of FAIL would reject every sequence."""
     engine = resolving_engine("/workspace/outputs/render.####.exr")
     descriptor = value_types.normalize_value("{outputs}/render.{###}.exr", "ImageUrlArtifact")
-    assert descriptor["value"] == {"path": "/workspace/outputs/render.####.exr", "format": "exr"}
+    assert descriptor["value"] == {
+        "path": "/workspace/outputs/render.####.exr",
+        "format": "exr",
+        "first": None,
+        "last": None,
+    }
     assert (
         engine.requests[0].unresolved_sequence_slot_behavior == UnresolvedSequenceSlotBehavior.RENDER_SEQUENCE_PATTERN
     )
@@ -106,3 +117,29 @@ def test_a_resolved_macro_path_uses_forward_slashes(resolving_engine) -> None:  
     resolving_engine("C:\\workspace\\outputs\\render.png")
     descriptor = value_types.normalize_value("{outputs}/render.png", "ImageUrlArtifact")
     assert descriptor["value"]["path"] == "C:/workspace/outputs/render.png"
+
+
+def test_a_sequence_in_a_macro_directory_resolves_with_its_pattern(resolving_engine) -> None:  # noqa: ANN001
+    """A scan keeps the caller's macro head on `directory`, so the joined pattern resolves as one path."""
+    engine = resolving_engine("/workspace/inputs/plate/frame_####.png")
+    sequence = Sequence(
+        entries=[SequenceEntry(number=1, padded_number="0001", path="{inputs}/plate/frame_0001.png")],
+        first=1,
+        last=1,
+        discovered_first=1,
+        discovered_last=1,
+        padding=4,
+        pattern="frame_####.png",
+        directory="{inputs}/plate",
+        policy=MissingItemPolicy.SKIP,
+    )
+
+    descriptor = value_types.normalize_value(sequence, "Sequence")
+
+    assert engine.requests[0].parsed_macro.template == "{inputs}/plate/frame_####.png"
+    assert descriptor["value"] == {
+        "path": "/workspace/inputs/plate/frame_####.png",
+        "format": "png",
+        "first": 1,
+        "last": 1,
+    }
