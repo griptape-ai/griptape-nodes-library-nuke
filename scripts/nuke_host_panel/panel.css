@@ -382,6 +382,27 @@ a {
 .bar .fill.unknown {
   background: repeating-linear-gradient(90deg, #3a3a3a 0 8px, #2b2b2b 8px 16px);
 }
+.bar.thin {
+  height: 5px;
+}
+.bar .fill.indeterminate {
+  animation: indeterminate 1.2s ease-in-out infinite;
+  background: var(--amber);
+  width: 30%;
+}
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+.node-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 .nodes {
   display: flex;
   flex-wrap: wrap;
@@ -586,6 +607,9 @@ details.plan .call {
 }
 .ev-node {
   color: #9fce8c;
+}
+.ev-progress {
+  color: #e0c070;
 }
 .ev-value {
   color: #7fb3d5;

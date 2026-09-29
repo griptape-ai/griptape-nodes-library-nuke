@@ -8,6 +8,7 @@
     const failed = st.nodeStates.filter((entry) => entry.state === "failed");
     const denominator = st.runTotal ? st.runTotal.length : 0;
     const ratio = denominator ? Math.min(resolved / denominator, 1) : 0;
+    const running = st.runActive ? st.nodeStates.filter((entry) => entry.state === "running") : [];
     const subflows = st.executionNodeSets.filter((set) => set.length > 0).length - 1;
     const now = Date.now();
     const elapsed = !st.runStartedAt
@@ -72,6 +73,28 @@
                         </div>`
                       : null
                   }
+                  ${running.map((entry) => {
+                    const reported = st.nodeProgress[entry.node] || { progress: null, message: "" };
+                    const known = reported.progress !== null;
+                    return html`
+                      <div class="node-progress">
+                        <div class="stack">
+                          <span>${entry.node}</span>
+                          <span class="muted">${reported.message || "working"}</span>
+                          <span class="grow"></span>
+                          <span class="muted">
+                            ${known ? (reported.progress * 100).toFixed(0) + "%" : "no end reported"}
+                          </span>
+                        </div>
+                        <div class="bar thin">
+                          <div
+                            class=${"fill" + (known ? "" : " indeterminate")}
+                            style=${known ? "width: " + (reported.progress * 100).toFixed(1) + "%" : ""}
+                          ></div>
+                        </div>
+                      </div>
+                    `;
+                  })}
                   <div class="nodes">
                     ${st.nodeStates.map(
                       (entry) => html`

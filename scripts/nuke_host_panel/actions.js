@@ -91,6 +91,7 @@ const Actions = (function () {
       inputValues: flattenValues(loaded.input_values, false),
       outputValues: flattenValues(loaded.output_values, false),
       nodeStates: [],
+      nodeProgress: {},
       execution: null,
       executionNodeSets: [],
       runTotal: null,
@@ -227,6 +228,7 @@ const Actions = (function () {
     if (!state().loaded || state().runActive) return;
     setState({
       nodeStates: [],
+      nodeProgress: {},
       execution: null,
       executionNodeSets: [],
       runTotal: null,

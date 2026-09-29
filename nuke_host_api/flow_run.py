@@ -57,4 +57,5 @@ async def _run(flow_name: str) -> None:
     if started.value is None:
         detail = f"the engine reported flow '{flow_name}' failed. {started.details}"
         logger.error("Nuke host API: %s", detail)
+        execution_bridge.end_all_progress()
         execution_bridge.publish(NukeExecutionStateEvent(state=ExecutionState.FAILED, detail=detail))

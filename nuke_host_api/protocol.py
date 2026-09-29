@@ -31,6 +31,7 @@ class Notification:
     PARAMETER_VALUE = "NukeParameterValueEvent"
     EXECUTION_STATE = "NukeExecutionStateEvent"
     EXECUTION_NODES = "NukeExecutionNodesEvent"
+    NODE_PROGRESS = "NukeNodeProgressEvent"
 
 
 class NodeState:

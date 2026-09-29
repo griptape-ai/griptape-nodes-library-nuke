@@ -184,6 +184,7 @@
 
   function typeClass(payloadType) {
     if (payloadType === NOTIFICATION.NODE_STATE) return "ev-node";
+    if (payloadType === NOTIFICATION.NODE_PROGRESS) return "ev-progress";
     if (payloadType === NOTIFICATION.PARAMETER_VALUE) return "ev-value";
     if (payloadType === NOTIFICATION.EXECUTION_STATE) return "ev-exec";
     if (payloadType === NOTIFICATION.EXECUTION_NODES) return "ev-nodes";

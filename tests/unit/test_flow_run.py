@@ -118,3 +118,18 @@ async def test_a_clean_start_publishes_nothing(monkeypatch: pytest.MonkeyPatch, 
     await settled()
 
     assert _published == []
+
+
+async def test_a_failed_run_ends_all_node_progress(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
+    """A sibling error cancels running data nodes without per-node events, so their next start must still count."""
+    use_engine(
+        monkeypatch,
+        {StartFlowRequest: StartFlowResultFailure(result_details="node failed", validation_exceptions=[])},
+    )
+    bridge = execution_bridge._BRIDGE
+    monkeypatch.setitem(bridge._progress, "Cancelled", execution_bridge._NodeProgress())
+
+    flow_run.start("main")
+    await settled()
+
+    assert "Cancelled" not in bridge._progress

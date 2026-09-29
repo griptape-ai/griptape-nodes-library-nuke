@@ -28,7 +28,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeNodeProgressEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
@@ -1176,8 +1176,8 @@ Preview a project's workspace and validation before activating it with
 
 ## Notifications
 
-Pushed without a request, labelled with `event_topic`. Nine engine execution event types
-collapse into these four notifications.
+Pushed without a request, labelled with `event_topic`. Twelve engine execution event types
+collapse into these five notifications.
 
 ### NukeNodeStateEvent
 
@@ -1254,6 +1254,42 @@ three that carries no outcome.
 
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the parameters
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetParameterValuesRequest`.
+
+### NukeNodeProgressEvent
+
+Progress of a running node. Each event is a full snapshot for that node.
+
+| Field | Type | Notes |
+|---|---|---|
+| `node_name` | `str` | |
+| `progress` | `float \| null` | `0.0` to `1.0`. `null` means the node has reported no known end: show an indeterminate indicator |
+| `message` | `str` | Live status text, empty when none |
+
+```json
+{
+  "node_name": "Flux Image Generation",
+  "progress": null,
+  "message": "RUNNING"
+}
+```
+
+Sent only between a node's `running` and its next state. A node that reports nothing sends
+none, so treat `running` with no progress as indeterminate. Whether a node reports progress is
+not knowable before it runs. Any later `NukeNodeStateEvent` for the node ends its progress.
+
+The execution's terminal `NukeExecutionStateEvent` ends all node progress. Some nodes get no
+terminal node state, such as loop start nodes, so a node still `running` at that point is
+finished. A control node's `running` is sent when it becomes current, possibly before it
+starts executing.
+
+Sources:
+
+| Engine source | Sets |
+|---|---|
+| A parameter with `ui_options.progress_bar`, as the engine's `ProgressBarComponent` publishes | `progress` |
+| The `generation_status` parameter on standard library Griptape Cloud generation nodes (`QUEUED`, `RUNNING`, ...) | `message` |
+
+`progress` can go down when a node restarts its count, such as a loop start node.
 
 ### NukeExecutionNodesEvent
 

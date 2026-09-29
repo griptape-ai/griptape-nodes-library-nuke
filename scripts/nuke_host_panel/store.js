@@ -48,6 +48,8 @@ const Store = (function () {
       lastSet: null,
       execution: null,
       nodeStates: [],
+      // Keyed by node; present only while the node runs and has reported progress.
+      nodeProgress: {},
       executionNodeSets: [],
       runTotal: null,
       runActive: false,

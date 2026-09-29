@@ -21,6 +21,17 @@ const Events = (function () {
       if (index === -1) nodeStates.push(entry);
       else nodeStates[index] = entry;
       patch.nodeStates = nodeStates;
+      // Any state change starts or ends a run of this node, so earlier progress no longer applies.
+      if (state().nodeProgress[body.node_name]) {
+        patch.nodeProgress = Object.assign({}, state().nodeProgress);
+        delete patch.nodeProgress[body.node_name];
+      }
+    } else if (payloadType === NOTIFICATION.NODE_PROGRESS) {
+      patch.nodeProgress = Object.assign({}, state().nodeProgress);
+      patch.nodeProgress[body.node_name] = {
+        progress: typeof body.progress === "number" ? body.progress : null,
+        message: body.message || "",
+      };
     } else if (payloadType === NOTIFICATION.PARAMETER_VALUE) {
       // Route streamed values using the loaded declaration; the engine pushes inputs and outputs.
       const key = paramKey(body.node_name, body.parameter_name);
@@ -44,6 +55,9 @@ const Events = (function () {
       if (isTerminal(body.state)) {
         patch.runActive = false;
         patch.runEndedAt = Date.now();
+        patch.nodeProgress = {};
+        // Loop start and cancelled nodes get no terminal node state; the run end finishes them.
+        patch.nodeStates = state().nodeStates.filter((entry) => entry.state !== "running");
       }
     }
 
@@ -115,6 +129,13 @@ const Events = (function () {
         ((body.value || {}).value_type || "?") +
         "  " +
         paramKey(body.node_name, body.parameter_name)
+      );
+    }
+    if (payloadType === NOTIFICATION.NODE_PROGRESS) {
+      const fraction =
+        typeof body.progress === "number" ? (body.progress * 100).toFixed(0) + "%" : "no end";
+      return (
+        fraction + "  " + (body.node_name || "?") + (body.message ? "  " + body.message : "")
       );
     }
     if (payloadType === NOTIFICATION.EXECUTION_STATE) {

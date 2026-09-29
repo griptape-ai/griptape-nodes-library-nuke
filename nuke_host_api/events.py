@@ -343,6 +343,16 @@ class NukeParameterValueEvent(AppPayload):
 
 @dataclass
 @PayloadRegistry.register
+class NukeNodeProgressEvent(AppPayload):
+    """A snapshot of a running node's progress; ``progress`` is ``None`` when the node reports no known end."""
+
+    node_name: str
+    progress: float | None = None
+    message: str = ""
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeExecutionNodesEvent(AppPayload):
     """Subflow events are not identifiable, and an empty list marks top-level completion."""
 

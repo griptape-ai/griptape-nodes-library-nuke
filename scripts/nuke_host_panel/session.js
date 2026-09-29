@@ -180,7 +180,7 @@ const Session = (function () {
         return;
       }
       const described = describe.result || {};
-      setState({ loaded: described, described, nodeStates: [], execution: null });
+      setState({ loaded: described, described, nodeStates: [], nodeProgress: {}, execution: null });
       noteStep("adopt the workflow the engine holds", "ok", engineHolds);
     }
 

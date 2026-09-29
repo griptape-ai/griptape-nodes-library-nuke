@@ -287,9 +287,16 @@ loaded at all.
 
 ### 5. Node execution changes
 
-Five engine execution events collapse into four states (`unresolved`, `running`,
-`resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add a sixth event
-type without the host learning anything.
+Seven engine execution events collapse into four states (`unresolved`, `running`,
+`resolved`, `failed`) delivered as `NukeNodeStateEvent`, so the engine can add another event
+type without the host learning anything. The engine never emits `NodeStartProcessEvent`, so
+`running` comes from its current-node events.
+
+`NukeNodeProgressEvent` reports progress inside a running node. The engine has no progress
+convention, so the bridge reads two sources: any parameter marked `ui_options.progress_bar`
+(the engine's `ProgressBarComponent`) for a fraction, and the standard library cloud nodes'
+`generation_status` for text. It keeps a snapshot per running node, so a status change
+keeps the last known fraction. The terminal execution state ends all progress.
 
 `NukeExecutionNodesEvent` forwards the engine's node lists for progress tracking. The first
 non-empty list describes the top-level flow. Later lists describe subflows, but contain no

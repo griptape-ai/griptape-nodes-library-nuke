@@ -17,20 +17,27 @@ from griptape_nodes.retained_mode.events.base_events import AppEvent
 from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowCancelledEvent,
     ControlFlowResolvedEvent,
+    CurrentControlNodeEvent,
+    CurrentDataNodeEvent,
     InvolvedNodesEvent,
     NodeErrorEvent,
+    NodeFinishProcessEvent,
+    NodeResolvedEvent,
     NodeStartProcessEvent,
+    NodeUnresolvedEvent,
     ParameterValueUpdateEvent,
 )
+from griptape_nodes.retained_mode.events.parameter_events import AlterElementEvent
 
 from nuke_host_api import execution_bridge
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
+    NukeNodeProgressEvent,
     NukeNodeStateEvent,
     NukeParameterValueEvent,
 )
-from nuke_host_api.execution_bridge import ExecutionBridge
+from nuke_host_api.execution_bridge import PROGRESS_BAR_UI_OPTION, STATUS_PARAMETER, ExecutionBridge
 from nuke_host_api.protocol import ExecutionState, NodeState, ValueType
 from nuke_host_api.value_types import CONTROL_PARAM_TYPE
 from nuke_nodes import nuke_library_advanced
@@ -84,6 +91,12 @@ class TestSubscriptionLifecycle:
         bridge = ExecutionBridge()
         bridge.install()
         assert event_manager.listener_count == len(bridge._subscriptions())
+
+    def test_install_subscribes_the_events_that_mark_a_start_and_carry_progress(
+        self, event_manager: FakeEventManager
+    ) -> None:
+        ExecutionBridge().install()
+        assert {CurrentDataNodeEvent, CurrentControlNodeEvent, AlterElementEvent} <= event_manager.listeners.keys()
 
     def test_uninstall_removes_everything_install_added(self, event_manager: FakeEventManager) -> None:
         """The asymmetry that made a host receive every notification twice, then thrice.
@@ -207,6 +220,22 @@ class TestTranslation:
         assert isinstance(payload, NukeNodeStateEvent)
         assert payload.node_name == "Blur"
         assert payload.state == NodeState.RUNNING
+
+    @pytest.mark.parametrize("event_type", [CurrentDataNodeEvent, CurrentControlNodeEvent])
+    def test_a_current_node_event_becomes_running(self, event_manager: FakeEventManager, event_type: type) -> None:
+        """The engine never emits NodeStartProcessEvent, so these are the only start signal."""
+        bridge = ExecutionBridge()
+        bridge.install()
+        bridge._on_node_start(event_type(node_name="Blur"))
+        payload = event_manager.payloads()[-1]
+        assert payload == NukeNodeStateEvent(node_name="Blur", state=NodeState.RUNNING)
+
+    def test_a_control_node_reported_twice_is_running_once(self, event_manager: FakeEventManager) -> None:
+        bridge = ExecutionBridge()
+        bridge.install()
+        bridge._on_node_start(CurrentControlNodeEvent(node_name="Blur"))
+        bridge._on_node_start(CurrentDataNodeEvent(node_name="Blur"))
+        assert event_manager.payloads() == [NukeNodeStateEvent(node_name="Blur", state=NodeState.RUNNING)]
 
     def test_node_error_carries_the_message(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()
@@ -339,3 +368,188 @@ class TestTranslation:
         bridge.install()
         bridge._on_node_start(NodeStartProcessEvent(node_name="Blur"))
         assert all(isinstance(event, AppEvent) for event in event_manager.emitted)
+
+
+def _altered(
+    node_name: str,
+    parameter_name: str,
+    value: Any,
+    *,
+    progress_bar: bool = False,
+    modification_type: str = "set",
+) -> AlterElementEvent:
+    return AlterElementEvent(
+        element_details={
+            "node_name": node_name,
+            "parameter_name": parameter_name,
+            "value": value,
+            "ui_options": {PROGRESS_BAR_UI_OPTION: True} if progress_bar else {},
+            "modification_type": modification_type,
+        }
+    )
+
+
+class TestNodeProgress:
+    @pytest.fixture
+    def bridge(self, event_manager: FakeEventManager) -> ExecutionBridge:  # noqa: ARG002
+        bridge = ExecutionBridge()
+        bridge.install()
+        return bridge
+
+    @staticmethod
+    def progress_events(event_manager: FakeEventManager) -> list[NukeNodeProgressEvent]:
+        return [payload for payload in event_manager.payloads() if isinstance(payload, NukeNodeProgressEvent)]
+
+    def test_a_progress_bar_value_is_reported_as_a_fraction(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", 0.25, progress_bar=True))
+
+        assert self.progress_events(event_manager) == [
+            NukeNodeProgressEvent(node_name="Upscale", progress=0.25, message="")
+        ]
+
+    def test_a_status_string_is_reported_with_no_known_end(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Flux"))
+        bridge._on_element_altered(_altered("Flux", STATUS_PARAMETER, "RUNNING"))
+
+        assert self.progress_events(event_manager) == [
+            NukeNodeProgressEvent(node_name="Flux", progress=None, message="RUNNING")
+        ]
+
+    def test_a_status_change_keeps_the_known_fraction(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", 0.5, progress_bar=True))
+        bridge._on_element_altered(_altered("Upscale", STATUS_PARAMETER, "RUNNING"))
+
+        assert self.progress_events(event_manager)[-1] == NukeNodeProgressEvent(
+            node_name="Upscale", progress=0.5, message="RUNNING"
+        )
+
+    def test_a_fraction_outside_the_unit_range_is_clamped(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", 1.5, progress_bar=True))
+        bridge._on_element_altered(_altered("Upscale", "progress", -1, progress_bar=True))
+
+        assert [event.progress for event in self.progress_events(event_manager)] == [1.0, 0.0]
+
+    def test_a_non_numeric_progress_bar_value_is_ignored(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", "half", progress_bar=True))
+        bridge._on_element_altered(_altered("Upscale", "progress", True, progress_bar=True))  # noqa: FBT003
+
+        assert self.progress_events(event_manager) == []
+
+    def test_an_ordinary_parameter_is_not_progress(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "scale", 0.5))
+
+        assert self.progress_events(event_manager) == []
+
+    def test_a_node_that_is_not_running_reports_no_progress(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_element_altered(_altered("Upscale", "progress", 0.5, progress_bar=True))
+
+        assert self.progress_events(event_manager) == []
+
+    def test_a_deleted_value_is_not_progress(self, bridge: ExecutionBridge, event_manager: FakeEventManager) -> None:
+        """Clearing outputs emits the stored value, which says nothing about this run."""
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", 0.9, progress_bar=True, modification_type="deleted"))
+
+        assert self.progress_events(event_manager) == []
+
+    @pytest.mark.parametrize(
+        ("handler", "event"),
+        [
+            (
+                "_on_node_resolved",
+                NodeResolvedEvent(node_name="Upscale", node_type="Upscale", parameter_output_values={}),
+            ),
+            ("_on_node_unresolved", NodeUnresolvedEvent(node_name="Upscale")),
+            ("_on_node_finish", NodeFinishProcessEvent(node_name="Upscale")),
+            ("_on_node_error", NodeErrorEvent(node_name="Upscale", error_message="kaboom")),
+        ],
+    )
+    def test_progress_stops_once_the_node_leaves_running(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager, handler: str, event: Any
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        getattr(bridge, handler)(event)
+        bridge._on_element_altered(_altered("Upscale", "progress", 0.5, progress_bar=True))
+
+        assert self.progress_events(event_manager) == []
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_a_non_finite_progress_bar_value_is_ignored(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager, value: float
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", value, progress_bar=True))
+
+        assert self.progress_events(event_manager) == []
+
+    def test_a_non_string_status_is_reported_as_an_empty_message(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Flux"))
+        bridge._on_element_altered(_altered("Flux", STATUS_PARAMETER, 3))
+
+        assert self.progress_events(event_manager) == [
+            NukeNodeProgressEvent(node_name="Flux", progress=None, message="")
+        ]
+
+    @pytest.mark.parametrize(
+        "end_flow",
+        [
+            lambda bridge: bridge._on_flow_cancelled(ControlFlowCancelledEvent(result_details="stopped")),
+            lambda bridge: bridge._on_flow_resolved(
+                ControlFlowResolvedEvent(end_node_name="End Flow", parameter_output_values={})
+            ),
+        ],
+        ids=["cancelled", "resolved"],
+    )
+    def test_the_end_of_the_flow_ends_progress_and_the_next_run_starts_fresh(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager, end_flow: Any
+    ) -> None:
+        """Cancel emits no per-node events and loop start nodes never resolve."""
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Loop Start"))
+        bridge._on_element_altered(_altered("Loop Start", "progress", 0.5, progress_bar=True))
+        end_flow(bridge)
+        bridge._on_element_altered(_altered("Loop Start", "progress", 0.75, progress_bar=True))
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Loop Start"))
+
+        assert [event.progress for event in self.progress_events(event_manager)] == [0.5]
+        running = [
+            payload
+            for payload in event_manager.payloads()
+            if isinstance(payload, NukeNodeStateEvent) and payload.state == NodeState.RUNNING
+        ]
+        assert len(running) == 2
+
+    def test_a_rerun_starts_from_an_empty_snapshot(
+        self, bridge: ExecutionBridge, event_manager: FakeEventManager
+    ) -> None:
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", "progress", 0.5, progress_bar=True))
+        bridge._on_node_resolved(
+            NodeResolvedEvent(node_name="Upscale", node_type="Upscale", parameter_output_values={})
+        )
+        bridge._on_node_start(NodeStartProcessEvent(node_name="Upscale"))
+        bridge._on_element_altered(_altered("Upscale", STATUS_PARAMETER, "QUEUED"))
+
+        assert self.progress_events(event_manager)[-1] == NukeNodeProgressEvent(
+            node_name="Upscale", progress=None, message="QUEUED"
+        )
