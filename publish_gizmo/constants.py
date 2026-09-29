@@ -76,3 +76,12 @@ def versioned_node_name(stem: str, version: int) -> str:
 def versioned_gizmo_glob(stem: str) -> str:
     """Return a glob/``nuke.plugins`` pattern, e.g. ``'my_workflow_v*.gizmo'``."""
     return f"{stem}_v*.gizmo"
+
+
+def menu_label(stem: str) -> str:
+    """Return the Nodes > Griptape entry label for a workflow stem, e.g. ``'My Workflow'``.
+
+    The generated menu.py computes this expression itself -- it runs inside Nuke where
+    publish_gizmo is not importable -- so the two copies are kept honest by a test.
+    """
+    return stem.replace("_", " ").title()

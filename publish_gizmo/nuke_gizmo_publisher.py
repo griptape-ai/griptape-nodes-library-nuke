@@ -43,6 +43,7 @@ from publish_gizmo.constants import (
     GRIPTAPE_RUN_DIR_NAME,
     INIT_MARKER,
     PRESERVED_ON_REPUBLISH,
+    menu_label,
     versioned_gizmo_filename,
 )
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
@@ -154,34 +155,91 @@ class NukeGizmoPublisher:
             logger.info("Gizmo written to: %s", gizmo_path)
 
             # One-time plugin path setup + regenerate menu
-            self._ensure_init_plugin_path(install_dir)
+            first_time_setup = self._ensure_init_plugin_path(install_dir)
             self._regenerate_menu_py(griptape_dir)
 
             self._save_publish_config(gizmo_path, version)
 
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
-            details = f"Gizmo v{version} installed to: {gizmo_path}"
-            if install_dir_created:
-                # A typo'd or accidentally workspace-relative pick now silently becomes a
-                # real directory; saying so is the only thing standing between that and a
-                # gizmo the artist cannot find.
-                details += f"\n\nNote: the install directory did not exist and was created: {install_dir}"
-            if lock_error:
-                # Surface the skipped lock in the publish result, not just the log:
-                # without it the artist running the gizmo is the first to find out.
-                details += (
-                    f"\n\nWarning: dependencies were not pinned ({lock_error}). "
-                    "The gizmo will resolve them on the machine that runs it, which is slower "
-                    "and may pick up different versions. Install uv and re-publish to pin them."
-                )
+            notes = self._build_publish_notes(
+                install_dir=install_dir, install_dir_created=install_dir_created, lock_error=lock_error
+            )
+            next_steps = self._build_next_steps(
+                workflow_stem=workflow_stem,
+                install_dir=install_dir,
+                version=version,
+                first_time_setup=first_time_setup,
+            )
             return PublishWorkflowResultSuccess(
                 published_workflow_file_path=str(gizmo_path),
                 skip_published_workflow_registration=True,
-                result_details=details,
+                # result_details is the CLI/log channel, which has no structured
+                # rendering, so the notes are repeated into it as prose.
+                result_details="\n\n".join([f"Gizmo v{version} installed to: {gizmo_path}", *notes]),
+                metadata={"publish_next_steps": next_steps, "publish_notes": notes},
             )
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
             return PublishWorkflowResultFailure(result_details=f"Failed to publish workflow: {e}")
+
+    # -- Result reporting --
+
+    @staticmethod
+    def _build_next_steps(
+        *,
+        workflow_stem: str,
+        install_dir: Path,
+        version: int,
+        first_time_setup: bool,
+    ) -> list[str]:
+        """Return the ordered steps the artist takes in Nuke after a successful publish."""
+        label = menu_label(workflow_stem)
+        steps = []
+        if first_time_setup:
+            # pluginAddPath lives in init.py, which Nuke reads only at startup, so this
+            # first publish into this install dir is the one case a restart is required.
+            steps.append(
+                "Restart Nuke once. This is the first gizmo published here, and Nuke picks up the new "
+                f"plugin path ({install_dir / 'init.py'}) only at startup. Later publishes to this "
+                "directory don't need a restart."
+            )
+        # Whether the entry is flat or a version submenu can't be known here: the menu
+        # merges this workflow's gizmos across every plugin path Nuke loads, not just
+        # this install dir. So the step names both rather than guessing.
+        steps.append(
+            f"In Nuke, create the node from the Nodes toolbar: Nodes > Griptape > {label}. "
+            f"If it has more than one version, pick v{version} from its submenu. "
+            "The .gizmo is a node class, not a file to open."
+        )
+        steps.append("Fill in the node's Inputs tab, then press Run Workflow on its Run tab.")
+        if not first_time_setup:
+            steps.append(
+                "The menu should update on its own. If it doesn't:\n"
+                "- Menu is there, but this version is missing: run Griptape > Refresh Griptape Gizmos "
+                "from Nuke's menu bar. Network mounts usually need this.\n"
+                "- No Griptape menu at all: that Nuke session started before the first gizmo was "
+                "published here. Restart it once."
+            )
+        return steps
+
+    @staticmethod
+    def _build_publish_notes(*, install_dir: Path, install_dir_created: bool, lock_error: str | None) -> list[str]:
+        """Return caveats about a successful publish that the artist needs to see."""
+        notes = []
+        if install_dir_created:
+            # A typo'd or accidentally workspace-relative pick now silently becomes a
+            # real directory; saying so is the only thing standing between that and a
+            # gizmo the artist cannot find.
+            notes.append(f"The install directory didn't exist, so it was created: {install_dir}")
+        if lock_error:
+            # Surface the skipped lock in the publish result, not just the log:
+            # without it the artist running the gizmo is the first to find out.
+            notes.append(
+                f"Dependencies weren't pinned ({lock_error}). The gizmo will resolve them on whatever "
+                "machine runs it, which is slower and can pick up different versions. Install uv and "
+                "publish again to pin them."
+            )
+        return notes
 
     @staticmethod
     def _overlay_current_values(workflow_shape: dict) -> None:
@@ -630,11 +688,14 @@ class NukeGizmoPublisher:
 
     # -- Plugin registration file writers --
 
-    def _ensure_init_plugin_path(self, install_dir: Path) -> None:
-        """Append a single pluginAddPath for the griptape dir to init.py, once.
+    def _ensure_init_plugin_path(self, install_dir: Path) -> bool:
+        """Append a single pluginAddPath for the griptape dir to init.py, once; True if it wrote it.
 
         Uses a marker comment to detect an existing entry so subsequent
         publishes are no-ops and the user's own init.py content is preserved.
+
+        A True return means this install dir was not wired up before, so Nuke has to be
+        restarted once to read the new init.py -- the menu watcher cannot help there.
         """
         init_path = install_dir / "init.py"
         read_result = GriptapeNodes.handle_request(
@@ -646,7 +707,7 @@ class NukeGizmoPublisher:
             else ""
         )
         if INIT_MARKER in existing:
-            return
+            return False
 
         line = (
             f"import nuke as _nuke, os as _os  {INIT_MARKER}\n"
@@ -661,6 +722,7 @@ class NukeGizmoPublisher:
             logger.error(msg)
             raise TypeError(msg)
         logger.info("init.py updated at: %s", init_path)
+        return True
 
     def _regenerate_menu_py(self, griptape_dir: Path) -> None:
         """Write griptape/menu.py with a dynamic refresh function.
