@@ -32,7 +32,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
-| Execution states | `running`, `completed`, `failed`, `cancelled` |
+| Execution states | `running`, `succeeded`, `failed`, `cancelled` |
 
 Binding rules:
 
@@ -717,10 +717,8 @@ progress and outcome are the notification stream, not this result.
 
 The engine's `StartFlowRequest`, sent with `wait_for_completion=True`, resolves only when the flow
 ends, so the handler detaches it and replies at kickoff. A normal request timeout is enough, and
-the reply itself signals that the run began. The engine's later verdict arrives on the
-notification stream: a validation refusal emits only a `NukeExecutionStateEvent` with
-`state: "failed"`; a mid-run node error emits `completed` followed by `failed`. A clean run gets
-no verdict event.
+the reply itself signals that the run began. The run's verdict arrives later as exactly one
+`NukeExecutionStateEvent`: `succeeded`, `failed`, or `cancelled`.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -750,7 +748,7 @@ the request instead of starting a run that would hand those same values back.
 | `NukeExecuteWorkflowResultSuccess` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The workflow that started. Always the loaded one, so a host that sent no id still learns what it started |
-| `state` | `str` | Always `running`, which says the run started and nothing about its outcome. A failed run's verdict arrives later as `NukeExecutionStateEvent` |
+| `state` | `str` | Always `running`, which says the run started and nothing about its outcome. The verdict arrives later as `NukeExecutionStateEvent` |
 | `applied_inputs` | `list[dict]` | `{node, parameter}` the engine accepted |
 | `rejected_inputs` | `list[dict]` | `{node, parameter, reason}` |
 
@@ -857,13 +855,17 @@ a host polling only for liveness should not pay for it.
 | `active_nodes` | `list[str]` | Nodes currently resolving. Empty in the gap between a started run and the engine's first node |
 | `involved_nodes` | `list[str]` | Nodes in the current execution |
 | `workflow_id` | `str` | Loaded workflow, empty when none |
+| `last_outcome` | `str` | State of the most recent `NukeExecutionStateEvent`: `succeeded`, `failed`, or `cancelled`. Empty before any run ends. While `running` is true it describes the previous run |
+| `last_outcome_detail` | `str` | That event's `detail` |
 
 ```json
 {
   "running": false,
   "active_nodes": [],
   "involved_nodes": [],
-  "workflow_id": "nuke_api_smoke"
+  "workflow_id": "nuke_api_smoke",
+  "last_outcome": "succeeded",
+  "last_outcome_detail": "Workflow finished."
 }
 ```
 
@@ -1217,40 +1219,34 @@ collapse into these four notifications.
 
 ### NukeExecutionStateEvent
 
-Terminal notification.
+The run's verdict. Exactly one per run started with `NukeExecuteWorkflowRequest`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `state` | `str` | `completed` says the flow finished and carries no outcome. `cancelled` ends a cancelled run. `failed` is the engine's verdict on a run `NukeExecuteWorkflowRequest` started (see below). `running` never arrives on this notification: execute's reply is what reports a run as begun |
-| `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node |
-| `detail` | `str` | Human-readable reason |
+| `state` | `str` | `succeeded`, `failed`, or `cancelled`. `running` never arrives on this notification: execute's reply is what reports a run as begun |
+| `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node. Empty when the flow never resolved |
+| `detail` | `str` | Human-readable reason. For `failed`, the engine's error |
 
 ```json
 {
-  "state": "completed",
+  "state": "succeeded",
   "terminal_node": "End Flow",
-  "detail": "The engine reported the flow finished. It did not report an outcome."
+  "detail": "Workflow finished."
 }
 ```
 
-`completed` means only that the engine finished the flow, not that it succeeded. The
-engine's `ControlFlowResolvedEvent` fires on both a clean run and an errored one but carries no
-status. The engine's verdict is its answer to the start `NukeExecuteWorkflowRequest` sent. A
-validation refusal emits only `failed`; a mid-run node error emits `completed` followed by
-`failed`, with the reason in `detail`. A clean run gets no verdict event, and neither does a run
-started from the editor, whose start this library never sent. `NukeGetExecutionStateRequest` keeps reporting
-`running: true` until the verdict, if any, has been published.
+`NukeGetExecutionStateRequest` reports `running: true` until the verdict has been published,
+then carries it as `last_outcome`, so a host that reconnects or misses the notification can
+still read it. Declared outputs are readable with `NukeGetParameterValuesRequest` once the
+verdict is `succeeded`.
 
-For a run started elsewhere, the only failure signal is the live `NukeNodeStateEvent` with
-`state: "failed"`. Neither signal is replayed. `NukeGetExecutionStateRequest` carries running
-state and active/involved nodes, never an outcome; `NukeGetParameterValuesRequest` reads values,
-not outcomes. A disconnected or late host cannot learn that a run failed.
-
-A run can end with two terminal states. `failed` follows `completed` when a node errored, and a
-cancelled run can report `completed` and `cancelled` in either order, because the engine's cancel
-path ends in the same completion event. Let `failed` or `cancelled` replace an earlier
-`completed` for the same run, and never let `completed` replace either: it is the only one of the
-three that carries no outcome.
+A run started from the editor also gets a verdict, but a best-effort one. The engine's
+completion event carries no outcome, so the verdict is `failed` when a node errored since the
+last verdict and `succeeded` otherwise. The engine fires completion before cancellation on its
+cancel path, so an editor run cancelled mid-node can report `succeeded` followed by
+`cancelled`; let `cancelled` replace it. A run started with `NukeExecuteWorkflowRequest` and
+cancelled with `NukeCancelExecutionRequest` reports `cancelled` once. Cancelled from the editor
+instead, it can report `succeeded` then `cancelled` the same way.
 
 Carries no outputs by design. Outputs mean exactly one thing in this protocol: the parameters
 `NukeDescribeWorkflowRequest` declared. Read them with `NukeGetParameterValuesRequest`.

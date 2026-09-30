@@ -315,7 +315,11 @@ const Actions = (function () {
       if (result.running === false && state().runActive) {
         patch.runActive = false;
         patch.runEndedAt = Date.now();
-        setTimeout(() => closeRun(null), DRAIN_GRACE_MS);
+        // The verdict notification may have been missed; the poll carries it too.
+        const verdict = result.last_outcome
+          ? { state: result.last_outcome, detail: result.last_outcome_detail || "" }
+          : null;
+        setTimeout(() => closeRun(verdict), DRAIN_GRACE_MS);
       }
       setState(patch);
     }
@@ -361,14 +365,14 @@ const Actions = (function () {
     const history = state().history.slice();
     const entry = history.find((run) => run.state === "running");
     if (!entry) return;
-    // `execution` preserves a failed or cancelled verdict received during the grace period.
+    // `execution` holds the latest verdict, including a `cancelled` that followed `succeeded`.
     const final = state().execution || terminal;
     const failures = state()
       .nodeStates.filter((node) => node.state === "failed")
       .map((node) => ({ node: node.node, detail: node.detail }));
     Object.assign(entry, {
       endedAt: state().runEndedAt || Date.now(),
-      state: final ? final.state || "completed" : "completed",
+      state: (final && final.state) || "unknown",
       outputs: Object.assign({}, state().outputValues),
       failures,
     });

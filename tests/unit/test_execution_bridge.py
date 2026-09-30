@@ -23,7 +23,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     ParameterValueUpdateEvent,
 )
 
-from nuke_host_api import execution_bridge
+from nuke_host_api import execution_bridge, run_outcome
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
@@ -274,45 +274,53 @@ class TestTranslation:
         )
         assert len(event_manager.payloads()) == before, "execution wiring must not reach a host"
 
-    def test_flow_resolved_reports_the_terminal_node_and_no_values(self, event_manager: FakeEventManager) -> None:
-        """Values are read on demand, not gathered inside a callback.
-
-        The engine asks listeners to stay cheap, and `end_node_name` is whichever node
-        control flow ended on, which is often not a declared output node. Carrying its
-        values here would give "outputs" two meanings.
-        """
+    def test_an_editor_run_that_resolves_cleanly_succeeds_once(self, event_manager: FakeEventManager) -> None:
+        """Values are read on demand, not gathered inside a callback, so the verdict carries none."""
         bridge = ExecutionBridge()
         bridge.install()
         bridge._on_flow_resolved(
             ControlFlowResolvedEvent(end_node_name="Execute Python_1", parameter_output_values={"x": 1})
         )
-        payload = event_manager.payloads()[-1]
-        assert isinstance(payload, NukeExecutionStateEvent)
-        assert payload.state == ExecutionState.COMPLETED
-        assert payload.terminal_node == "Execute Python_1"
-        assert not hasattr(payload, "outputs")
+        verdicts = [p for p in event_manager.payloads() if isinstance(p, NukeExecutionStateEvent)]
+        assert len(verdicts) == 1
+        assert verdicts[0].state == ExecutionState.SUCCEEDED
+        assert verdicts[0].terminal_node == "Execute Python_1"
+        assert not hasattr(verdicts[0], "outputs")
 
-    def test_flow_resolved_never_reports_failed_or_succeeded(self, event_manager: FakeEventManager) -> None:
-        """ControlFlowResolvedEvent fires on both a clean run and an errored one.
-
-        The engine gives this callback no status to report, so it must not guess one,
-        including by inferring from a NodeErrorEvent seen earlier in the same run.
-        """
+    def test_an_editor_run_with_a_node_error_fails_with_its_message(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()
         bridge.install()
         bridge._on_node_error(NodeErrorEvent(node_name="Blur", error_message="kaboom"))
         bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="Blur", parameter_output_values={}))
-        payload = event_manager.payloads()[-1]
-        assert payload.state not in {ExecutionState.FAILED, "succeeded"}
-        assert payload.state == ExecutionState.COMPLETED
+        verdicts = [p for p in event_manager.payloads() if isinstance(p, NukeExecutionStateEvent)]
+        assert [v.state for v in verdicts] == [ExecutionState.FAILED]
+        assert verdicts[0].detail == "kaboom"
 
-    def test_flow_cancelled_reports_cancelled(self, event_manager: FakeEventManager) -> None:
+    def test_a_node_error_does_not_outlive_its_runs_verdict(self, event_manager: FakeEventManager) -> None:
+        bridge = ExecutionBridge()
+        bridge.install()
+        bridge._on_node_error(NodeErrorEvent(node_name="Blur", error_message="kaboom"))
+        bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="Blur", parameter_output_values={}))
+        bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="Blur", parameter_output_values={}))
+        assert event_manager.payloads()[-1].state == ExecutionState.SUCCEEDED
+
+    def test_an_editor_cancel_reports_cancelled(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()
         bridge.install()
         bridge._on_flow_cancelled(ControlFlowCancelledEvent(result_details="user stopped it"))
         payload = event_manager.payloads()[-1]
         assert payload.state == ExecutionState.CANCELLED
         assert "user stopped it" in payload.detail
+
+    def test_a_host_run_leaves_the_verdict_to_its_start(self, event_manager: FakeEventManager) -> None:
+        """The engine's cancel path fires resolved then cancelled; only the start's answer ends a host run."""
+        bridge = ExecutionBridge()
+        bridge.install()
+        run_outcome.begin_host_run()
+        bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
+        bridge._on_flow_cancelled(ControlFlowCancelledEvent())
+        assert not any(isinstance(p, NukeExecutionStateEvent) for p in event_manager.payloads())
+        assert run_outcome.conclude().state == ExecutionState.CANCELLED
 
     def test_involved_nodes_are_forwarded_as_the_progress_denominator(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()

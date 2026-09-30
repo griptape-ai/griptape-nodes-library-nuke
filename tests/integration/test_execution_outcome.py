@@ -1,4 +1,4 @@
-"""A node error reaches the host as a failed event after the kickoff reply; a mid-run cancel does not.
+"""A host-started run reaches the host as exactly one verdict after the kickoff reply.
 
 No Nuke and no engine process: a real engine in-process, driven through the host handlers.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from griptape_nodes.exe_types.node_types import BaseNode
@@ -28,6 +28,9 @@ from tests.detached_run import settled
 
 from .fixtures.canary.canary_workflow_builder import build_start_canary_end_flow
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 DATA_NODE = "Canary"
 
 
@@ -38,19 +41,34 @@ def _data_node() -> BaseNode:
 
 
 @pytest.fixture
-def failures(monkeypatch: pytest.MonkeyPatch) -> list[NukeExecutionStateEvent]:
+def verdicts(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[NukeExecutionStateEvent]]:
     published: list[NukeExecutionStateEvent] = []
 
     def capture(payload: Any) -> None:
-        if isinstance(payload, NukeExecutionStateEvent) and payload.state == ExecutionState.FAILED:
+        if isinstance(payload, NukeExecutionStateEvent):
             published.append(payload)
 
     monkeypatch.setattr(execution_bridge, "publish", capture)
-    return published
+    # The bridge sees the engine's own terminal events, which must not add verdicts.
+    execution_bridge.ensure_installed()
+    yield published
+    execution_bridge.uninstall()
+
+
+async def test_a_clean_run_is_published_as_succeeded(
+    tmp_path: Any, monkeypatch: Any, verdicts: list[NukeExecutionStateEvent]
+) -> None:
+    build_start_canary_end_flow(tmp_path, monkeypatch, file_name="outcome_clean", data_node_name=DATA_NODE)
+
+    result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
+    assert isinstance(result, NukeExecuteWorkflowResultSuccess), result
+
+    await settled()
+    assert [v.state for v in verdicts] == [ExecutionState.SUCCEEDED], verdicts
 
 
 async def test_a_node_error_is_published_as_failed(
-    tmp_path: Any, monkeypatch: Any, failures: list[NukeExecutionStateEvent]
+    tmp_path: Any, monkeypatch: Any, verdicts: list[NukeExecutionStateEvent]
 ) -> None:
     build_start_canary_end_flow(tmp_path, monkeypatch, file_name="outcome_error", data_node_name=DATA_NODE)
     node = _data_node()
@@ -66,12 +84,12 @@ async def test_a_node_error_is_published_as_failed(
     assert result.state == ExecutionState.RUNNING
 
     await settled()
-    assert len(failures) == 1, failures
-    assert "boom from the outcome test" in failures[0].detail
+    assert [v.state for v in verdicts] == [ExecutionState.FAILED], verdicts
+    assert "boom from the outcome test" in verdicts[0].detail
 
 
-async def test_a_mid_run_cancel_publishes_no_failure(
-    tmp_path: Any, monkeypatch: Any, failures: list[NukeExecutionStateEvent]
+async def test_a_mid_run_cancel_is_published_as_cancelled(
+    tmp_path: Any, monkeypatch: Any, verdicts: list[NukeExecutionStateEvent]
 ) -> None:
     build_start_canary_end_flow(tmp_path, monkeypatch, file_name="outcome_cancel", data_node_name=DATA_NODE)
     node = _data_node()
@@ -92,7 +110,6 @@ async def test_a_mid_run_cancel_publishes_no_failure(
 
     result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result
-    assert result.state == ExecutionState.RUNNING
 
     for _ in range(500):
         if started.is_set():
@@ -105,4 +122,4 @@ async def test_a_mid_run_cancel_publishes_no_failure(
     assert node.is_cancellation_requested
 
     await settled()
-    assert failures == []
+    assert [v.state for v in verdicts] == [ExecutionState.CANCELLED], verdicts

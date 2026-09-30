@@ -158,6 +158,8 @@ class NukeGetExecutionStateResultSuccess(WorkflowNotAlteredMixin, ResultPayloadS
     active_nodes: list[str]
     involved_nodes: list[str]
     workflow_id: str = ""
+    last_outcome: str = ""
+    last_outcome_detail: str = ""
 
 
 @dataclass
@@ -352,7 +354,7 @@ class NukeExecutionNodesEvent(AppPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeExecutionStateEvent(AppPayload):
-    """Terminal engine events do not expose declared outputs or execution success."""
+    """One per run; carries no outputs, which are read with NukeGetParameterValuesRequest."""
 
     state: str
     terminal_node: str = ""

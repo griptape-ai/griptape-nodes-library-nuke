@@ -49,10 +49,10 @@ PARAMETER_SECTIONS = (ParameterSection.INPUTS, ParameterSection.OUTPUTS)
 
 
 class ExecutionState:
-    """``COMPLETED`` has no outcome; execute's ``FAILED`` verdict can follow it for the same run."""
+    """``RUNNING`` only on execute's reply; the rest are a run's single verdict."""
 
     RUNNING = "running"
-    COMPLETED = "completed"
+    SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
 

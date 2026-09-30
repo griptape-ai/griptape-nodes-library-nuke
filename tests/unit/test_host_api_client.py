@@ -234,12 +234,12 @@ class TestFrameHandling:
         client, _ = _client(
             [
                 _app_event("NukeNodeStateEvent", node_name="A", state="running"),
-                _app_event("NukeExecutionStateEvent", state="completed"),
+                _app_event("NukeExecutionStateEvent", state="succeeded"),
                 _reply("mine"),
             ]
         )
         client._pump(until_request_id="mine")  # noqa: SLF001
-        assert [event.body["state"] for event in client.of_type("NukeExecutionStateEvent")] == ["completed"]
+        assert [event.body["state"] for event in client.of_type("NukeExecutionStateEvent")] == ["succeeded"]
 
 
 class TestReplyHelpers:

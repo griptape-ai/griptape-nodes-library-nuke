@@ -164,12 +164,14 @@ Without the guard, a host could not tell which run any following notification de
 which one a cancel would stop. `NukeLoadWorkflowRequest` refuses mid-run for the same reason
 and a stronger one: it would discard the running graph. Engine flow state leaves gaps during
 execute preflight and before the engine reports the flow running, so `flow_run` reserves the slot
-before execute's first await and holds it until `StartFlowRequest` resolves.
+before execute's first await and holds it until the run's verdict is published.
 
 The engine's `StartFlowRequest`, sent with `wait_for_completion=True`, resolves only when the flow
-ends, so execute detaches it and replies at kickoff. Progress and outcome use the notification
-stream, and the engine's verdict on a failed run arrives as a `NukeExecutionStateEvent` with
-`state: "failed"`.
+ends, so execute detaches it and replies at kickoff. Progress uses the notification stream.
+`run_outcome` collapses the engine's terminal events into one `NukeExecutionStateEvent`
+(`succeeded`, `failed`, or `cancelled`), published once the start answers. The engine answers the
+start mid-cancel, before it reports the cancel, so the run also waits on any cancel this API
+sent.
 
 Six engine requests plus one per input forwarded to the engine, plus one when
 `unresolve_first` is set, and none of them loads.
@@ -396,9 +398,8 @@ blocks.
 path: a reconnecting host that missed every notification reads what is running from the
 first and what every declared parameter currently holds from the second. Both read straight from
 the engine on every call, holding no cache, which is why neither can drift from the
-engine's own view. Neither recovers a run's outcome. The engine's verdict is pushed once as
-`failed` and never replayed, so a host that misses it or the live `NukeNodeStateEvent` with
-`state: "failed"` cannot learn that the run failed.
+engine's own view. The first also carries the last run's verdict as `last_outcome`, the one
+piece of state the library holds, because the engine keeps no record of how a run ended.
 
 **Outputs have exactly one meaning:** the parameters `NukeDescribeWorkflowRequest` declared.
 The engine's terminal event reports values for whichever node control flow ended on, which

@@ -94,10 +94,6 @@
                             <div class="muted">${entry.detail || "no detail reported"}</div>
                           `,
                         )}
-                          <p class="note">
-                            Node failures appear only in live state events; terminal events still
-                            report <code>completed</code>.
-                          </p>
                         </div>`
                       : null
                   }

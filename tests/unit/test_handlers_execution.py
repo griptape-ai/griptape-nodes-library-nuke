@@ -565,6 +565,24 @@ class TestGetExecutionState:
         assert result.running is True
         assert result.active_nodes == [], "the engine has reported no node yet, and inventing one would be a lie"
 
+    async def test_a_late_host_learns_the_previous_runs_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(
+            monkeypatch,
+            execute_responses(
+                {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])}
+            ),
+        )
+        monkeypatch.setattr(execution_bridge, "publish", lambda payload: None)
+
+        await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        await settled()
+        result = await handle_get_execution_state(NukeGetExecutionStateRequest())
+
+        assert isinstance(result, NukeGetExecutionStateResultSuccess)
+        assert result.running is False
+        assert result.last_outcome == ExecutionState.FAILED
+        assert "validation failed" in result.last_outcome_detail
+
 
 class TestCancelExecution:
     async def test_cancellation_is_requested(self, monkeypatch: pytest.MonkeyPatch) -> None:

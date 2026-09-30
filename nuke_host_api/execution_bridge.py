@@ -19,13 +19,14 @@ from griptape_nodes.retained_mode.events.execution_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
+from nuke_host_api import run_outcome
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
     NukeNodeStateEvent,
     NukeParameterValueEvent,
 )
-from nuke_host_api.protocol import ExecutionState, NodeState
+from nuke_host_api.protocol import NodeState
 from nuke_host_api.value_types import CONTROL_PARAM_TYPE, UnrepresentableValueError, normalize_value
 
 if TYPE_CHECKING:
@@ -111,6 +112,7 @@ class ExecutionBridge:
         self._emit_node_state(event.node_name, NodeState.UNRESOLVED)
 
     def _on_node_error(self, event: NodeErrorEvent) -> None:
+        run_outcome.note_node_error(event.error_message)
         self._emit_node_state(event.node_name, NodeState.FAILED, event.error_message)
 
     def _on_parameter_value(self, event: ParameterValueUpdateEvent) -> None:
@@ -135,18 +137,15 @@ class ExecutionBridge:
         self._emit(NukeExecutionNodesEvent(involved_nodes=list(event.involved_nodes)))
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:
-        """Resolved events expose neither outcome nor declared outputs."""
-        self._emit(
-            NukeExecutionStateEvent(
-                state=ExecutionState.COMPLETED,
-                terminal_node=event.end_node_name,
-                detail="The engine reported the flow finished. It did not report an outcome.",
-            )
-        )
+        """Carries no outcome, so an editor run's verdict rests on node errors seen since the last one."""
+        run_outcome.note_resolved(event.end_node_name)
+        if not run_outcome.host_run():
+            self._emit(run_outcome.conclude())
 
     def _on_flow_cancelled(self, event: ControlFlowCancelledEvent) -> None:
-        detail = str(event.result_details) if event.result_details else "Workflow cancelled."
-        self._emit(NukeExecutionStateEvent(state=ExecutionState.CANCELLED, detail=detail))
+        run_outcome.note_cancelled(str(event.result_details) if event.result_details else "Workflow cancelled.")
+        if not run_outcome.host_run():
+            self._emit(run_outcome.conclude())
 
 
 # Process-wide so connect handlers can install it and library teardown can remove it.

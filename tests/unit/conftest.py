@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nuke_host_api import flow_run
+from nuke_host_api import execution_bridge, flow_run, run_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -29,6 +29,24 @@ def _no_detached_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Discard detached tasks bound to a closed test loop."""
     monkeypatch.setattr(flow_run, "_RUN", None)
     monkeypatch.setattr(flow_run, "_RESERVED", False)
+    monkeypatch.setattr(flow_run, "_CANCEL", None)
+    run_outcome.clear()
+
+
+class _DroppingEventManager:
+    def put_event(self, event: object) -> None:
+        pass
+
+
+class _NoEngine:
+    def EventManager(self) -> _DroppingEventManager:  # noqa: N802
+        return _DroppingEventManager()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every run ends in a published verdict, which would otherwise boot the real engine."""
+    monkeypatch.setattr(execution_bridge, "GriptapeNodes", _NoEngine())
 
 
 @pytest.fixture(autouse=True)

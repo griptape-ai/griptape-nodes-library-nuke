@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
 from griptape_nodes.retained_mode.events.execution_events import (
+    CancelFlowRequest,
+    CancelFlowResultSuccess,
     GetFlowStateRequest,
     StartFlowRequest,
     StartFlowResultFailure,
@@ -14,7 +17,7 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 
-from nuke_host_api import execution_bridge, flow_run
+from nuke_host_api import engine, execution_bridge, flow_run, run_outcome
 from nuke_host_api.protocol import ExecutionState
 from tests.detached_run import settled
 from tests.unit.host_api_fakes import IDLE_FLOW, use_engine
@@ -111,10 +114,61 @@ async def test_a_failed_run_reaches_the_host_as_a_failed_execution_state(
     assert "validation failed" in _published[0].detail
 
 
-async def test_a_clean_start_publishes_nothing(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
+async def test_a_clean_run_publishes_one_success(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
     use_engine(monkeypatch, STARTS)
 
     flow_run.start("main")
     await settled()
 
-    assert _published == []
+    assert [payload.state for payload in _published] == [ExecutionState.SUCCEEDED]
+
+
+async def test_a_cancel_seen_during_the_run_wins_over_the_starts_success(
+    monkeypatch: pytest.MonkeyPatch, _published: list[Any]
+) -> None:
+    """The engine answers a cancelled start with success."""
+    use_engine(monkeypatch, STARTS)
+
+    flow_run.start("main")
+    run_outcome.note_cancelled("stopped")
+    await settled()
+
+    assert [payload.state for payload in _published] == [ExecutionState.CANCELLED]
+
+
+async def test_a_start_that_raises_still_ends_the_run(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
+    async def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError
+
+    monkeypatch.setattr(engine, "request", boom)
+
+    flow_run.start("main")
+    with pytest.raises(RuntimeError):
+        await settled()
+
+    assert [payload.state for payload in _published] == [ExecutionState.FAILED]
+    assert run_outcome.host_run() is False
+
+
+async def test_a_start_that_answers_mid_cancel_waits_for_the_cancel(
+    monkeypatch: pytest.MonkeyPatch, _published: list[Any]
+) -> None:
+    """The engine answers the start once the flow completes, before its cancel reports."""
+    cancel_entered = asyncio.Event()
+
+    async def request(payload: Any, success: type) -> Any:
+        if isinstance(payload, CancelFlowRequest):
+            cancel_entered.set()
+            await asyncio.sleep(0.01)
+            run_outcome.note_cancelled("stopped")
+            return engine.Attempt(CancelFlowResultSuccess(result_details="ok"), "ok")
+        await cancel_entered.wait()
+        return engine.Attempt(StartFlowResultSuccess(result_details="ok"), "ok")
+
+    monkeypatch.setattr(engine, "request", request)
+
+    flow_run.start("main")
+    await flow_run.cancel("main")
+    await settled()
+
+    assert [payload.state for payload in _published] == [ExecutionState.CANCELLED]

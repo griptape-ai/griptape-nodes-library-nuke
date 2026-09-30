@@ -25,7 +25,7 @@ const Protocol = (function () {
 
   const CLIENT_PROTOCOL_VERSIONS = [1];
 
-  const TERMINAL_EXECUTION_STATES = ["completed", "failed", "cancelled"];
+  const TERMINAL_EXECUTION_STATES = ["succeeded", "failed", "cancelled"];
   const EXECUTION_STATES = TERMINAL_EXECUTION_STATES.concat(["running"]);
   const KNOWN_NODE_STATES = ["unresolved", "running", "resolved", "failed"];
 

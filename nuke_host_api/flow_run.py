@@ -5,11 +5,14 @@ import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-from griptape_nodes.retained_mode.events.execution_events import StartFlowRequest, StartFlowResultSuccess
+from griptape_nodes.retained_mode.events.execution_events import (
+    CancelFlowRequest,
+    CancelFlowResultSuccess,
+    StartFlowRequest,
+    StartFlowResultSuccess,
+)
 
-from nuke_host_api import engine, execution_bridge
-from nuke_host_api.events import NukeExecutionStateEvent
-from nuke_host_api.protocol import ExecutionState
+from nuke_host_api import engine, execution_bridge, run_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -19,6 +22,7 @@ logger = logging.getLogger("griptape_nodes")
 # Keep a strong reference to the detached task until the run ends.
 _RUN: asyncio.Task[None] | None = None
 _RESERVED = False
+_CANCEL: asyncio.Task[engine.Attempt[CancelFlowResultSuccess]] | None = None
 
 
 @contextmanager
@@ -36,12 +40,21 @@ def reserve() -> Iterator[bool]:
 
 
 def start(flow_name: str) -> None:
-    global _RUN  # noqa: PLW0603
+    global _RUN, _CANCEL  # noqa: PLW0603
+    run_outcome.begin_host_run()
+    _CANCEL = None
     _RUN = asyncio.create_task(_run(flow_name))
 
 
+async def cancel(flow_name: str) -> engine.Attempt[CancelFlowResultSuccess]:
+    """The start answers mid-cancel, before the engine reports it, so the run awaits this too."""
+    global _CANCEL  # noqa: PLW0603
+    _CANCEL = asyncio.create_task(engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess))
+    return await _CANCEL
+
+
 def pending() -> bool:
-    """True from reservation until the engine answers the start, which it does when the flow ends."""
+    """True from reservation until the run's verdict is published."""
     return _RESERVED or (_RUN is not None and not _RUN.done())
 
 
@@ -50,11 +63,19 @@ async def busy() -> bool:
 
 
 async def _run(flow_name: str) -> None:
-    """The reply already said the run started, so the engine's verdict has nowhere to go but the stream."""
-    started = await engine.request(
-        StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
-    )
-    if started.value is None:
-        detail = f"the engine reported flow '{flow_name}' failed. {started.details}"
-        logger.error("Nuke host API: %s", detail)
-        execution_bridge.publish(NukeExecutionStateEvent(state=ExecutionState.FAILED, detail=detail))
+    """Every terminal engine event precedes the start's answer, so the verdict is complete here."""
+    failure: str | None = f"the start request for flow '{flow_name}' ended without an answer."
+    try:
+        started = await engine.request(
+            StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
+        )
+        failure = (
+            None if started.value is not None else f"the engine reported flow '{flow_name}' failed. {started.details}"
+        )
+    finally:
+        if _CANCEL is not None and not _CANCEL.done():
+            await asyncio.wait({_CANCEL})
+        # A run left open would hold every later editor run's verdict.
+        if failure is not None:
+            logger.error("Nuke host API: %s", failure)
+        execution_bridge.publish(run_outcome.conclude(failure))

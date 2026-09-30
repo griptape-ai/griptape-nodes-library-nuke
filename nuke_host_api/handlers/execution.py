@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from griptape_nodes.retained_mode.events.execution_events import (
-    CancelFlowRequest,
-    CancelFlowResultSuccess,
     UnresolveFlowRequest,
     UnresolveFlowResultSuccess,
 )
 
-from nuke_host_api import engine, flow_run, parameter_values, shape
+from nuke_host_api import engine, flow_run, parameter_values, run_outcome, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
@@ -158,12 +156,15 @@ async def handle_get_execution_state(
     running = flow_run.pending() or engine.flow_is_running(state.value)
 
     workflow_id = await engine.current_workflow_id()
+    last = run_outcome.last()
 
     return NukeGetExecutionStateResultSuccess(
         running=running,
         active_nodes=active,
         involved_nodes=involved,
         workflow_id=workflow_id,
+        last_outcome=last.state if last else "",
+        last_outcome_detail=last.detail if last else "",
         result_details=f"Engine is {'running' if running else 'idle'} with {len(involved)} node(s) involved.",
     )
 
@@ -183,7 +184,7 @@ async def handle_cancel_execution(
             because="no workflow is loaded, so there is nothing to cancel.",
         )
 
-    cancelled = await engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess)
+    cancelled = await flow_run.cancel(flow_name)
     if cancelled.value is None:
         return failure(
             NukeCancelExecutionResultFailure,

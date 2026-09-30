@@ -349,7 +349,7 @@ a {
   color: #f0c761;
 }
 .chip.resolved,
-.chip.completed {
+.chip.succeeded {
   background: #24361d;
   color: #9fce8c;
 }
