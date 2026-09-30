@@ -1,4 +1,4 @@
-"""Collapse engine terminal events into one verdict per run."""
+"""Derive run verdicts from engine terminal events."""
 
 from __future__ import annotations
 
@@ -49,7 +49,6 @@ def note_cancelled(detail: str) -> None:
 
 
 def conclude(start_failure: str | None = None) -> NukeExecutionStateEvent:
-    """Build the run's only verdict and forget the run."""
     global _last  # noqa: PLW0603
     with _LOCK:
         if start_failure is not None:

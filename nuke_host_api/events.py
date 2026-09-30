@@ -354,7 +354,7 @@ class NukeExecutionNodesEvent(AppPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeExecutionStateEvent(AppPayload):
-    """One per run; carries no outputs, which are read with NukeGetParameterValuesRequest."""
+    """Carries a verdict but no outputs, which are read with NukeGetParameterValuesRequest."""
 
     state: str
     terminal_node: str = ""

@@ -1,7 +1,4 @@
-"""A host-started run reaches the host as exactly one verdict after the kickoff reply.
-
-No Nuke and no engine process: a real engine in-process, driven through the host handlers.
-"""
+"""No Nuke and no engine process: a real engine in-process, driven through the host handlers."""
 
 from __future__ import annotations
 
@@ -49,7 +46,6 @@ def verdicts(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[NukeExecutionStat
             published.append(payload)
 
     monkeypatch.setattr(execution_bridge, "publish", capture)
-    # The bridge sees the engine's own terminal events, which must not add verdicts.
     execution_bridge.ensure_installed()
     yield published
     execution_bridge.uninstall()
