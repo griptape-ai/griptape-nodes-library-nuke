@@ -30,7 +30,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultFailure,
 )
 
-from nuke_host_api import run_outcome
+from nuke_host_api import engine, flow_run, run_outcome
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
     NukeLoadWorkflowResultFailure,
@@ -70,6 +70,23 @@ class TestLoadWorkflow:
         await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert run_outcome.last("wf1") is None
+
+    async def test_an_execute_cannot_start_while_a_load_is_in_flight(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch, load_responses())
+        held: list[bool] = []
+        lookup = engine.lookup_workflow
+
+        async def spy(workflow_id: str) -> engine.WorkflowLookup:
+            with flow_run.reserve() as reserved:
+                held.append(not reserved)
+            return await lookup(workflow_id)
+
+        monkeypatch.setattr(engine, "lookup_workflow", spy)
+
+        await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert held == [True]
+        assert flow_run.pending() is False
 
     async def test_declared_parameters_match_what_describe_publishes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A host must not have to call describe as well, nor learn a second descriptor shape."""

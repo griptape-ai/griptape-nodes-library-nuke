@@ -42,17 +42,23 @@ async def handle_load_workflow(
             error=ValueError,
         )
 
-    if await flow_run.busy():
-        return failure(
-            NukeLoadWorkflowResultFailure,
-            attempted=f"to load '{request.workflow_id or request.file_path}'",
-            because=(
-                "the engine is already executing, and loading discards the running graph. "
-                "Wait for the run to finish, or cancel it with NukeCancelExecutionRequest, then retry."
-            ),
-            workflow_id=request.workflow_id,
-        )
+    # Held for the whole load so an execute cannot start on the graph being torn down.
+    with flow_run.reserve() as reserved:
+        if reserved and not await engine.is_running():
+            return await _load(request)
 
+    return failure(
+        NukeLoadWorkflowResultFailure,
+        attempted=f"to load '{request.workflow_id or request.file_path}'",
+        because=(
+            "the engine is already executing, and loading discards the running graph. "
+            "Wait for the run to finish, or cancel it with NukeCancelExecutionRequest, then retry."
+        ),
+        workflow_id=request.workflow_id,
+    )
+
+
+async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
     if request.file_path:
         imported = await engine.request(ImportWorkflowRequest(file_path=request.file_path), ImportWorkflowResultSuccess)
         if imported.value is None:

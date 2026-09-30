@@ -851,7 +851,7 @@ a host polling only for liveness should not pay for it.
 
 | `NukeGetExecutionStateResultSuccess` field | Type | Notes |
 |---|---|---|
-| `running` | `bool` | Whether anything is executing. True from the moment `NukeExecuteWorkflowRequest` replies, which is before the engine has a node to report |
+| `running` | `bool` | Whether anything is executing. True from the moment `NukeExecuteWorkflowRequest` replies, which is before the engine has a node to report, and while `NukeLoadWorkflowRequest` is loading |
 | `active_nodes` | `list[str]` | Nodes currently resolving. Empty in the gap between a started run and the engine's first node |
 | `involved_nodes` | `list[str]` | Nodes in the current execution |
 | `workflow_id` | `str` | Loaded workflow, empty when none |

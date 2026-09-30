@@ -65,6 +65,7 @@ async def busy() -> bool:
 async def _run(flow_name: str, workflow_id: str) -> None:
     """Wait for pending cancels because their terminal events may follow the start response."""
     failure: str | None = f"the start request for flow '{flow_name}' ended without an answer."
+    raised = False
     try:
         started = await engine.request(
             StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
@@ -75,11 +76,12 @@ async def _run(flow_name: str, workflow_id: str) -> None:
     except Exception as e:
         # Detached, so nothing would retrieve a re-raise; the verdict is the report.
         failure = f"the start request for flow '{flow_name}' raised: {e}"
-        logger.exception("Nuke host API: start request for flow '%s' raised", flow_name)
+        logger.exception("Nuke host API: %s", failure)
+        raised = True
     finally:
         while _CANCELS:
             await asyncio.wait(set(_CANCELS))
         # A run left open would hold every later editor run's verdict.
-        if failure is not None:
+        if failure is not None and not raised:
             logger.error("Nuke host API: %s", failure)
         execution_bridge.publish(run_outcome.conclude(failure, workflow_id))
