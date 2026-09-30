@@ -51,8 +51,8 @@ async def handle_load_workflow(
         NukeLoadWorkflowResultFailure,
         attempted=f"to load '{request.workflow_id or request.file_path}'",
         because=(
-            "the engine is already executing, and loading discards the running graph. "
-            "Wait for the run to finish, or cancel it with NukeCancelExecutionRequest, then retry."
+            "the engine is already executing or loading a workflow, and loading discards the graph in use. "
+            "Wait for it to finish, or cancel a run with NukeCancelExecutionRequest, then retry."
         ),
         workflow_id=request.workflow_id,
     )

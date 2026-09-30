@@ -83,7 +83,7 @@ async def handle_set_parameter_values(
             NukeSetParameterValuesResultFailure,
             attempted=attempted,
             because=(
-                "the engine is already executing, and a value set mid-run cannot be told apart from one that "
+                "the engine is already executing or loading a workflow, and a value set mid-run cannot be told apart from one that "
                 "arrives in time for the node that reads it or one that arrives too late. Wait for the current "
                 "run to finish, or cancel it with NukeCancelExecutionRequest, then retry."
             ),

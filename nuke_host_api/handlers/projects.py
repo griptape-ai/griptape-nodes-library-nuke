@@ -135,8 +135,8 @@ async def handle_set_current_project(
             NukeSetCurrentProjectResultFailure,
             attempted=attempted,
             because=(
-                "the engine is already executing. Wait for the current run to "
-                "finish, or cancel it with NukeCancelExecutionRequest, then retry."
+                "the engine is already executing or loading a workflow. Wait for it to "
+                "finish, or cancel a run with NukeCancelExecutionRequest, then retry."
             ),
         )
 
