@@ -855,7 +855,7 @@ a host polling only for liveness should not pay for it.
 | `active_nodes` | `list[str]` | Nodes currently resolving. Empty in the gap between a started run and the engine's first node |
 | `involved_nodes` | `list[str]` | Nodes in the current execution |
 | `workflow_id` | `str` | Loaded workflow, empty when none |
-| `last_outcome` | `str` | State of the most recent `NukeExecutionStateEvent`: `succeeded`, `failed`, or `cancelled`. Empty before any run ends. While `running` is true it describes the previous run |
+| `last_outcome` | `str` | State of the most recent `NukeExecutionStateEvent`: `succeeded`, `failed`, or `cancelled`. Empty before any run ends, or when the latest verdict was for a workflow other than the loaded one. While `running` is true it describes the previous run |
 | `last_outcome_detail` | `str` | That event's `detail` |
 
 ```json
@@ -1219,7 +1219,8 @@ collapse into these four notifications.
 
 ### NukeExecutionStateEvent
 
-The run's verdict. Exactly one per run started with `NukeExecuteWorkflowRequest`.
+The run's verdict. Exactly one per run started with `NukeExecuteWorkflowRequest`, unless the
+editor cancels it (see below).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1242,7 +1243,8 @@ verdict is `succeeded`.
 
 A run started from the editor also gets a verdict, but a best-effort one. The engine's
 completion event carries no outcome, so the verdict is `failed` when a node errored since the
-last verdict and `succeeded` otherwise. The engine fires completion before cancellation on its
+last verdict and `succeeded` otherwise. A node run on its own from the editor ends with no
+verdict, so an error there makes the next editor run report `failed`. The engine fires completion before cancellation on its
 cancel path, so an editor run cancelled mid-node can report `succeeded` followed by
 `cancelled`; let `cancelled` replace it. A run started with `NukeExecuteWorkflowRequest` and
 cancelled with `NukeCancelExecutionRequest` reports `cancelled` once. Cancelled from the editor

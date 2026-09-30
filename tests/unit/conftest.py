@@ -29,7 +29,7 @@ def _no_detached_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """Discard detached tasks bound to a closed test loop."""
     monkeypatch.setattr(flow_run, "_RUN", None)
     monkeypatch.setattr(flow_run, "_RESERVED", False)
-    monkeypatch.setattr(flow_run, "_CANCEL", None)
+    monkeypatch.setattr(flow_run, "_CANCELS", set())
     run_outcome.clear()
 
 
@@ -38,9 +38,17 @@ class _DroppingEventManager:
         pass
 
 
+class _NoContext:
+    def has_current_workflow(self) -> bool:
+        return False
+
+
 class _NoEngine:
     def EventManager(self) -> _DroppingEventManager:  # noqa: N802
         return _DroppingEventManager()
+
+    def ContextManager(self) -> _NoContext:  # noqa: N802
+        return _NoContext()
 
 
 @pytest.fixture(autouse=True)

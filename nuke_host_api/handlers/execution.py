@@ -116,7 +116,7 @@ async def _start_loaded_workflow(
                 rejected_inputs=rejected,
             )
 
-    flow_run.start(flow_name)
+    flow_run.start(flow_name, loaded_id)
 
     return NukeExecuteWorkflowResultSuccess(
         workflow_id=loaded_id,
@@ -156,7 +156,7 @@ async def handle_get_execution_state(
     running = flow_run.pending() or engine.flow_is_running(state.value)
 
     workflow_id = await engine.current_workflow_id()
-    last = run_outcome.last()
+    last = run_outcome.last(workflow_id)
 
     return NukeGetExecutionStateResultSuccess(
         running=running,

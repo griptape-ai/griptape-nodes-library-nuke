@@ -42,6 +42,12 @@ def publish(payload: AppPayload) -> None:
     GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
 
 
+def current_workflow_id() -> str:
+    """Read synchronously because bridge callbacks cannot await an engine request."""
+    context = GriptapeNodes.ContextManager()
+    return context.get_current_workflow_name() if context.has_current_workflow() else ""
+
+
 class ExecutionBridge:
     def __init__(self) -> None:
         self._installed = False
@@ -138,14 +144,15 @@ class ExecutionBridge:
 
     def _on_flow_resolved(self, event: ControlFlowResolvedEvent) -> None:
         """Carries no outcome, so an editor run's verdict rests on node errors seen since the last one."""
-        run_outcome.note_resolved(event.end_node_name)
-        if not run_outcome.host_run():
-            self._emit(run_outcome.conclude())
+        verdict = run_outcome.on_resolved(event.end_node_name, current_workflow_id())
+        if verdict is not None:
+            self._emit(verdict)
 
     def _on_flow_cancelled(self, event: ControlFlowCancelledEvent) -> None:
-        run_outcome.note_cancelled(str(event.result_details) if event.result_details else "Workflow cancelled.")
-        if not run_outcome.host_run():
-            self._emit(run_outcome.conclude())
+        detail = str(event.result_details) if event.result_details else "Workflow cancelled."
+        verdict = run_outcome.on_cancelled(detail, current_workflow_id())
+        if verdict is not None:
+            self._emit(verdict)
 
 
 # Process-wide so connect handlers can install it and library teardown can remove it.

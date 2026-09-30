@@ -71,6 +71,9 @@ class FakeEngine:
     def EventManager(self) -> FakeEventManager:  # noqa: N802
         return self._event_manager
 
+    def ContextManager(self) -> SimpleNamespace:  # noqa: N802
+        return SimpleNamespace(has_current_workflow=lambda: False, get_current_workflow_name=lambda: "")
+
 
 @pytest.fixture
 def event_manager(monkeypatch: pytest.MonkeyPatch) -> FakeEventManager:
@@ -320,7 +323,7 @@ class TestTranslation:
         bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
         bridge._on_flow_cancelled(ControlFlowCancelledEvent())
         assert not any(isinstance(p, NukeExecutionStateEvent) for p in event_manager.payloads())
-        assert run_outcome.conclude().state == ExecutionState.CANCELLED
+        assert run_outcome.conclude(None, "").state == ExecutionState.CANCELLED
 
     def test_involved_nodes_are_forwarded_as_the_progress_denominator(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()

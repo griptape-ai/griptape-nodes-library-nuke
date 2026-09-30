@@ -36,7 +36,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryRequest,
 )
 
-from nuke_host_api import execution_bridge, shape
+from nuke_host_api import execution_bridge, run_outcome, shape
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultFailure,
@@ -582,6 +582,22 @@ class TestGetExecutionState:
         assert result.running is False
         assert result.last_outcome == ExecutionState.FAILED
         assert "validation failed" in result.last_outcome_detail
+
+    async def test_a_verdict_for_a_workflow_no_longer_loaded_is_not_reported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run_outcome.conclude("wf1 broke", "wf1")
+        use_engine(
+            monkeypatch,
+            execute_responses(
+                {GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf2", result_details="ok")}
+            ),
+        )
+
+        result = await handle_get_execution_state(NukeGetExecutionStateRequest())
+
+        assert isinstance(result, NukeGetExecutionStateResultSuccess)
+        assert (result.last_outcome, result.last_outcome_detail) == ("", "")
 
 
 class TestCancelExecution:

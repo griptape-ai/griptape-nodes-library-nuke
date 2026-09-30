@@ -22,7 +22,7 @@ logger = logging.getLogger("griptape_nodes")
 # Keep a strong reference to the detached task until the run ends.
 _RUN: asyncio.Task[None] | None = None
 _RESERVED = False
-_CANCEL: asyncio.Task[engine.Attempt[CancelFlowResultSuccess]] | None = None
+_CANCELS: set[asyncio.Task[engine.Attempt[CancelFlowResultSuccess]]] = set()
 
 
 @contextmanager
@@ -39,18 +39,18 @@ def reserve() -> Iterator[bool]:
         _RESERVED = False
 
 
-def start(flow_name: str) -> None:
-    global _RUN, _CANCEL  # noqa: PLW0603
+def start(flow_name: str, workflow_id: str) -> None:
+    global _RUN  # noqa: PLW0603
     run_outcome.begin_host_run()
-    _CANCEL = None
-    _RUN = asyncio.create_task(_run(flow_name))
+    _RUN = asyncio.create_task(_run(flow_name, workflow_id))
 
 
 async def cancel(flow_name: str) -> engine.Attempt[CancelFlowResultSuccess]:
-    """The start answers mid-cancel, before the engine reports it, so the run awaits this too."""
-    global _CANCEL  # noqa: PLW0603
-    _CANCEL = asyncio.create_task(engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess))
-    return await _CANCEL
+    """The start answers mid-cancel, before the engine reports it, so the run awaits every cancel."""
+    task = asyncio.create_task(engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess))
+    _CANCELS.add(task)
+    task.add_done_callback(_CANCELS.discard)
+    return await task
 
 
 def pending() -> bool:
@@ -62,8 +62,8 @@ async def busy() -> bool:
     return pending() or await engine.is_running()
 
 
-async def _run(flow_name: str) -> None:
-    """Every terminal engine event precedes the start's answer, so the verdict is complete here."""
+async def _run(flow_name: str, workflow_id: str) -> None:
+    """Terminal events precede the start's answer, except a cancel's, which the cancel wait covers."""
     failure: str | None = f"the start request for flow '{flow_name}' ended without an answer."
     try:
         started = await engine.request(
@@ -72,10 +72,13 @@ async def _run(flow_name: str) -> None:
         failure = (
             None if started.value is not None else f"the engine reported flow '{flow_name}' failed. {started.details}"
         )
+    except Exception as e:
+        failure = f"the start request for flow '{flow_name}' raised: {e}"
+        raise
     finally:
-        if _CANCEL is not None and not _CANCEL.done():
-            await asyncio.wait({_CANCEL})
+        if _CANCELS:
+            await asyncio.wait(set(_CANCELS))
         # A run left open would hold every later editor run's verdict.
         if failure is not None:
             logger.error("Nuke host API: %s", failure)
-        execution_bridge.publish(run_outcome.conclude(failure))
+        execution_bridge.publish(run_outcome.conclude(failure, workflow_id))
