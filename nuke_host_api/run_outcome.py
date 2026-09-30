@@ -38,7 +38,6 @@ def note_node_error(message: str) -> None:
 
 
 def on_resolved(terminal_node: str, workflow_id: str) -> NukeExecutionStateEvent | None:
-    """Return an editor run's verdict; a host run's waits for its start."""
     global _terminal_node  # noqa: PLW0603
     with _LOCK:
         _terminal_node = terminal_node
@@ -58,7 +57,6 @@ def conclude(start_failure: str | None, workflow_id: str) -> NukeExecutionStateE
 
 
 def last(workflow_id: str) -> NukeExecutionStateEvent | None:
-    """A verdict for another workflow says nothing about the one loaded now."""
     with _LOCK:
         return _last if _last is not None and _last_workflow_id == workflow_id else None
 

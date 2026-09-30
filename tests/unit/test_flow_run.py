@@ -175,7 +175,6 @@ async def test_a_start_that_answers_mid_cancel_waits_for_the_cancel(
 
 
 async def test_a_run_waits_for_every_overlapping_cancel(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
-    """A second cancel replacing the first must not let the first's event land after the verdict."""
     release_first = asyncio.Event()
     both_sent = asyncio.Event()
     cancels = 0

@@ -46,7 +46,7 @@ def start(flow_name: str, workflow_id: str) -> None:
 
 
 async def cancel(flow_name: str) -> engine.Attempt[CancelFlowResultSuccess]:
-    """The start answers mid-cancel, before the engine reports it, so the run awaits every cancel."""
+    """Track every cancel because the start request can finish before cancellation is reported."""
     task = asyncio.create_task(engine.request(CancelFlowRequest(flow_name=flow_name), CancelFlowResultSuccess))
     _CANCELS.add(task)
     task.add_done_callback(_CANCELS.discard)
@@ -63,7 +63,7 @@ async def busy() -> bool:
 
 
 async def _run(flow_name: str, workflow_id: str) -> None:
-    """Terminal events precede the start's answer, except a cancel's, which the cancel wait covers."""
+    """Wait for pending cancels because their terminal events may follow the start response."""
     failure: str | None = f"the start request for flow '{flow_name}' ended without an answer."
     try:
         started = await engine.request(

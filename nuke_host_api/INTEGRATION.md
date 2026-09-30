@@ -1243,10 +1243,10 @@ verdict is `succeeded`.
 
 A run started from the editor also gets a verdict, but a best-effort one. The engine's
 completion event carries no outcome, so the verdict is `failed` when a node errored since the
-last verdict and `succeeded` otherwise. A node run on its own from the editor ends with no
-verdict, so an error there makes the next editor run report `failed`. The engine fires completion before cancellation on its
-cancel path, so an editor run cancelled mid-node can report `succeeded` followed by
-`cancelled`; let `cancelled` replace it. A run started with `NukeExecuteWorkflowRequest` and
+last verdict and `succeeded` otherwise. A node run on its own from the editor emits no
+verdict, so its error makes the next editor run report `failed`. The engine fires completion
+before cancellation on its cancel path, so an editor run cancelled mid-node can report
+`succeeded` followed by `cancelled`; let `cancelled` replace it. A run started with `NukeExecuteWorkflowRequest` and
 cancelled with `NukeCancelExecutionRequest` reports `cancelled` once. Cancelled from the editor
 instead, it can report `succeeded` then `cancelled` the same way.
 
