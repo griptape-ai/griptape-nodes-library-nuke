@@ -39,8 +39,8 @@ class _DroppingEventManager:
 
 
 class _NoContext:
-    def has_current_workflow(self) -> bool:
-        return False
+    def get_current_workflow_name(self) -> str:
+        return ""
 
 
 class _NoEngine:

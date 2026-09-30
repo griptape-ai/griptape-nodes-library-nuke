@@ -73,10 +73,11 @@ async def _run(flow_name: str, workflow_id: str) -> None:
             None if started.value is not None else f"the engine reported flow '{flow_name}' failed. {started.details}"
         )
     except Exception as e:
+        # Detached, so nothing would retrieve a re-raise; the verdict is the report.
         failure = f"the start request for flow '{flow_name}' raised: {e}"
-        raise
+        logger.exception("Nuke host API: start request for flow '%s' raised", flow_name)
     finally:
-        if _CANCELS:
+        while _CANCELS:
             await asyncio.wait(set(_CANCELS))
         # A run left open would hold every later editor run's verdict.
         if failure is not None:

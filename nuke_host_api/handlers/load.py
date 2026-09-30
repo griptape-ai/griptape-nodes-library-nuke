@@ -9,7 +9,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultSuccess,
 )
 
-from nuke_host_api import engine, flow_run, parameter_values, shape
+from nuke_host_api import engine, flow_run, parameter_values, run_outcome, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
@@ -86,6 +86,8 @@ async def handle_load_workflow(
             workflow_id=workflow_id,
         )
 
+    # A clean-slate load discards the graph a previous verdict described, even when it fails.
+    run_outcome.clear()
     loaded = await engine.request(
         RunWorkflowFromRegistryRequest(workflow_name=workflow_id, run_with_clean_slate=True),
         RunWorkflowFromRegistryResultSuccess,

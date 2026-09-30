@@ -72,7 +72,7 @@ class FakeEngine:
         return self._event_manager
 
     def ContextManager(self) -> SimpleNamespace:  # noqa: N802
-        return SimpleNamespace(has_current_workflow=lambda: False, get_current_workflow_name=lambda: "")
+        return SimpleNamespace(get_current_workflow_name=lambda: "")
 
 
 @pytest.fixture

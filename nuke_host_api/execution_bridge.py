@@ -18,6 +18,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     ParameterValueUpdateEvent,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.retained_mode.managers.context_manager import ContextManager
 
 from nuke_host_api import run_outcome
 from nuke_host_api.events import (
@@ -44,8 +45,10 @@ def publish(payload: AppPayload) -> None:
 
 def current_workflow_id() -> str:
     """Read synchronously because bridge callbacks cannot await an engine request."""
-    context = GriptapeNodes.ContextManager()
-    return context.get_current_workflow_name() if context.has_current_workflow() else ""
+    try:
+        return GriptapeNodes.ContextManager().get_current_workflow_name()
+    except ContextManager.NoActiveWorkflowError:
+        return ""
 
 
 class ExecutionBridge:

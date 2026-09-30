@@ -138,15 +138,16 @@ async def test_a_cancel_seen_during_the_run_wins_over_the_starts_success(
 
 async def test_a_start_that_raises_still_ends_the_run(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
     async def boom(*args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError
+        msg = "socket gone"
+        raise RuntimeError(msg)
 
     monkeypatch.setattr(engine, "request", boom)
 
     flow_run.start("main", "wf1")
-    with pytest.raises(RuntimeError):
-        await settled()
+    await settled()
 
     assert [payload.state for payload in _published] == [ExecutionState.FAILED]
+    assert "socket gone" in _published[0].detail
     assert run_outcome.host_run() is False
 
 
@@ -202,6 +203,41 @@ async def test_a_run_waits_for_every_overlapping_cancel(monkeypatch: pytest.Monk
     assert _published == [], "the verdict must wait for the first cancel"
     release_first.set()
     await first
+    await settled()
+
+    assert [payload.state for payload in _published] == [ExecutionState.CANCELLED]
+
+
+async def test_a_cancel_sent_while_the_run_waits_on_another_is_awaited_too(
+    monkeypatch: pytest.MonkeyPatch, _published: list[Any]
+) -> None:
+    release = [asyncio.Event(), asyncio.Event()]
+    cancels = 0
+
+    async def request(payload: Any, success: type) -> Any:
+        nonlocal cancels
+        if isinstance(payload, CancelFlowRequest):
+            mine = cancels
+            cancels += 1
+            await release[mine].wait()
+            run_outcome.on_cancelled(f"cancel {mine}", "wf1")
+            return engine.Attempt(CancelFlowResultSuccess(result_details="ok"), "ok")
+        return engine.Attempt(StartFlowResultSuccess(result_details="ok"), "ok")
+
+    monkeypatch.setattr(engine, "request", request)
+
+    first = asyncio.create_task(flow_run.cancel("main"))
+    await asyncio.sleep(0)
+    flow_run.start("main", "wf1")
+    await asyncio.sleep(0.01)
+    second = asyncio.create_task(flow_run.cancel("main"))
+    await asyncio.sleep(0)
+    release[0].set()
+    await first
+    await asyncio.sleep(0.01)
+    assert _published == [], "the verdict must wait for the cancel sent during the wait"
+    release[1].set()
+    await second
     await settled()
 
     assert [payload.state for payload in _published] == [ExecutionState.CANCELLED]

@@ -30,6 +30,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultFailure,
 )
 
+from nuke_host_api import run_outcome
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
     NukeLoadWorkflowResultFailure,
@@ -60,6 +61,15 @@ class TestLoadWorkflow:
         load = next(r for r in engine.requests if isinstance(r, RunWorkflowFromRegistryRequest))
         assert load.workflow_name == "wf1"
         assert load.run_with_clean_slate is True
+
+    async def test_a_load_forgets_the_previous_graphs_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Reloading the same id still discards the graph the verdict described."""
+        run_outcome.conclude("wf1 broke", "wf1")
+        use_engine(monkeypatch, load_responses())
+
+        await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert run_outcome.last("wf1") is None
 
     async def test_declared_parameters_match_what_describe_publishes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A host must not have to call describe as well, nor learn a second descriptor shape."""
