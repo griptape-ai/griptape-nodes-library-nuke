@@ -715,9 +715,9 @@ Applies inputs to the loaded workflow and starts it. Loads nothing: call
 `NukeLoadWorkflowRequest` first. The reply lands at kickoff, not at the end of the run, so
 progress and outcome are the notification stream, not this result.
 
-The engine's `StartFlowRequest`, sent with `wait_for_completion=True`, resolves only when the flow
-ends, so the handler detaches it and replies at kickoff. A normal request timeout is enough, and
-the reply itself signals that the run began. The run's verdict arrives later as exactly one
+The engine's `StartFlowRequest` resolves only when the flow ends, so the handler detaches it and
+replies at kickoff. A normal request timeout is enough, and the reply itself signals that the run
+began. The run's verdict arrives later as exactly one
 `NukeExecutionStateEvent`: `succeeded`, `failed`, or `cancelled`.
 
 | Request field | Type | Default | Notes |

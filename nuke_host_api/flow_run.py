@@ -67,9 +67,7 @@ async def _run(flow_name: str, workflow_id: str) -> None:
     failure: str | None = f"the start request for flow '{flow_name}' ended without an answer."
     raised = False
     try:
-        started = await engine.request(
-            StartFlowRequest(flow_name=flow_name, wait_for_completion=True), StartFlowResultSuccess
-        )
+        started = await engine.request(StartFlowRequest(flow_name=flow_name), StartFlowResultSuccess)
         failure = (
             None if started.value is not None else f"the engine reported flow '{flow_name}' failed. {started.details}"
         )

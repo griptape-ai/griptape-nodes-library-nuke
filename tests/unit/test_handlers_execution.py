@@ -86,8 +86,6 @@ class TestExecuteWorkflow:
 
         request_types = [type(request) for request in engine.requests]
         assert request_types.index(SetParameterValueRequest) < request_types.index(StartFlowRequest)
-        started = next(r for r in engine.requests if isinstance(r, StartFlowRequest))
-        assert started.wait_for_completion is True
 
     async def test_the_reply_lands_before_the_engine_is_asked_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """StartFlowRequest resolves only when the flow ends, so awaiting it would hold the reply."""
