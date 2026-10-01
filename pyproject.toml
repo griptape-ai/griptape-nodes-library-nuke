@@ -53,6 +53,8 @@ line-ending = "auto"
 # bundle imports its own siblings at runtime. See extraPaths below for pyright's
 # equivalent.
 pythonpath = ["publish_gizmo"]
+# Host API handlers are async, so every test that drives one is too.
+asyncio_mode = "auto"
 
 [tool.pyright]
 venvPath = "."
