@@ -166,8 +166,8 @@ and a stronger one: it would discard the running graph. Engine flow state leaves
 execute preflight and before the engine reports the flow running, so `flow_run` reserves the slot
 before execute's first await and holds it until the run's verdict is published.
 
-The engine's `StartFlowRequest`, sent with `wait_for_completion=True`, resolves only when the flow
-ends, so execute detaches it and replies at kickoff. Progress uses the notification stream.
+The engine's `StartFlowRequest` resolves only when the flow ends, so execute detaches it and
+replies at kickoff. Progress uses the notification stream.
 `run_outcome` collapses the engine's terminal events into one `NukeExecutionStateEvent`
 (`succeeded`, `failed`, or `cancelled`), published once the start answers. The engine answers the
 start mid-cancel, before it reports the cancel, so the run also waits on any cancel this API
