@@ -38,7 +38,7 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
 
     def before_library_nodes_loaded(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
         msg = f"Starting to load nodes for '{library_data.name}' library..."
-        logger.info(msg)
+        logger.debug(msg)
 
     def after_library_nodes_loaded(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
         GriptapeNodes.LibraryManager().on_register_event_handler(
