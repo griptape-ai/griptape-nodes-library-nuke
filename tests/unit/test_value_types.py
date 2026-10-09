@@ -12,7 +12,6 @@ from griptape.artifacts import (
     VideoUrlArtifact,
 )
 from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence, SequenceEntry
-from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroResultFailure,
     PathResolutionFailureReason,
@@ -316,7 +315,7 @@ class TestSequences:
 
     @pytest.mark.parametrize("serialize", [False, True])
     def test_a_sequence_is_one_entry_with_its_frame_range(self, serialize: bool) -> None:
-        value = safe_unstructure(_sequence()) if serialize else _sequence()
+        value = _sequence().model_dump(mode="json") if serialize else _sequence()
 
         descriptor = value_types.normalize_value(value, "Sequence")
 
@@ -425,7 +424,7 @@ class TestUnrepresentable:
         "value",
         [
             ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2),
-            safe_unstructure(ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2)),
+            ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2).to_dict(),
             BlobArtifact(value=b"\x00\x01"),
             b"raw",
         ],
@@ -467,6 +466,25 @@ class TestSerializedArtifacts:
         descriptor = value_types.normalize_value(frames, "ImageSequenceArtifact")
         assert descriptor["value_type"] == ValueType.IMAGE
         assert len(descriptor["value"]) == 3
+
+    @pytest.mark.parametrize(
+        ("tagged", "plain"),
+        [
+            (
+                {"$type": "griptape.artifacts:ImageUrlArtifact", "type": "ImageUrlArtifact", "value": "/a.png"},
+                {"type": "ImageUrlArtifact", "value": "/a.png"},
+            ),
+            ({"$type": "builtins:tuple", "$value": [1, {"$type": "pathlib:Path", "$value": "/a.png"}]}, [1, "/a.png"]),
+            ({"$type": "builtins:dict", "$value": {"$type": "data"}}, {"$type": "data"}),
+            ({"$type": "builtins:float", "$value": "inf"}, float("inf")),
+        ],
+    )
+    def test_a_tagged_value_reads_as_its_state(self, tagged: Any, plain: Any) -> None:
+        assert value_types._untagged(tagged) == plain
+
+    def test_tagged_bytes_are_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="bytes"):
+            value_types._untagged([{"$type": "builtins:bytes", "$value": "eA=="}])
 
 
 class TestEngineValue:

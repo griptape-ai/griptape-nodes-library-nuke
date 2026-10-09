@@ -18,6 +18,12 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from nuke_host_api.protocol import ValueType
 
+try:
+    from griptape_nodes.serialization import values as engine_values  # pyright: ignore[reportMissingImports]
+except ImportError:
+    # Engines before 0.104 have no value codec, and their safe_unstructure still calls to_dict().
+    engine_values = None
+
 logger = logging.getLogger("griptape_nodes")
 
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "exr", "tif", "tiff", "webp", "dpx", "tga", "hdr"})
@@ -71,6 +77,11 @@ _SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FI
 
 MEDIA_ENTRY_FIELDS = frozenset({"path", "format", "first", "last"})
 
+# The engine value codec's tags. A tagged value's state sits beside "$type" or under "$value".
+TYPE_KEY = "$type"
+VALUE_KEY = "$value"
+_BYTES_TYPE_NAMES = frozenset({"builtins:bytes", "builtins:bytearray"})
+
 
 class UnrepresentableValueError(ValueError):
     """Raised when this protocol cannot represent a value."""
@@ -114,7 +125,7 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
         msg = "It holds raw bytes the engine never saved to a file."
         raise UnrepresentableValueError(msg)
 
-    plain = safe_unstructure(value)
+    plain = _plain_value(value)
     engine_type = _engine_type(value, plain, declared_engine_type)
     declared_value_type = value_type_for_engine_type(declared_engine_type)
     items = _list_items(plain)
@@ -144,6 +155,39 @@ def engine_value(value: Any) -> Any:
     if isinstance(value, dict) and "path" in value and set(value) <= MEDIA_ENTRY_FIELDS:
         return value["path"]
     return value
+
+
+def _plain_value(value: Any) -> Any:
+    """The value as untagged plain data, so an artifact reads as its ``to_dict()`` form."""
+    if engine_values is None:
+        return safe_unstructure(value)
+    try:
+        return _untagged(engine_values.encode_value(value))
+    except engine_values.ValueEncodeError as e:
+        raise UnrepresentableValueError(str(e)) from e
+
+
+def _untagged(data: Any) -> Any:
+    """Drop the codec's ``$type`` tags, keeping each value's state."""
+    if isinstance(data, list):
+        return [_untagged(item) for item in data]
+    if not isinstance(data, dict):
+        return data
+    if TYPE_KEY not in data:
+        return {key: _untagged(item) for key, item in data.items()}
+    tag = data[TYPE_KEY]
+    if tag in _BYTES_TYPE_NAMES:
+        msg = "It holds raw bytes the engine never saved to a file."
+        raise UnrepresentableValueError(msg)
+    if VALUE_KEY not in data:
+        return {key: _untagged(item) for key, item in data.items() if key != TYPE_KEY}
+    state = data[VALUE_KEY]
+    if tag == "builtins:dict" and isinstance(state, dict):
+        # A wrapped dict: its own "$type" key is data, not a tag.
+        return {key: _untagged(item) for key, item in state.items()}
+    if tag == "builtins:float":
+        return float(state)
+    return _untagged(state)
 
 
 def _descriptor(value_type: str, value: Any, engine_type: str) -> dict[str, Any]:
