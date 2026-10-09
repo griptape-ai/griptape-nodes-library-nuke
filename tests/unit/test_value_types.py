@@ -487,6 +487,31 @@ class TestSerializedArtifacts:
             value_types._untagged([{"$type": "builtins:bytes", "$value": "eA=="}])
 
 
+@pytest.mark.skipif(value_types.engine_values is None, reason="This engine has no value codec.")
+class TestValueCodec:
+    """Values read through the engine's own codec, not hand-written tags."""
+
+    @pytest.mark.parametrize(
+        ("value", "declared", "host_value"),
+        [
+            (ImageUrlArtifact("/show/a.png"), "ImageUrlArtifact", "/show/a.png"),
+            (ListArtifact([VideoUrlArtifact("/show/a.mov")]), "list[VideoUrlArtifact]", ["/show/a.mov"]),
+            (("/show/a.png", "/show/b.png"), "list[ImageUrlArtifact]", ["/show/a.png", "/show/b.png"]),
+            (_sequence(), "Sequence", "/show/plate/frame_####.png"),
+        ],
+    )
+    def test_a_live_value_normalizes(self, value: Any, declared: str, host_value: Any) -> None:
+        assert value_types.engine_value(value_types.normalize_value(value, declared)["value"]) == host_value
+
+    def test_bytes_inside_a_list_are_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="bytes"):
+            value_types.normalize_value([b"raw"], "list")
+
+    def test_a_value_the_codec_cannot_encode_is_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="no plain-data form"):
+            value_types.normalize_value(object(), "any")
+
+
 class TestEngineValue:
     """A host sends back what it read, and the engine is handed what it holds."""
 

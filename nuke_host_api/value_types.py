@@ -8,7 +8,6 @@ from typing import Any
 
 from griptape_nodes.common.macro_parser import ParsedMacro
 from griptape_nodes.common.macro_parser.exceptions import MacroSyntaxError
-from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
     GetPathForMacroResultSuccess,
@@ -21,7 +20,6 @@ from nuke_host_api.protocol import ValueType
 try:
     from griptape_nodes.serialization import values as engine_values  # pyright: ignore[reportMissingImports]
 except ImportError:
-    # Engines before 0.104 have no value codec, and their safe_unstructure still calls to_dict().
     engine_values = None
 
 logger = logging.getLogger("griptape_nodes")
@@ -160,6 +158,10 @@ def engine_value(value: Any) -> Any:
 def _plain_value(value: Any) -> Any:
     """The value as untagged plain data, so an artifact reads as its ``to_dict()`` form."""
     if engine_values is None:
+        # Engines before 0.104 have no value codec, and their safe_unstructure still calls to_dict().
+        # Imported here because later engines deprecate it.
+        from griptape_nodes.retained_mode.events.event_converter import safe_unstructure  # noqa: PLC0415
+
         return safe_unstructure(value)
     try:
         return _untagged(engine_values.encode_value(value))
