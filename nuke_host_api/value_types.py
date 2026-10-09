@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 
+from griptape.mixins.serializable_mixin import SerializableMixin
 from griptape_nodes.common.macro_parser import ParsedMacro
 from griptape_nodes.common.macro_parser.exceptions import MacroSyntaxError
 from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
@@ -114,7 +115,7 @@ def normalize_value(value: Any, declared_engine_type: str | None = None) -> dict
         msg = "It holds raw bytes the engine never saved to a file."
         raise UnrepresentableValueError(msg)
 
-    plain = safe_unstructure(value)
+    plain = _plain_value(value)
     engine_type = _engine_type(value, plain, declared_engine_type)
     declared_value_type = value_type_for_engine_type(declared_engine_type)
     items = _list_items(plain)
@@ -144,6 +145,19 @@ def engine_value(value: Any) -> Any:
     if isinstance(value, dict) and "path" in value and set(value) <= MEDIA_ENTRY_FIELDS:
         return value["path"]
     return value
+
+
+def _plain_value(value: Any) -> Any:
+    """Griptape objects go through ``to_dict()``, since the event converter refuses them outside parameter-value fields."""
+    if isinstance(value, (list, tuple)):
+        return [_plain_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _plain_value(item) for key, item in value.items()}
+    try:
+        return value.to_dict() if isinstance(value, SerializableMixin) else safe_unstructure(value)
+    except Exception as e:
+        msg = f"It holds a {type(value).__name__} with no plain-data form: {e}"
+        raise UnrepresentableValueError(msg) from e
 
 
 def _descriptor(value_type: str, value: Any, engine_type: str) -> dict[str, Any]:

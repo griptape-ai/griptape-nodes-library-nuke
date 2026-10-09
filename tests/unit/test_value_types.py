@@ -11,6 +11,7 @@ from griptape.artifacts import (
     ListArtifact,
     VideoUrlArtifact,
 )
+from griptape.mixins.serializable_mixin import SerializableMixin
 from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence, SequenceEntry
 from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
 from griptape_nodes.retained_mode.events.project_events import (
@@ -425,7 +426,7 @@ class TestUnrepresentable:
         "value",
         [
             ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2),
-            safe_unstructure(ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2)),
+            ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2).to_dict(),
             BlobArtifact(value=b"\x00\x01"),
             b"raw",
         ],
@@ -458,6 +459,35 @@ class TestSerializedArtifacts:
     def test_a_serialized_artifact_keeps_its_path(self) -> None:
         descriptor = value_types.normalize_value(self.SERIALIZED, "ImageUrlArtifact")
         assert descriptor["value"] == {"path": "/show/render.png", "format": "png", "first": None, "last": None}
+
+    @pytest.mark.parametrize(
+        ("value", "declared", "paths"),
+        [
+            (ImageUrlArtifact("/show/render.png"), "ImageUrlArtifact", "/show/render.png"),
+            (
+                [ImageUrlArtifact("/show/a.png"), ImageUrlArtifact("/show/b.png")],
+                "list[ImageUrlArtifact]",
+                ["/show/a.png", "/show/b.png"],
+            ),
+            (ListArtifact([ImageUrlArtifact("/show/a.png")]), "list[ImageUrlArtifact]", ["/show/a.png"]),
+        ],
+    )
+    def test_a_live_artifact_never_reaches_the_event_converter(
+        self, monkeypatch: pytest.MonkeyPatch, value: Any, declared: str, paths: str | list[str]
+    ) -> None:
+        """The event converter refuses griptape objects outside parameter-value fields."""
+
+        def refuse_griptape_objects(obj: Any) -> Any:
+            if isinstance(obj, SerializableMixin):
+                msg = f"A '{type(obj).__qualname__}' value is sent only in a field that carries parameter values."
+                raise TypeError(msg)
+            return safe_unstructure(obj)
+
+        monkeypatch.setattr(value_types, "safe_unstructure", refuse_griptape_objects)
+
+        host_value = value_types.normalize_value(value, declared)["value"]
+
+        assert value_types.engine_value(host_value) == paths
 
     def test_the_dicts_own_type_is_reported(self) -> None:
         assert value_types.normalize_value(self.SERIALIZED)["engine_type"] == "ImageUrlArtifact"
