@@ -12,7 +12,6 @@ from griptape.artifacts import (
     VideoUrlArtifact,
 )
 from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence, SequenceEntry
-from griptape_nodes.retained_mode.events.event_converter import safe_unstructure
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroResultFailure,
     PathResolutionFailureReason,
@@ -316,7 +315,7 @@ class TestSequences:
 
     @pytest.mark.parametrize("serialize", [False, True])
     def test_a_sequence_is_one_entry_with_its_frame_range(self, serialize: bool) -> None:
-        value = safe_unstructure(_sequence()) if serialize else _sequence()
+        value = _sequence().model_dump(mode="json") if serialize else _sequence()
 
         descriptor = value_types.normalize_value(value, "Sequence")
 
@@ -425,7 +424,7 @@ class TestUnrepresentable:
         "value",
         [
             ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2),
-            safe_unstructure(ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2)),
+            ImageArtifact(value=b"\x89PNG", format="png", width=4, height=2).to_dict(),
             BlobArtifact(value=b"\x00\x01"),
             b"raw",
         ],
@@ -467,6 +466,50 @@ class TestSerializedArtifacts:
         descriptor = value_types.normalize_value(frames, "ImageSequenceArtifact")
         assert descriptor["value_type"] == ValueType.IMAGE
         assert len(descriptor["value"]) == 3
+
+    @pytest.mark.parametrize(
+        ("tagged", "plain"),
+        [
+            (
+                {"$type": "griptape.artifacts:ImageUrlArtifact", "type": "ImageUrlArtifact", "value": "/a.png"},
+                {"type": "ImageUrlArtifact", "value": "/a.png"},
+            ),
+            ({"$type": "builtins:tuple", "$value": [1, {"$type": "pathlib:Path", "$value": "/a.png"}]}, [1, "/a.png"]),
+            ({"$type": "builtins:dict", "$value": {"$type": "data"}}, {"$type": "data"}),
+            ({"$type": "builtins:float", "$value": "inf"}, float("inf")),
+        ],
+    )
+    def test_a_tagged_value_reads_as_its_state(self, tagged: Any, plain: Any) -> None:
+        assert value_types._untagged(tagged) == plain
+
+    def test_tagged_bytes_are_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="bytes"):
+            value_types._untagged([{"$type": "builtins:bytes", "$value": "eA=="}])
+
+
+@pytest.mark.skipif(value_types.engine_values is None, reason="This engine has no value codec.")
+class TestValueCodec:
+    """Values read through the engine's own codec, not hand-written tags."""
+
+    @pytest.mark.parametrize(
+        ("value", "declared", "host_value"),
+        [
+            (ImageUrlArtifact("/show/a.png"), "ImageUrlArtifact", "/show/a.png"),
+            (ListArtifact([VideoUrlArtifact("/show/a.mov")]), "list[VideoUrlArtifact]", ["/show/a.mov"]),
+            (("/show/a.png", "/show/b.png"), "list[ImageUrlArtifact]", ["/show/a.png", "/show/b.png"]),
+            (_sequence(), "Sequence", "/show/plate/frame_####.png"),
+        ],
+    )
+    def test_a_live_value_normalizes(self, value: Any, declared: str, host_value: Any) -> None:
+        assert value_types.engine_value(value_types.normalize_value(value, declared)["value"]) == host_value
+
+    def test_bytes_inside_a_list_are_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="bytes"):
+            value_types.normalize_value([b"raw"], "list")
+
+    def test_a_value_the_codec_cannot_encode_is_unrepresentable(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="no plain-data form"):
+            value_types.normalize_value(object(), "any")
 
 
 class TestEngineValue:
