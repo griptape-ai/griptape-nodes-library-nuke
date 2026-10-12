@@ -20,6 +20,8 @@ from griptape_nodes.node_library.library_registry import LibraryRegistry
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.engine import reset_root_engine
 
+from nuke_host_api import run_outcome
+
 from .fixtures.canary.canary_workflow_builder import PublishedBundle, publish_canary_bundle
 
 if TYPE_CHECKING:
@@ -31,6 +33,7 @@ def _reset_engine() -> None:
     reset_root_engine()
     LibraryRegistry._clear()
     WorkflowRegistry._workflows.clear()
+    run_outcome.clear()
 
 
 @pytest.fixture(autouse=True)
