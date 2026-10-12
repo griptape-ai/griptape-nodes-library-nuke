@@ -72,22 +72,6 @@ make test/integration/host-api
 It uses `local_socket` rather than the plugin transport, `websocket_direct`.
 `INTEGRATION.md` defines transport behavior not covered by the smoke suite.
 
-`scripts/nuke_host_panel/` covers the rest by hand: a host in a browser, over
-`websocket_direct`, shaped like a host rather than a list of requests with buttons on them. It
-connects itself and reconnects, reads the project before the workflow list, describes before it
-loads, writes parameter edits through coalesced, locks during a run, draws progress from the run's
-node set, shows each output with the `nuke.nodes` call it would become, and keeps the runs it has
-seen. Every verb and notification is reached by that flow; the wire log and event feed are in a
-drawer. It is a testing dashboard, not a second reference client, so no part of its shape is a
-contract.
-
-```bash
-make host-api/dashboard
-```
-
-Enable `websocket_direct` first (`INTEGRATION.md`, "Connecting"). The page fetches Preact and
-htm from a CDN on first load and says so rather than rendering blank when it cannot.
-
 ## The capabilities
 
 ### 1. Connect
