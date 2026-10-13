@@ -38,6 +38,7 @@ from griptape_nodes.traits.slider import Slider
 
 from execution.direct import _STRIPPED_PYTHON_VARS, _STRIPPED_QT_VARS, DirectSubprocessProvider
 from execution.installations import NukeInstallation, find_installation, merged_installations
+from nuke_nodes.script_path import ScriptPathResolution, describe_failure, resolve_script_path, workflow_anchor_dir
 from nuke_plugin.installer import get_plugin_path
 from nuke_runner.manifest import JobManifest, KnobOverride, ManifestInput, ManifestOutput
 from script_parser.annotation import ExposedKnob, GriptapeAnnotation
@@ -327,9 +328,10 @@ class NukeScriptNode(SuccessFailureNode):
         button: Button,  # noqa: ARG002
         details: ButtonDetailsMessagePayload,  # noqa: ARG002
     ) -> NodeMessageResult:
-        script_path = str(self.get_parameter_value("script_path") or "")
-        if not script_path or not os.path.exists(script_path):
-            return NodeMessageResult(success=False, details="script_path is not set or the file does not exist.")
+        resolution = self._resolve_script_path()
+        if resolution.path is None or not os.path.exists(resolution.path):
+            return NodeMessageResult(success=False, details=describe_failure(resolution))
+        script_path = resolution.path
         nuke_exe = self._resolve_nuke_exe()
         if not nuke_exe or not os.path.exists(nuke_exe):
             return NodeMessageResult(success=False, details=f"Nuke executable not found: {nuke_exe!r}")
@@ -391,8 +393,8 @@ class NukeScriptNode(SuccessFailureNode):
         details: ButtonDetailsMessagePayload,  # noqa: ARG002
     ) -> NodeMessageResult:
         self._refresh_installation_choices()
-        script_path = str(self.get_parameter_value("script_path") or "")
-        if not script_path or not os.path.exists(script_path):
+        script_path = self._existing_script_path()
+        if script_path is None:
             return NodeMessageResult(
                 success=True, details="Installation choices refreshed.", altered_workflow_state=True
             )
@@ -418,7 +420,9 @@ class NukeScriptNode(SuccessFailureNode):
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
         if parameter.name == "script_path" and value:
-            self._refresh_dynamic_ports(str(value))
+            resolved = resolve_script_path(value, anchor_dir=workflow_anchor_dir).path
+            if resolved is not None:
+                self._refresh_dynamic_ports(resolved)
 
     def _refresh_dynamic_ports(self, script_path: str) -> None:  # noqa: C901
         # Absorb any user-defined params not yet tracked — e.g. params left behind by a
@@ -599,10 +603,9 @@ class NukeScriptNode(SuccessFailureNode):
         """Rebuild _annotations and _expose_knobs from the script if lost across workflow reload."""
         if self._annotations or self._expose_knobs:
             return
-        script_path = self.get_parameter_value("script_path") or ""
-        if not script_path or not os.path.exists(str(script_path)):
+        script_path = self._existing_script_path()
+        if script_path is None:
             return
-        script_path = str(script_path)
         sidecar_path = os.path.splitext(script_path)[0] + ".gt.json"
         if os.path.exists(sidecar_path):
             annotations, expose_knobs, is_stale = read_sidecar(sidecar_path, script_path)
@@ -613,6 +616,19 @@ class NukeScriptNode(SuccessFailureNode):
     # ------------------------------------------------------------------
     # Artifact / path resolution
     # ------------------------------------------------------------------
+
+    def _resolve_script_path(self) -> ScriptPathResolution:
+        """Resolve the Script Path parameter, expanding macros and anchoring relative text."""
+        # workflow_anchor_dir is passed uncalled: it reaches the engine, and only a
+        # relative path needs it.
+        return resolve_script_path(self.get_parameter_value("script_path"), anchor_dir=workflow_anchor_dir)
+
+    def _existing_script_path(self) -> str | None:
+        """Return the resolved Script Path when it names a file that exists, else None."""
+        resolution = self._resolve_script_path()
+        if resolution.path is None or not os.path.exists(resolution.path):
+            return None
+        return resolution.path
 
     def _artifact_to_path(
         self,
@@ -717,11 +733,13 @@ class NukeScriptNode(SuccessFailureNode):
         self._ensure_annotations()
         errors: list[Exception] = []
 
-        script_path = self.get_parameter_value("script_path") or ""
-        if not script_path:
+        resolution = self._resolve_script_path()
+        if not resolution.raw_text:
             errors.append(ValueError("script_path is required"))
-        elif not os.path.exists(str(script_path)):
-            errors.append(FileNotFoundError(f"Script not found: {script_path}"))
+        elif resolution.path is None:
+            errors.append(ValueError(describe_failure(resolution)))
+        elif not os.path.exists(resolution.path):
+            errors.append(FileNotFoundError(describe_failure(resolution)))
 
         nuke_exe = self._resolve_nuke_exe()
         if not nuke_exe:
@@ -737,11 +755,12 @@ class NukeScriptNode(SuccessFailureNode):
         details: ButtonDetailsMessagePayload,  # noqa: ARG002
     ) -> NodeMessageResult:
         self._ensure_annotations()
-        script_path = self.get_parameter_value("script_path")
+        resolution = self._resolve_script_path()
+        script_path = resolution.path
         baked_path = self.get_parameter_value("baked_script_path")
 
-        if not script_path or not os.path.exists(str(script_path)):
-            return NodeMessageResult(success=False, details="No valid script_path set.", altered_workflow_state=False)
+        if script_path is None or not os.path.exists(script_path):
+            return NodeMessageResult(success=False, details=describe_failure(resolution), altered_workflow_state=False)
         if not baked_path:
             return NodeMessageResult(
                 success=False, details="Set 'Baked Script Output Path' first.", altered_workflow_state=False
@@ -809,7 +828,10 @@ class NukeScriptNode(SuccessFailureNode):
         self._clear_execution_status()
         self._ensure_annotations()
 
-        script_path = str(self.get_parameter_value("script_path"))
+        resolution = self._resolve_script_path()
+        if resolution.path is None:
+            raise ValueError(describe_failure(resolution))
+        script_path = resolution.path
         installation = self._resolve_installation()
         nuke_exe = self._resolve_nuke_exe()
         frame_start = int(self.get_parameter_value("frame_start") or 1001)
