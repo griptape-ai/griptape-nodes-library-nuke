@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, ExecutionState, NodeState, Notification, Verb
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, NodeState, Notification, Verb
 from tests.integration.host_api_client import (
     HostClient,
     detail_of,
@@ -226,9 +226,6 @@ class TestDescribe:
                 f"{addressed} label must not be prefixed with the node, which is already its own field"
             )
             assert declared["type"] in VALUE_TYPES, f"{addressed} escaped the closed set with {declared['type']!r}"
-            assert not (isinstance(declared["default_value"], dict) and "value_type" in declared["default_value"]), (
-                f"{addressed} default must be a value, not a descriptor"
-            )
             assert declared["is_list"] in {True, False, None}
             assert isinstance(declared["choices"], list)
             assert isinstance(declared["tooltip"], str)
@@ -316,7 +313,6 @@ class TestExecute:
         mark = len(client.notifications)
         started = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
         assert succeeded(started), f"execute failed: {detail_of(started)}"
-        assert result_of(started)["state"] == ExecutionState.RUNNING, "the reply reports a run that has begun"
         assert result_of(started)["rejected_inputs"] == [], "no inputs were sent, so none may be rejected"
 
         events = _drain_run(client, mark)

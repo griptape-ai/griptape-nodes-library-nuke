@@ -18,7 +18,6 @@ from nuke_host_api.events import (
     NukeGetExecutionStateResultFailure,
     NukeGetExecutionStateResultSuccess,
 )
-from nuke_host_api.protocol import ExecutionState
 
 
 @verb(NukeExecuteWorkflowRequest)
@@ -120,7 +119,6 @@ async def _start_loaded_workflow(
 
     return NukeExecuteWorkflowResultSuccess(
         workflow_id=loaded_id,
-        state=ExecutionState.RUNNING,
         applied_inputs=applied,
         rejected_inputs=rejected,
         result_details=f"Started workflow '{loaded_id}'{' from unresolved' if request.unresolve_first else ''}.",

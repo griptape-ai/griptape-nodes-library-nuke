@@ -32,7 +32,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
-| Execution states | `running`, `succeeded`, `failed`, `cancelled` |
+| Execution states | `succeeded`, `failed`, `cancelled` |
 
 Binding rules:
 
@@ -437,15 +437,10 @@ Parameter descriptor fields:
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
 | `type` | Always one of the seven value types. For a list parameter, the type of each item |
 | `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
-| `default_value` | The workflow author's default, in the same shape as a value descriptor's `value`, macros resolved. Initialize the knob to this |
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 | `hidden` | True when the author hid the parameter in the editor. Still declared, still settable |
-
-`default_value` has the same shape as a value descriptor's `value`, so one parser reads both,
-and sending it back through `NukeSetParameterValuesRequest` resets the knob. It is `null`, or
-`[]` for a list parameter, when the author set no default or the default has no host form.
 
 Non-empty `choices` is the set of values the workflow author offers, so build an
 `Enumeration_Knob` from them. Treat the list as what to offer, not as a guarantee: the engine can
@@ -461,8 +456,8 @@ widget but leaves the port connectable, and it excludes a hidden parameter group
 workflow shape does not describe at all. Either reports `hidden: false`, so read the field as "the
 author hid this parameter" rather than "the editor shows nothing here".
 
-Every field is always present. A parameter the engine gave no metadata for reports a `null`
-default, `is_list: null`, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
+Every field is always present. A parameter the engine gave no metadata for reports
+`is_list: null`, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
 keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
@@ -502,7 +497,6 @@ arrives. Never branch on the declared type at runtime.
       "name": "Topic",
       "type": "GTText",
       "is_list": false,
-      "default_value": "a quiet harbour at dusk",
       "choices": [],
       "tooltip": "What the shot is about.",
       "settable": true,
@@ -514,7 +508,6 @@ arrives. Never branch on the declared type at runtime.
       "name": "Size",
       "type": "GTText",
       "is_list": false,
-      "default_value": "1024x1024",
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
       "tooltip": "",
       "settable": true,
@@ -526,7 +519,6 @@ arrives. Never branch on the declared type at runtime.
       "name": "Frame Rate",
       "type": "GTFloat",
       "is_list": false,
-      "default_value": 23.976,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -540,7 +532,6 @@ arrives. Never branch on the declared type at runtime.
       "name": "was_successful",
       "type": "GTBool",
       "is_list": false,
-      "default_value": null,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -552,7 +543,6 @@ arrives. Never branch on the declared type at runtime.
       "name": "result_details",
       "type": "GTText",
       "is_list": false,
-      "default_value": null,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -564,7 +554,6 @@ arrives. Never branch on the declared type at runtime.
       "name": "summary",
       "type": "GTText",
       "is_list": false,
-      "default_value": null,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -601,7 +590,6 @@ workflows; neither is refused too.
 |---|---|---|
 | `workflow_id` | `str` | The loaded workflow's id. Resolved from `file_path` when that is what was sent, so this is how a host learns the id to use afterwards |
 | `name` | `str` | Display label |
-| `description` | `str` | |
 | `inputs` | `list[dict]` | Declared start-flow parameter descriptors, identical to `NukeDescribeWorkflowResultSuccess.inputs`. Build knobs from these |
 | `outputs` | `list[dict]` | Declared end-flow parameter descriptors |
 | `input_values` | `dict` | `{node: {parameter: value_descriptor}}`, identical in shape to `NukeGetParameterValuesResultSuccess.inputs`. Initialize knobs to these |
@@ -610,9 +598,8 @@ workflows; neither is refused too.
 
 Four fields separate declarations, which are fixed for the workflow, from values, which change on every run. Their shapes match the describe and bulk-read verbs.
 
-**Initialize knobs from `input_values`, not from `default_value`.** `default_value` is the
-workflow author's value; `input_values` is what the graph currently holds. They differ for any
-workflow whose inputs have been touched. `default_value` is what a reset-to-default button sends.
+**Initialize knobs from `input_values`.** It is what the graph currently holds, which differs
+from the author's defaults for any workflow whose inputs have been touched.
 
 ```json
 { "workflow_id": "nuke_api_smoke" }
@@ -622,7 +609,6 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
 {
   "workflow_id": "nuke_api_smoke",
   "name": "Nuke API Smoke",
-  "description": "",
   "inputs": [
     {
       "node": "Start Flow",
@@ -630,7 +616,6 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "name": "Topic",
       "type": "GTText",
       "is_list": false,
-      "default_value": "a quiet harbour at dusk",
       "choices": [],
       "tooltip": "What the shot is about.",
       "settable": true,
@@ -644,7 +629,6 @@ workflow whose inputs have been touched. `default_value` is what a reset-to-defa
       "name": "was_successful",
       "type": "GTBool",
       "is_list": false,
-      "default_value": null,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -748,7 +732,6 @@ the request instead of starting a run that would hand those same values back.
 | `NukeExecuteWorkflowResultSuccess` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The workflow that started. Always the loaded one, so a host that sent no id still learns what it started |
-| `state` | `str` | Always `running`, which says the run started and nothing about its outcome. The verdict arrives later as `NukeExecutionStateEvent` |
 | `applied_inputs` | `list[dict]` | `{node, parameter}` the engine accepted |
 | `rejected_inputs` | `list[dict]` | `{node, parameter, reason}` |
 
@@ -766,7 +749,6 @@ the request instead of starting a run that would hand those same values back.
 ```json
 {
   "workflow_id": "nuke_api_smoke",
-  "state": "running",
   "applied_inputs": [
     {
       "node": "Start Flow",
@@ -1040,9 +1022,7 @@ the next three verbs let a host see which project the engine is on and change it
 |---|---|---|
 | `id` | `str` | Opaque. Feed to `NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`. Do not parse or display |
 | `name` | `str` | Display label. Empty for a failed entry rather than falling back to the opaque `id` |
-| `description` | `str` | Always empty here. Read `NukeDescribeProjectRequest` for the real value |
 | `file_path` | `str` | Absolute path to the project's YAML. Empty only for a project with no backing file (the system defaults); a failed entry's `id` is already that path, so it is reused here |
-| `parent_id` | `str` | The parent project's id, empty when this project has no parent |
 | `current` | `bool` | True for the project the engine is on right now |
 | `available` | `bool` | False when the template failed validation, or when its adjacent config requires an engine version this engine fails |
 | `unavailable_reason` | `str` | Why an entry is greyed out. Empty when `available` |
@@ -1053,9 +1033,7 @@ the next three verbs let a host see which project the engine is on and change it
     {
       "id": "proj-1",
       "name": "Nuke Smoke Project",
-      "description": "",
       "file_path": "/projects/proj-1/griptape-nodes-project.yml",
-      "parent_id": "",
       "current": true,
       "available": true,
       "unavailable_reason": ""
@@ -1070,11 +1048,7 @@ No arguments.
 
 | `NukeGetCurrentProjectResultSuccess` field | Type | Notes |
 |---|---|---|
-| `id` | `str` | Opaque, as above |
 | `name` | `str` | |
-| `description` | `str` | Empty when the author wrote none |
-| `file_path` | `str` | Empty for a project with no backing file, the system defaults project |
-| `base_dir` | `str` | Directory this project resolves its own relative paths against. Diagnostic |
 | `workspace_dir` | `str` | The workspace directory the engine is actually using right now, read live. Never empty, including on the system defaults project |
 | `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING`. `GOOD` and `FLAWED` are usable; the other two are not |
 | `problems` | `list[str]` | Human-readable validation messages, for display. Empty when `validation_status` is `GOOD` |
@@ -1084,11 +1058,7 @@ engine treats as distinct from being on the system defaults project.
 
 ```json
 {
-  "id": "proj-1",
   "name": "Nuke Smoke Project",
-  "description": "",
-  "file_path": "/projects/proj-1/griptape-nodes-project.yml",
-  "base_dir": "/projects/proj-1",
   "workspace_dir": "/workspace/proj-1",
   "validation_status": "GOOD",
   "problems": []
@@ -1099,7 +1069,7 @@ engine treats as distinct from being on the system defaults project.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
-| `project_id` | `str \| null` | `null` | Id from `NukeListProjectsRequest` or `NukeGetCurrentProjectRequest`. `null` requests the system defaults, mirroring the engine's own request exactly |
+| `project_id` | `str \| null` | `null` | Id from `NukeListProjectsRequest`. `null` requests the system defaults, mirroring the engine's own request exactly |
 
 | `NukeSetCurrentProjectResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -1158,8 +1128,6 @@ Preview a project's workspace and validation before activating it with
 
 | `NukeDescribeProjectResultSuccess` field | Type | Notes |
 |---|---|---|
-| `project_id` | `str` | Echoed |
-| `name` | `str` | |
 | `description` | `str` | Empty when the author wrote none |
 | `workspace_dir` | `str` | The workspace directory this project would resolve to if activated, empty when the id resolves to no readable project file |
 | `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING` |
@@ -1167,8 +1135,6 @@ Preview a project's workspace and validation before activating it with
 
 ```json
 {
-  "project_id": "proj-2",
-  "name": "Second Unit Project",
   "description": "",
   "workspace_dir": "/workspace/proj-2",
   "validation_status": "GOOD",
@@ -1224,7 +1190,7 @@ editor cancels it (see below).
 
 | Field | Type | Notes |
 |---|---|---|
-| `state` | `str` | `succeeded`, `failed`, or `cancelled`. `running` never arrives on this notification: execute's reply is what reports a run as begun |
+| `state` | `str` | `succeeded`, `failed`, or `cancelled`. A successful execute reply is what reports a run as begun |
 | `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node. Empty when the flow never resolved |
 | `detail` | `str` | Human-readable reason. For `failed`, the engine's error |
 

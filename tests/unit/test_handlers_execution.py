@@ -36,7 +36,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryRequest,
 )
 
-from nuke_host_api import execution_bridge, run_outcome, shape
+from nuke_host_api import execution_bridge, run_outcome
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultFailure,
@@ -80,7 +80,6 @@ class TestExecuteWorkflow:
         await settled()
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        assert result.state == ExecutionState.RUNNING
         assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
         assert result.rejected_inputs == []
 
@@ -378,29 +377,6 @@ class TestExecuteWorkflow:
         assert "unsaved" not in details
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
-
-    async def test_the_preflight_reads_parameter_identity_without_normalizing_defaults(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Normalizing a macro-templated default issues an engine request.
-
-        The input allow-list needs node and parameter names only, so paying for resolution it
-        then discards would put avoidable engine round-trips on every execution.
-        """
-
-        def explode(*_args: Any, **_kwargs: Any) -> Any:
-            msg = "execute must not normalize parameter defaults; it needs identity only"
-            raise AssertionError(msg)
-
-        use_engine(monkeypatch, execute_responses())
-        monkeypatch.setattr(shape, "normalize_value", explode)
-
-        result = await handle_execute_workflow(
-            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
-        )
-
-        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "topic"}]
 
     async def test_short_circuits_when_the_loaded_workflow_has_no_top_level_flow(
         self, monkeypatch: pytest.MonkeyPatch
