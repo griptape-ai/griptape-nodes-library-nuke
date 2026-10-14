@@ -115,8 +115,7 @@ The engine has no load-and-describe entry point. Loading uses four engine reques
 The reply carries four fields rather than two: `inputs` and `outputs` are exactly
 `describe_workflow`'s parameter lists, and `input_values` and `output_values` are exactly
 `NukeGetParameterValuesRequest`'s maps. No new shape, and no field with two meanings. A
-parameter's declaration and its current value have different lifetimes, so folding a value
-into a descriptor would make `default_value` and `value` look like variants of one thing.
+parameter's declaration and its current value have different lifetimes, so they stay apart.
 
 `workflow_id` or `file_path`, never both, since they can name different workflows and guessing
 is worse than refusing. A `file_path` is imported and registered first, so a host can hand
@@ -205,10 +204,8 @@ next call; the other two are not the host's doing. Telling a host to save a work
 saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
 because then there is nothing to check against the allow-list.
 
-`NukeDescribeWorkflowRequest` carries each parameter's `is_list`, `default_value`, `choices`,
-`tooltip`, `settable`, and `hidden` alongside its type. The default is the value a host sets a knob
-to, in the same shape as a descriptor's `value`, with macros resolved. `choices` is what an
-`Enumeration_Knob` offers.
+`NukeDescribeWorkflowRequest` carries each parameter's `is_list`, `choices`, `tooltip`,
+`settable`, and `hidden` alongside its type. `choices` is what an `Enumeration_Knob` offers.
 
 `choices` carries the values, and nothing carries whether the engine enforces them. The `Options`
 trait can repopulate a dropdown at run time while the value the graph holds stays as it was, so a
@@ -584,8 +581,7 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 - **Registry entries can be stale.** `NukeListWorkflowsRequest` checks that a workflow's
   file still exists, because the registry keeps entries for deleted files and its own
   `is_saved` flag stays true for them.
-- **Parameter metadata exposes only `default_value`, `choices`, `tooltip`, `settable`, and
-  `hidden`.**
+- **Parameter metadata exposes only `choices`, `tooltip`, `settable`, and `hidden`.**
   The engine also carries slider ranges (`range_slider`, `step`), multi-select dropdowns
   (`multi_options`), `multiline`, and `hide_property` in `ui_options`. Passing that dict through raw
   would bind plugin authors to editor vocabulary, so a Nuke knob's metadata must be narrowed into

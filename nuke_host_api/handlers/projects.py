@@ -80,9 +80,7 @@ def _describe_project(info: ProjectTemplateInfo, *, current_id: str, loaded: boo
     return {
         "id": info.project_id,
         "name": info.name or "",
-        "description": "",
         "file_path": file_path or "",
-        "parent_id": info.parent_project_id or "",
         "current": info.project_id == current_id,
         "available": available,
         "unavailable_reason": unavailable_reason,
@@ -111,11 +109,7 @@ async def handle_get_current_project(
 
     info = current.value.project_info
     return NukeGetCurrentProjectResultSuccess(
-        id=str(info.project_id),
         name=info.template.name,
-        description=info.template.description or "",
-        file_path=str(info.project_file_path) if info.project_file_path is not None else "",
-        base_dir=str(info.project_base_dir),
         workspace_dir=await _current_workspace_dir(),
         validation_status=str(info.validation.status),
         problems=[problem.message for problem in info.validation.problems],
@@ -180,8 +174,6 @@ async def handle_describe_project(
         )
 
     return NukeDescribeProjectResultSuccess(
-        project_id=request.project_id,
-        name=template.value.template.name,
         description=template.value.template.description or "",
         workspace_dir=await _resolve_workspace_dir(request.project_id),
         validation_status=str(template.value.validation.status),

@@ -234,9 +234,7 @@ class TestGetCurrentProject:
     async def test_flattens_project_info_to_named_primitives(self, monkeypatch: pytest.MonkeyPatch) -> None:
         info = _project_info(
             "proj-1",
-            file_path=Path("/projects/proj-1/griptape-nodes-project.yml"),
-            base_dir=Path("/projects/proj-1"),
-            template=_template("Proj One", "a description"),
+            template=_template("Proj One"),
             validation=_validation(ProjectValidationStatus.FLAWED, problems=["something is off"]),
         )
         responses = {**_current(info), **_workspace("/workspace/proj-1")}
@@ -245,11 +243,7 @@ class TestGetCurrentProject:
         result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
-        assert result.id == "proj-1"
         assert result.name == "Proj One"
-        assert result.description == "a description"
-        assert result.file_path == "/projects/proj-1/griptape-nodes-project.yml"
-        assert result.base_dir == "/projects/proj-1"
         assert result.workspace_dir == "/workspace/proj-1"
         assert result.validation_status == "FLAWED"
         assert result.problems == ["something is off"]
@@ -261,15 +255,10 @@ class TestGetCurrentProject:
 
         assert isinstance(result, NukeGetCurrentProjectResultFailure)
 
-    async def test_a_project_with_no_backing_file_reports_an_empty_file_path(
+    async def test_the_system_defaults_project_reports_its_live_workspace(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The system defaults project has no backing file, but it still has a real, live workspace.
-
-        ``file_path`` is empty because the defaults are not file-backed. ``workspace_dir`` is
-        not: GetWorkspaceRequest names no project id to fail to resolve, so it answers with
-        whatever workspace the engine is actually configured against, defaults included.
-        """
+        """GetWorkspaceRequest names no project id to fail to resolve, so the defaults still report one."""
         info = _project_info("<system-defaults>", file_path=None)
         responses = {**_current(info), **_workspace("/workspace/global")}
         use_engine(monkeypatch, responses)
@@ -277,7 +266,6 @@ class TestGetCurrentProject:
         result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
-        assert result.file_path == ""
         assert result.workspace_dir == "/workspace/global"
 
 
@@ -398,8 +386,6 @@ class TestDescribeProject:
         result = await handle_describe_project(NukeDescribeProjectRequest(project_id="proj-2"))
 
         assert isinstance(result, NukeDescribeProjectResultSuccess)
-        assert result.project_id == "proj-2"
-        assert result.name == "Proj Two"
         assert result.description == "another project"
         assert result.workspace_dir == "/workspace/proj-2"
         assert result.validation_status == "GOOD"

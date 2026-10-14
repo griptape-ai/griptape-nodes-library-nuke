@@ -98,7 +98,6 @@ class NukeLoadWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSucces
 
     workflow_id: str
     name: str
-    description: str
     inputs: list[dict[str, Any]] = field(default_factory=list)
     outputs: list[dict[str, Any]] = field(default_factory=list)
     input_values: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -132,7 +131,6 @@ class NukeExecuteWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuc
     """No execution ID is available because engine events carry none."""
 
     workflow_id: str
-    state: str
     applied_inputs: list[dict[str, str]]
     rejected_inputs: list[dict[str, str]]
 
@@ -243,8 +241,6 @@ class NukeListProjectsRequest(RequestPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeListProjectsResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
-    """Project descriptions require per-project reads and are empty in this list."""
-
     projects: list[dict[str, Any]]
 
 
@@ -265,11 +261,7 @@ class NukeGetCurrentProjectRequest(RequestPayload):
 class NukeGetCurrentProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
     """Project IDs are opaque and may be canonical file paths for legacy projects."""
 
-    id: str
     name: str
-    description: str
-    file_path: str
-    base_dir: str
     workspace_dir: str
     validation_status: str
     problems: list[str] = field(default_factory=list)
@@ -313,8 +305,6 @@ class NukeDescribeProjectRequest(RequestPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeDescribeProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
-    project_id: str
-    name: str
     description: str
     workspace_dir: str
     validation_status: str

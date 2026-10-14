@@ -77,7 +77,6 @@ async def test_a_node_error_is_published_as_failed(
 
     result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result
-    assert result.state == ExecutionState.RUNNING
 
     await settled()
     assert [v.state for v in verdicts] == [ExecutionState.FAILED], verdicts

@@ -119,7 +119,6 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
     return NukeLoadWorkflowResultSuccess(
         workflow_id=workflow_id,
         name=str(entry.get("name") or workflow_id),
-        description=str(entry.get("description") or ""),
         inputs=shape.declared_parameters(declared_shape.get("inputs")),
         outputs=shape.declared_parameters(declared_shape.get("outputs")),
         input_values=input_values,
