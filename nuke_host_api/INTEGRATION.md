@@ -808,7 +808,8 @@ saving: a workflow that declares nothing still will next time, while the other t
 state that moved. A host told to save a workflow it already saved has been sent down the wrong
 recovery path.
 
-None of the three fires when `inputs` is empty. With nothing to check, what the workflow declares
+None of the three fires when `inputs` carries no parameters, whether it is `{}` or only empty
+node entries like `{"Start Flow": {}}`. With nothing to check, what the workflow declares
 does not bear on the run, so a graph with no declared shape still executes.
 
 A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.

@@ -249,6 +249,20 @@ class TestExecuteWorkflow:
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
+    async def test_empty_node_entries_run_a_graph_that_declares_no_inputs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hosts that group inputs by node send an empty entry for a start node with no data parameters."""
+        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {}}))
+        await settled()
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.applied_inputs == []
+        assert result.rejected_inputs == []
+        assert sum(isinstance(request, StartFlowRequest) for request in engine.requests) == 1
+
     async def test_an_unreadable_registry_is_a_retryable_refusal_not_a_graph_that_declares_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
