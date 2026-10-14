@@ -68,8 +68,7 @@ async def handle_set_parameter_values(
     attempted = "to set parameter values on the loaded workflow"
     loaded_id = await engine.current_workflow_id()
 
-    nothing_to_act_on = all(isinstance(parameters, dict) and not parameters for parameters in request.inputs.values())
-    if nothing_to_act_on:
+    if parameter_values.carries_no_values(request.inputs):
         return failure(
             NukeSetParameterValuesResultFailure,
             attempted=attempted,

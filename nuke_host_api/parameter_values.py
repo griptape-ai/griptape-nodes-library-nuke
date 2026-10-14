@@ -68,6 +68,11 @@ async def read_section(section: object) -> tuple[dict[str, dict[str, Any]], list
     return values, missing
 
 
+def carries_no_values(inputs: Mapping[str, object]) -> bool:
+    """A node entry that is not a dict still counts, so malformed entries reach validation."""
+    return all(isinstance(parameters, dict) and not parameters for parameters in inputs.values())
+
+
 class InputRefusal(NamedTuple):
     because: str
     error: type[Exception]
