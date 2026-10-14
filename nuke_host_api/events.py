@@ -259,8 +259,6 @@ class NukeGetCurrentProjectRequest(RequestPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeGetCurrentProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
-    """Project IDs are opaque and may be canonical file paths for legacy projects."""
-
     name: str
     workspace_dir: str
     validation_status: str

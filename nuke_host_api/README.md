@@ -297,8 +297,8 @@ Workflows are registered per workspace, and the current project selects the work
 `ProjectTemplateInfo` are engine dataclasses, and `ProjectInfo` additionally carries parsed
 macro caches. None of them cross the boundary; every field a host reads is a named primitive,
 exactly the way `shape.declared_parameters` narrows a parameter dict.
-Project ids are opaque the same way workflow ids are: `NukeListProjectsRequest` and
-`NukeGetCurrentProjectRequest` hand one back, a host feeds it to
+Project ids are opaque the same way workflow ids are: `NukeListProjectsRequest` hands one
+back, a host feeds it to
 `NukeSetCurrentProjectRequest` or `NukeDescribeProjectRequest`, and it is never parsed or
 constructed. `NukeSetCurrentProjectRequest.project_id: None` asks for the system defaults,
 mirroring the engine's own `SetCurrentProjectRequest` exactly rather than inventing a
@@ -310,9 +310,7 @@ with a single `runnable` flag rather than two lists a host must merge itself. It
 two unrelated engine mechanisms, a validation failure and an engine-version incompatibility
 declared in a project's adjacent config, into one `available` flag and a human-readable
 `unavailable_reason`, because a host disabling a menu entry does not need to know which
-mechanism fired. `description` is always empty in the list, because the engine's listing
-does not carry each template's description, only `NukeDescribeProjectRequest` and
-`NukeGetCurrentProjectRequest` read the full template that has one.
+mechanism fired.
 
 `NukeSetCurrentProjectRequest` refuses while the engine is executing, with the same wording
 `NukeExecuteWorkflowRequest`'s running-guard uses: reloading libraries out from under a live
