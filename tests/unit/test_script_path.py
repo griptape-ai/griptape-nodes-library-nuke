@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from griptape_nodes.retained_mode.events.library_events import (
+    GetLibrarySourceInfoRequest,
+    GetLibrarySourceInfoResultSuccess,
+)
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
     GetPathForMacroResultFailure,
@@ -17,25 +21,61 @@ from nuke_nodes import script_path as script_path_module
 from nuke_nodes.script_path import (
     ScriptPathResolution,
     describe_failure,
+    library_dir,
     resolve_script_path,
     workflow_anchor_dir,
 )
 
 
+class FakeLibraryManager:
+    """Stands in for GriptapeNodes.LibraryManager(), mapping a node type to a library name."""
+
+    def __init__(self, library_name: str | None) -> None:
+        self._library_name = library_name
+
+    def get_library_name_for_node_type(self, node_type: str) -> str | None:  # noqa: ARG002
+        return self._library_name
+
+
 class FakeEngine:
     """Stands in for the GriptapeNodes facade, recording the macros it was asked to resolve."""
 
-    def __init__(self, resolved: str | None, missing: set[str] | None = None, absolute: str | None = None) -> None:
+    def __init__(
+        self,
+        resolved: str | None,
+        missing: set[str] | None = None,
+        absolute: str | None = None,
+        library_name: str | None = None,
+        library_directory: str | None = None,
+    ) -> None:
         self._resolved = resolved
         self._missing = missing or {"workspace_dir"}
         # Diverges from resolved_path by default: the engine anchors absolute_path on the
         # workspace, and a fake that returns the same string for both cannot catch code
         # reading the wrong field.
         self._absolute = absolute if absolute is not None else f"/engine/workspace/{resolved}"
+        self._library_name = library_name
+        self._library_directory = library_directory
         self.requests: list[Any] = []
+
+    def LibraryManager(self) -> FakeLibraryManager:  # noqa: N802
+        return FakeLibraryManager(self._library_name)
 
     def handle_request(self, request: Any) -> Any:
         self.requests.append(request)
+        if isinstance(request, GetLibrarySourceInfoRequest):
+            if self._library_directory is None:
+                return GetPathForMacroResultFailure(
+                    failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
+                    missing_variables=set(),
+                    result_details="library not found",
+                )
+            return GetLibrarySourceInfoResultSuccess(
+                library_name=request.library,
+                library_json_path=f"{self._library_directory}/griptape-nodes-library.json",
+                library_directory=self._library_directory,
+                result_details="resolved",
+            )
         if self._resolved is None:
             return GetPathForMacroResultFailure(
                 failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
@@ -51,8 +91,14 @@ class FakeEngine:
 
 @pytest.fixture
 def engine(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
-    def install(resolved: str | None, missing: set[str] | None = None, absolute: str | None = None) -> FakeEngine:
-        fake = FakeEngine(resolved, missing, absolute)
+    def install(
+        resolved: str | None,
+        missing: set[str] | None = None,
+        absolute: str | None = None,
+        library_name: str | None = None,
+        library_directory: str | None = None,
+    ) -> FakeEngine:
+        fake = FakeEngine(resolved, missing, absolute, library_name, library_directory)
         monkeypatch.setattr(script_path_module, "GriptapeNodes", fake)
         return fake
 
@@ -192,6 +238,65 @@ class TestLazyAnchor:
         engine("/unused")
         resolution = resolve_script_path("comp.nk", anchor_dir=lambda: None)
         assert resolution.path == "comp.nk"
+
+
+class TestLibraryDirToken:
+    """{library_dir} anchors a shipped template to its library, surviving SAVE_FROM_TEMPLATE."""
+
+    def test_a_library_dir_token_is_substituted_before_other_macros(self, engine) -> None:  # noqa: ANN001
+        engine("/ws/comp.nk", library_name="nuke_lib", library_directory="/library/my_lib")
+        resolution = resolve_script_path(
+            "{library_dir}/scripts/comp.nk",
+            anchor_dir="/engine/workspace",
+            library_dir="/library/my_lib",
+        )
+        assert resolution.path == "/library/my_lib/scripts/comp.nk"
+
+    def test_the_workflow_dir_anchor_is_never_consulted_once_library_dir_resolves(self, engine) -> None:  # noqa: ANN001
+        # Simulates post-SAVE_FROM_TEMPLATE: {workflow_dir} now resolves to the workspace,
+        # but {library_dir} still finds the library's own folder.
+        engine("sh010/comp.nk", library_name="nuke_lib", library_directory="/library/my_lib")
+        resolution = resolve_script_path(
+            "{library_dir}/comp.nk",
+            anchor_dir="/engine/workspace",
+            library_dir="/library/my_lib",
+        )
+        assert resolution.path == "/library/my_lib/comp.nk"
+        assert "/engine/workspace" not in (resolution.path or "")
+
+    def test_a_missing_library_dir_leaves_the_token_untouched_and_the_macro_branch_reports_it(
+        self,
+        engine,  # noqa: ANN001
+    ) -> None:
+        engine(None, missing={"library_dir"})
+        resolution = resolve_script_path("{library_dir}/comp.nk", library_dir=lambda: None)
+        assert resolution.path is None
+        assert resolution.failure_reason is not None
+
+    def test_library_dir_is_resolved_lazily(self, engine) -> None:  # noqa: ANN001
+        engine("/unused")
+        calls: list[int] = []
+
+        def lazy_library_dir() -> str:
+            calls.append(1)
+            return "/library/my_lib"
+
+        resolve_script_path("/shots/comp.nk", library_dir=lazy_library_dir)
+        assert calls == []
+
+
+class TestLibraryDirFunction:
+    def test_library_dir_resolves_through_the_owning_library(self, engine) -> None:  # noqa: ANN001
+        engine("/unused", library_name="nuke_lib", library_directory="/library/my_lib")
+        assert library_dir("NukeScriptNode") == "/library/my_lib"
+
+    def test_library_dir_is_none_when_the_node_type_has_no_library(self, engine) -> None:  # noqa: ANN001
+        engine("/unused", library_name=None)
+        assert library_dir("NukeScriptNode") is None
+
+    def test_library_dir_is_none_when_the_library_cannot_be_found(self, engine) -> None:  # noqa: ANN001
+        engine("/unused", library_name="nuke_lib", library_directory=None)
+        assert library_dir("NukeScriptNode") is None
 
 
 class TestWorkflowAnchorDir:

@@ -7,6 +7,10 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro
+from griptape_nodes.retained_mode.events.library_events import (
+    GetLibrarySourceInfoRequest,
+    GetLibrarySourceInfoResultSuccess,
+)
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
     GetPathForMacroResultFailure,
@@ -30,27 +34,29 @@ class ScriptPathResolution(NamedTuple):
 
 
 def resolve_script_path(
-    raw: str | None, *, anchor_dir: str | Callable[[], str | None] | None = None
+    raw: str | None,
+    *,
+    anchor_dir: str | Callable[[], str | None] | None = None,
+    library_dir: str | Callable[[], str | None] | None = None,
 ) -> ScriptPathResolution:
-    """Resolve Script Path text, expanding project macros and anchoring relative paths.
-
-    Mirrors how the node already resolves its output paths, so a workflow that travels
-    between machines can carry a Script Path such as ``{workspace_dir}/shots/comp.nk``.
-
-    ``anchor_dir`` may be a callable, which is invoked only once the path turns out to be
-    relative. Resolving an anchor costs an engine round-trip, and empty or already-absolute
-    text -- the common cases -- never needs one.
-    """
+    """Resolve Script Path text, expanding project macros and anchoring relative paths."""
     text = (raw or "").strip()
     if not text:
         return ScriptPathResolution(path=None, raw_text="", failure_reason=None, missing_variables=())
 
     resolved = text
-    if "{" in text:
+    if "{library_dir}" in resolved and library_dir is not None:
+        # Not a real engine macro: the engine has no notion of "the library this node
+        # came from", so it is substituted here before the rest reaches ParsedMacro.
+        base = library_dir() if callable(library_dir) else library_dir
+        if base:
+            resolved = resolved.replace("{library_dir}", base)
+
+    if "{" in resolved:
         # A macro that cannot be read is reported rather than passed through, so the node
         # never stats a literal "{workspace_dir}/..." directory and blames a missing file.
         try:
-            parsed_macro = ParsedMacro(text)
+            parsed_macro = ParsedMacro(resolved)
         except MacroSyntaxError as e:
             return ScriptPathResolution(path=None, raw_text=text, failure_reason=str(e), missing_variables=())
 
@@ -63,10 +69,7 @@ def resolve_script_path(
                 failure_reason=macro_failure_reason(result),
                 missing_variables=tuple(sorted(missing or ())),
             )
-        # resolved_path, not absolute_path: the engine anchors the latter on the workspace, so a
-        # macro expanding to relative text would land there instead of beside a library template
-        # that lives outside it -- the case this node exists to serve. griptape-nodes-library-standard
-        # reads absolute_path for the opposite reason: its files are workspace-resident.
+        # Not absolute_path: the engine anchors that on the workspace, not the workflow.
         resolved = str(result.resolved_path)
 
     if not os.path.isabs(os.path.expanduser(resolved)) and anchor_dir is not None:
@@ -101,18 +104,21 @@ def describe_failure(resolution: ScriptPathResolution) -> str:
 
 
 def workflow_anchor_dir() -> str | None:
-    """Return the current workflow's directory, which relative Script Paths anchor to.
-
-    For a workflow shipped inside a library this is the library's own folder: the engine
-    registers out-of-workspace workflows by absolute path, so ``{workflow_dir}`` lands
-    beside the template rather than in the workspace.
-    """
-    try:
-        parsed = ParsedMacro("{workflow_dir}")
-    except MacroSyntaxError:
-        return None
+    """Return the current workflow's directory, which relative Script Paths anchor to."""
+    parsed = ParsedMacro("{workflow_dir}")
     result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=parsed, variables={}))
     if not isinstance(result, GetPathForMacroResultSuccess):
         # An unsaved workflow has no directory yet; relative paths simply stay relative.
         return None
     return str(result.resolved_path)
+
+
+def library_dir(node_type: str) -> str | None:
+    """Return the folder of the library that provides node_type, for anchoring shipped-template paths."""
+    library_name = GriptapeNodes.LibraryManager().get_library_name_for_node_type(node_type)
+    if library_name is None:
+        return None
+    result = GriptapeNodes.handle_request(GetLibrarySourceInfoRequest(library=library_name))
+    if not isinstance(result, GetLibrarySourceInfoResultSuccess):
+        return None
+    return result.library_directory

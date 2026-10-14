@@ -929,3 +929,55 @@ class TestScriptPathMacroResolution:
             node.after_value_set(mock_param, "{workspace_dir}/comp.nk")
 
         node._refresh_dynamic_ports.assert_called_once_with(str(nk_file))
+
+    def test_validate_resolves_a_flow_variable_that_aprocess_would_have_substituted(self, tmp_path: Path) -> None:
+        nk_file = tmp_path / "sh010" / "comp.nk"
+        nk_file.parent.mkdir()
+        nk_file.write_text("")
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{workspace_dir}/{shot}/comp.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+        node._ensure_annotations = MagicMock()
+
+        with (
+            patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(f"{tmp_path}/{{shot}}")),
+            patch(
+                "nuke_nodes.nuke_script_node.VariableResolver.get_variables_without_memoizing",
+                return_value={"shot": "sh010"},
+            ),
+        ):
+            errors = node.validate_before_node_run() or []
+
+        unknown_variable_errors = [e for e in errors if "unknown variable" in str(e)]
+        assert unknown_variable_errors == []
+
+    def test_validate_reports_unknown_when_no_flow_variable_resolves_shot(self, tmp_path: Path) -> None:
+        from griptape_nodes.retained_mode.events.project_events import (
+            GetPathForMacroResultFailure,
+            PathResolutionFailureReason,
+        )
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{shot}/comp.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+        node._ensure_annotations = MagicMock()
+
+        engine = MagicMock()
+        engine.handle_request.return_value = GetPathForMacroResultFailure(
+            failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
+            missing_variables={"shot"},
+            result_details="missing required variables",
+        )
+
+        with (
+            patch("nuke_nodes.script_path.GriptapeNodes", engine),
+            patch(
+                "nuke_nodes.nuke_script_node.VariableResolver.get_variables_without_memoizing",
+                return_value=None,
+            ),
+        ):
+            errors = node.validate_before_node_run() or []
+
+        unknown_variable_errors = [e for e in errors if "unknown variable(s) shot" in str(e)]
+        assert len(unknown_variable_errors) == 1

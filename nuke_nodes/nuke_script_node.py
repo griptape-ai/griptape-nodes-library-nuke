@@ -19,6 +19,7 @@ from griptape_nodes.exe_types.core_types import NodeMessageResult, Parameter, Pa
 from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_types.parameter_button import ParameterButton
 from griptape_nodes.exe_types.param_types.parameter_string import ParameterString
+from griptape_nodes.exe_types.variable_resolver import VariableResolver
 from griptape_nodes.files.file import File
 from griptape_nodes.files.project_file import ProjectFileDestination
 from griptape_nodes.retained_mode.events.os_events import (
@@ -38,7 +39,13 @@ from griptape_nodes.traits.slider import Slider
 
 from execution.direct import _STRIPPED_PYTHON_VARS, _STRIPPED_QT_VARS, DirectSubprocessProvider
 from execution.installations import NukeInstallation, find_installation, merged_installations
-from nuke_nodes.script_path import ScriptPathResolution, describe_failure, resolve_script_path, workflow_anchor_dir
+from nuke_nodes.script_path import (
+    ScriptPathResolution,
+    describe_failure,
+    library_dir,
+    resolve_script_path,
+    workflow_anchor_dir,
+)
 from nuke_plugin.installer import get_plugin_path
 from nuke_runner.manifest import JobManifest, KnobOverride, ManifestInput, ManifestOutput
 from script_parser.annotation import ExposedKnob, GriptapeAnnotation
@@ -204,6 +211,12 @@ class NukeScriptNode(SuccessFailureNode):
             default_value="",
             display_name="Script Path (.nk)",
             allow_output=False,
+            tooltip=(
+                "Path to a .nk script. Supports project macros such as {workspace_dir} and "
+                "{shot}. A template shipped inside a library should use {library_dir} rather "
+                "than {workflow_dir}: {workflow_dir} tracks the library's folder only until the "
+                "template is saved into the workspace, after which it points there instead."
+            ),
         )
         script_path_param.add_trait(
             FileSystemPicker(allow_files=True, allow_directories=False, file_extensions=[".nk"])
@@ -420,7 +433,7 @@ class NukeScriptNode(SuccessFailureNode):
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
         if parameter.name == "script_path" and value:
-            resolved = resolve_script_path(value, anchor_dir=workflow_anchor_dir).path
+            resolved = self._resolve_script_path_text(value).path
             if resolved is not None:
                 self._refresh_dynamic_ports(resolved)
 
@@ -618,10 +631,24 @@ class NukeScriptNode(SuccessFailureNode):
     # ------------------------------------------------------------------
 
     def _resolve_script_path(self) -> ScriptPathResolution:
-        """Resolve the Script Path parameter, expanding macros and anchoring relative text."""
-        # workflow_anchor_dir is passed uncalled: it reaches the engine, and only a
-        # relative path needs it.
-        return resolve_script_path(self.get_parameter_value("script_path"), anchor_dir=workflow_anchor_dir)
+        """Resolve the Script Path parameter, expanding variables and macros and anchoring relative text."""
+        return self._resolve_script_path_text(self.get_parameter_value("script_path"))
+
+    def _resolve_script_path_text(self, raw: Any) -> ScriptPathResolution:
+        """Resolve arbitrary Script Path text the same way _resolve_script_path does."""
+        if isinstance(raw, str):
+            # Outside aprocess the engine leaves flow variables unsubstituted, and
+            # GetPathForMacroRequest does not consult them.
+            variables = VariableResolver.get_variables_without_memoizing(self.name)
+            if variables:
+                raw = VariableResolver.resolve_string(raw, variables, self.name)
+        # anchor_dir/library_dir are passed uncalled: each reaches the engine, and only a
+        # relative path, or one containing {library_dir}, needs one.
+        return resolve_script_path(
+            raw,
+            anchor_dir=workflow_anchor_dir,
+            library_dir=lambda: library_dir(type(self).__name__),
+        )
 
     def _existing_script_path(self) -> str | None:
         """Return the resolved Script Path when it names a file that exists, else None."""
