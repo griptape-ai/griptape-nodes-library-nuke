@@ -74,7 +74,8 @@ async def _start_loaded_workflow(
     declared = shape.input_parameter_types(found.entry) if found.entry is not None else {}
 
     # Shapeless graphs remain executable when no inputs need validation.
-    if request.inputs:
+    # Hosts may group by node and send {"Start Flow": {}}, which carries nothing to validate.
+    if not parameter_values.carries_no_values(request.inputs):
         refusal = parameter_values.unaddressable_inputs_reason(
             loaded_id, found, declared, no_inputs_remedy="send no inputs to run the graph as it stands"
         )

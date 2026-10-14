@@ -314,6 +314,16 @@ class TestApplySequenceInputs:
         assert rejected[0]["reason"] == "two frame tokens"
 
 
+class TestCarriesNoValues:
+    @pytest.mark.parametrize("inputs", [{}, {"Start Flow": {}}, {"Start Flow": {}, "Other": {}}])
+    def test_empty_node_entries_carry_no_values(self, inputs: dict[str, Any]) -> None:
+        assert parameter_values.carries_no_values(inputs)
+
+    @pytest.mark.parametrize("inputs", [{"Start Flow": {"topic": "hello"}}, {"Start Flow": None}, {"Start Flow": []}])
+    def test_a_parameter_or_a_malformed_entry_counts_as_a_value(self, inputs: dict[str, Any]) -> None:
+        assert not parameter_values.carries_no_values(inputs)
+
+
 class TestUnaddressableInputsReason:
     """Shared by NukeExecuteWorkflowRequest and NukeSetParameterValuesRequest.
 
