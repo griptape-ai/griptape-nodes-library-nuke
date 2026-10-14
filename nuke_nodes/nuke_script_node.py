@@ -636,9 +636,10 @@ class NukeScriptNode(SuccessFailureNode):
 
     def _resolve_script_path_text(self, raw: Any) -> ScriptPathResolution:
         """Resolve arbitrary Script Path text the same way _resolve_script_path does."""
-        if isinstance(raw, str):
+        if isinstance(raw, str) and VariableResolver.contains_variable_macro(raw):
             # Outside aprocess the engine leaves flow variables unsubstituted, and
-            # GetPathForMacroRequest does not consult them.
+            # GetPathForMacroRequest does not consult them. contains_variable_macro is
+            # checked first so a plain path never touches the engine at all.
             variables = VariableResolver.get_variables_without_memoizing(self.name)
             if variables:
                 raw = VariableResolver.resolve_string(raw, variables, self.name)

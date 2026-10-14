@@ -845,6 +845,14 @@ class TestProcess:
 class TestScriptPathMacroResolution:
     """Issue #153: a Script Path carrying a project macro must resolve, not be used literally."""
 
+    @pytest.fixture(autouse=True)
+    def _no_flow_variables(self):  # noqa: ANN202
+        # contains_variable_macro matches "{workspace_dir}" too, so without this every test
+        # here would reach VariableResolver's own real-engine lazy import, not the
+        # nuke_nodes.script_path.GriptapeNodes fake these tests patch.
+        with patch("nuke_nodes.nuke_script_node.VariableResolver.get_variables_without_memoizing", return_value=None):
+            yield
+
     @staticmethod
     def _fake_engine(resolved: str):  # noqa: ANN205
         from griptape_nodes.retained_mode.events.project_events import GetPathForMacroResultSuccess
