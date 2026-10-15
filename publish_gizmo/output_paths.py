@@ -89,7 +89,7 @@ def resolve_output_dir(raw: str | None, nk_script_dir: str | None, companion_dir
         GetPathForMacroRequest(parsed_macro=parsed_macro, variables={}, project_id=None)
     )
     if not isinstance(result, GetPathForMacroResultSuccess):
-        reason = _macro_failure_reason(result)
+        reason = macro_failure_reason(result)
         missing = result.missing_variables if isinstance(result, GetPathForMacroResultFailure) else None
         logger.warning("Refusing to run: could not resolve the Output Directory %r: %s", raw, reason)
         return OutputDirResolution(
@@ -114,7 +114,7 @@ def default_output_dir(nk_script_dir: str | None, companion_dir: str) -> str:
     return absolutize(OUTPUTS_DIR_NAME, nk_script_dir or companion_dir)
 
 
-def _macro_failure_reason(result: ResultPayload) -> str:
+def macro_failure_reason(result: ResultPayload) -> str:
     """Describe why the engine refused a macro, keeping the detail that names the offending variable."""
     # failure_reason on its own is a bare enum member ("MACRO_RESOLUTION_ERROR"), which tells an
     # artist nothing; result_details is where the engine explains which name it could not resolve.

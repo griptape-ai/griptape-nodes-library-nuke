@@ -840,3 +840,152 @@ class TestProcess:
         deleted_paths = {c.args[0].path for c in delete_calls}
         assert canonical_path_1 in deleted_paths
         assert resolve_path_1 not in deleted_paths
+
+
+class TestScriptPathMacroResolution:
+    """Issue #153: a Script Path carrying a project macro must resolve, not be used literally."""
+
+    @pytest.fixture(autouse=True)
+    def _no_flow_variables(self):  # noqa: ANN202
+        # contains_variable_macro matches "{workspace_dir}" too, so without this every test
+        # here would reach VariableResolver's own real-engine lazy import, not the
+        # nuke_nodes.script_path.GriptapeNodes fake these tests patch.
+        with patch("nuke_nodes.nuke_script_node.VariableResolver.get_variables_without_memoizing", return_value=None):
+            yield
+
+    @staticmethod
+    def _fake_engine(resolved: str):  # noqa: ANN205
+        from griptape_nodes.retained_mode.events.project_events import GetPathForMacroResultSuccess
+
+        engine = MagicMock()
+        # absolute_path diverges: the engine anchors it on the workspace, and a fake that
+        # returns the same string for both cannot catch code reading the wrong field.
+        engine.handle_request.return_value = GetPathForMacroResultSuccess(
+            resolved_path=Path(resolved),
+            absolute_path=Path(f"/engine/workspace{resolved}"),
+            result_details="resolved",
+        )
+        return engine
+
+    def test_open_in_nuke_accepts_a_macro_script_path(self, tmp_path: Path) -> None:
+        nk_file = tmp_path / "comp.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{workspace_dir}/comp.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+
+        with patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(str(nk_file))):
+            result = node._open_in_nuke(MagicMock(), MagicMock())
+
+        # Resolution succeeded, so the failure is now about the missing Nuke exe,
+        # not about script_path being unset or absent.
+        assert "script_path is not set" not in result.details
+        assert "Nuke executable not found" in result.details
+
+    def test_validate_reports_the_resolved_path_not_the_template(self, tmp_path: Path) -> None:
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{workspace_dir}/missing.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+        node._ensure_annotations = MagicMock()
+
+        missing = tmp_path / "missing.nk"
+        with patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(str(missing))):
+            errors = node.validate_before_node_run() or []
+
+        not_found = [e for e in errors if isinstance(e, FileNotFoundError)]
+        assert len(not_found) == 1
+        assert "{workspace_dir}" not in str(not_found[0])
+        assert str(missing) in str(not_found[0])
+
+    def test_open_in_nuke_names_the_resolved_path_when_the_script_is_missing(self, tmp_path: Path) -> None:
+        missing = tmp_path / "gone.nk"
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{workspace_dir}/gone.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+
+        with patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(str(missing))):
+            result = node._open_in_nuke(MagicMock(), MagicMock())
+
+        assert str(missing) in result.details
+        assert "{workspace_dir}" not in result.details
+
+    def test_save_baked_copy_names_the_resolved_path_when_the_script_is_missing(self, tmp_path: Path) -> None:
+        missing = tmp_path / "gone.nk"
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{workspace_dir}/gone.nk")
+        node._ensure_annotations = MagicMock()
+
+        with patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(str(missing))):
+            result = node._save_baked_copy(MagicMock(), MagicMock())
+
+        assert str(missing) in result.details
+        assert "{workspace_dir}" not in result.details
+
+    def test_after_value_set_refreshes_ports_with_the_resolved_path(self, tmp_path: Path) -> None:
+        nk_file = tmp_path / "comp.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._refresh_dynamic_ports = MagicMock()
+        mock_param = MagicMock()
+        mock_param.name = "script_path"
+
+        with patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(str(nk_file))):
+            node.after_value_set(mock_param, "{workspace_dir}/comp.nk")
+
+        node._refresh_dynamic_ports.assert_called_once_with(str(nk_file))
+
+    def test_validate_resolves_a_flow_variable_that_aprocess_would_have_substituted(self, tmp_path: Path) -> None:
+        nk_file = tmp_path / "sh010" / "comp.nk"
+        nk_file.parent.mkdir()
+        nk_file.write_text("")
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{workspace_dir}/{shot}/comp.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+        node._ensure_annotations = MagicMock()
+
+        with (
+            patch("nuke_nodes.script_path.GriptapeNodes", self._fake_engine(f"{tmp_path}/{{shot}}")),
+            patch(
+                "nuke_nodes.nuke_script_node.VariableResolver.get_variables_without_memoizing",
+                return_value={"shot": "sh010"},
+            ),
+        ):
+            errors = node.validate_before_node_run() or []
+
+        unknown_variable_errors = [e for e in errors if "unknown variable" in str(e)]
+        assert unknown_variable_errors == []
+
+    def test_validate_reports_unknown_when_no_flow_variable_resolves_shot(self, tmp_path: Path) -> None:
+        from griptape_nodes.retained_mode.events.project_events import (
+            GetPathForMacroResultFailure,
+            PathResolutionFailureReason,
+        )
+
+        node = _make_node()
+        node.get_parameter_value = MagicMock(return_value="{shot}/comp.nk")
+        node._resolve_nuke_exe = MagicMock(return_value=None)
+        node._ensure_annotations = MagicMock()
+
+        engine = MagicMock()
+        engine.handle_request.return_value = GetPathForMacroResultFailure(
+            failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
+            missing_variables={"shot"},
+            result_details="missing required variables",
+        )
+
+        with (
+            patch("nuke_nodes.script_path.GriptapeNodes", engine),
+            patch(
+                "nuke_nodes.nuke_script_node.VariableResolver.get_variables_without_memoizing",
+                return_value=None,
+            ),
+        ):
+            errors = node.validate_before_node_run() or []
+
+        unknown_variable_errors = [e for e in errors if "unknown variable(s) shot" in str(e)]
+        assert len(unknown_variable_errors) == 1
