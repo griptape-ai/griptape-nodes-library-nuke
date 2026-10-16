@@ -33,12 +33,7 @@ def engines_registry_path() -> Path:
 
 
 def socket_dir() -> Path:
-    """Mirror the app's own resolution: a socket is runtime state, not data.
-
-    macOS caps ``sun_path`` at 104 bytes, so on posix the app keeps sockets in a short
-    per-uid directory under the platform's runtime dir rather than under a data home.
-    Windows addresses a named pipe instead, so the value returned there is unused.
-    """
+    """Use the app's short runtime paths to stay within macOS's 104-byte ``sun_path`` limit."""
     # os.getuid() does not exist on win32; socket_path_for() never reaches here on that platform.
     if sys.platform == "win32":
         return Path(tempfile.gettempdir()) / "gtn"

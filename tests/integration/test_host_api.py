@@ -54,11 +54,7 @@ pytestmark = [
 
 @pytest.fixture(autouse=True)
 def _isolated_engine_env() -> None:
-    """Override the conftest fixture: this suite drives an engine in another process.
-
-    That fixture repoints XDG_DATA_HOME at a tmp dir for in-process engine tests, which
-    hides the registry naming the engine under test.
-    """
+    """Disable conftest's XDG_DATA_HOME isolation so discovery can read the live engine registry."""
 
 
 @pytest.fixture(scope="module")
@@ -211,7 +207,6 @@ class TestConnect:
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
 
     def test_a_second_host_is_refused_until_it_forces_the_claim(self, client: HostClient) -> None:
-        """The claim is process state, so only a live engine shows it surviving between requests."""
         second = {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "second smoke host"}
         try:
             refused = client.request(Verb.CONNECT, second)
@@ -432,8 +427,8 @@ class TestExecute:
 
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
         """Serial execution is what makes the missing engine-side execution id survivable."""
-        # Both executes go out before either reply is read, so a fast workflow cannot finish in between.
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        # Send both executes without waiting for replies to reduce the race window.
         client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
         second = client.reply_for(client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
 

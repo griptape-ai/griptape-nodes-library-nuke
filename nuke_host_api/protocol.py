@@ -35,7 +35,7 @@ class Notification:
 
 
 class DisconnectCause:
-    """Why the engine asked a host to leave. Open to more members without a version bump."""
+    """New causes are additive and do not require a protocol version bump."""
 
     CLAIM_TAKEN = "claim_taken"
 

@@ -1,5 +1,3 @@
-"""Publish a host notification on the only path that reaches a host."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

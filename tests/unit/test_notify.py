@@ -34,11 +34,7 @@ def event_manager(monkeypatch: pytest.MonkeyPatch) -> FakeEventManager:
 
 
 def test_publishing_wraps_the_payload_in_an_app_event(event_manager: FakeEventManager) -> None:
-    """``put_event(AppEvent(...))`` is the only path that reaches a host over IPC.
-
-    ``broadcast_app_event`` notifies in-process listeners and nothing on a socket, so a
-    payload sent that way is published to no host and raises nothing.
-    """
+    """``broadcast_app_event`` silently bypasses IPC; hosts need ``put_event(AppEvent(...))``."""
     payload = NukeHostDisconnectEvent(
         client_name="Nuke shot_040",
         cause=DisconnectCause.CLAIM_TAKEN,

@@ -64,7 +64,7 @@ async def test_a_refused_connect_does_not_install_the_event_bridge(_record_bridg
 
 @pytest.mark.parametrize("client_name", ["", "   "])
 async def test_a_host_with_no_name_is_refused_and_takes_no_claim(client_name: str) -> None:
-    """Two unnamed hosts cannot be told apart, so neither could ever be refused or displaced."""
+    """A name is required to distinguish hosts for claim refusals and takeovers."""
     result = await handle_connect(
         NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=client_name)
     )
@@ -163,7 +163,6 @@ async def test_a_connect_reports_the_host_it_claimed_the_engine_for() -> None:
 
 
 async def test_a_second_host_is_refused_and_told_who_has_the_engine() -> None:
-    """Two Nuke sessions on one engine is the symptom this claim exists to report."""
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
     assert isinstance(result, NukeConnectResultFailure)
@@ -173,7 +172,6 @@ async def test_a_second_host_is_refused_and_told_who_has_the_engine() -> None:
 
 
 async def test_a_refused_second_host_still_learns_the_support_window() -> None:
-    """A host must be able to read one failure shape, whichever refusal it got."""
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
     assert isinstance(result, NukeConnectResultFailure)
@@ -188,7 +186,6 @@ async def test_a_version_refusal_names_no_host() -> None:
 
 
 async def test_an_unsupported_version_does_not_take_the_claim() -> None:
-    """Negotiation runs first, so a host that cannot speak the version claims nothing."""
     await handle_connect(NukeConnectRequest(client_protocol_versions=[99], client_name="Nuke shot_112"))
     assert host_claim.held() is None
 
@@ -217,11 +214,7 @@ async def test_a_refused_second_host_does_not_install_the_event_bridge(
 
 
 async def test_a_takeover_asks_the_displaced_host_to_disconnect(_published: list[Any]) -> None:
-    """The transport cannot close another host's socket, so the host has to close its own.
-
-    Without this the displaced host learns nothing until its next connect, and keeps driving a
-    graph the new host is also driving.
-    """
+    """The transport cannot close another host's socket, so the host must close its own."""
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_112", force=True))
 
@@ -234,7 +227,6 @@ async def test_a_takeover_asks_the_displaced_host_to_disconnect(_published: list
 
 
 async def test_nothing_is_asked_to_disconnect_when_no_host_was_displaced(_published: list[Any]) -> None:
-    """A first connect, a reconnect, and a forced connect onto a free engine displace nobody."""
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040", force=True))
@@ -242,7 +234,6 @@ async def test_nothing_is_asked_to_disconnect_when_no_host_was_displaced(_publis
 
 
 async def test_a_refused_connect_asks_nobody_to_disconnect(_published: list[Any]) -> None:
-    """A host that could not get in must not be able to push another host off."""
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
     assert _published == []

@@ -31,11 +31,7 @@ REGISTRY = {
 
 @pytest.fixture
 def data_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    """Point the registry at a tmp data home and sockets at a tmp runtime dir.
-
-    Both platform branches of ``socket_dir`` are redirected, so a test reads the same paths
-    the harness resolves regardless of where it runs.
-    """
+    """Redirect both runtime-directory fallbacks so tests cannot probe real sockets."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     runtime = tmp_path / "runtime"
     runtime.mkdir()
@@ -73,11 +69,7 @@ class TestDiscovery:
         reason="Windows addresses a named pipe, so there is no socket dir to resolve",
     )
     def test_a_socket_is_resolved_as_runtime_state_outside_the_data_home(self, data_home: pathlib.Path) -> None:
-        """The app moved sockets out of the data home for macOS's 104-byte sun_path limit.
-
-        Resolving the old path leaves every live engine undiscoverable, which reads as an
-        engine that is not running rather than as a harness that is looking in the wrong place.
-        """
+        """Short runtime paths avoid macOS's 104-byte ``sun_path`` limit."""
         resolved = pathlib.Path(host_api_client.socket_path_for("aaa-111"))
         assert data_home not in resolved.parents
         assert resolved.parent.name == f"gtn-{os.getuid()}"

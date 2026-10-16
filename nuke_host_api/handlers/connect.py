@@ -28,7 +28,6 @@ def _local_time(epoch_seconds: float) -> str:
 
 @verb(NukeConnectRequest)
 async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSuccess | NukeConnectResultFailure:
-    """Negotiate a version, claim the engine for one host, then install the event bridge."""
     offered = request.client_protocol_versions or [PROTOCOL_VERSION]
     mutual = sorted(set(offered) & set(SUPPORTED_PROTOCOL_VERSIONS), reverse=True)
 

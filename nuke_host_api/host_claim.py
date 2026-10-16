@@ -1,5 +1,3 @@
-"""Record which host an engine reports itself driven by."""
-
 from __future__ import annotations
 
 import time
@@ -7,7 +5,6 @@ from dataclasses import dataclass
 
 
 def canonical_name(client_name: str) -> str:
-    """Trim the name so surrounding whitespace does not make a second host."""
     return client_name.strip()
 
 
@@ -28,17 +25,15 @@ class ClaimAttempt:
     displaced: str = ""
 
 
-# Process-wide because a claim outlives the request that took it and no host owns the state.
+# Claims survive library reloads and last until engine restart.
 _HELD: HostClaim | None = None
 
 
 def held() -> HostClaim | None:
-    """Return the current claim, or None when no host has connected."""
     return _HELD
 
 
 def claim(client_name: str, *, force: bool = False) -> ClaimAttempt:
-    """Grant a free engine, the same name reconnecting, or a forced takeover; refuse the rest."""
     global _HELD  # noqa: PLW0603
 
     name = canonical_name(client_name)
@@ -54,7 +49,7 @@ def claim(client_name: str, *, force: bool = False) -> ClaimAttempt:
 
 
 def release() -> None:
-    """Drop the claim. Nothing in the engine calls this, since a claim must outlive a reload."""
+    """Not called on library unload: the claim must survive reloads."""
     global _HELD  # noqa: PLW0603
 
     _HELD = None
