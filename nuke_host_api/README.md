@@ -26,6 +26,8 @@ nuke_host_api/
   dispatch.py                      handler calling convention: request guard, failure wording
   library_version.py               the shipped version, read from the manifest
   execution_bridge.py              engine execution events -> host notifications
+  host_claim.py                    which host this engine reports itself driven by
+  notify.py                        the one path that publishes a notification to a host
   value_types.py                   value normalizer
 tests/unit/
   test_protocol.py                 verb/notification names resolve to real payload classes
@@ -39,6 +41,8 @@ tests/unit/
   test_library_version.py          manifest read and reload reset
   test_handlers_routes.py          every declared verb is routed exactly once
   test_handlers_connect.py         negotiation, event stream gating
+  test_host_claim.py               claim grant, reconnect, refusal, takeover
+  test_notify.py                   a payload leaves as an AppEvent on the IPC path
   test_handlers_workflows.py       discovery and parameter publication
   test_handlers_load.py            argument checks, load ordering, read-back
   test_handlers_execution.py       run guards, input allow-list, state, cancel
@@ -91,6 +95,18 @@ a host holds the `websocket_direct` URL as its own setting, defaulted to
 `ws://127.0.0.1:18125/`, and a completed handshake is the liveness check. The engine's
 `engines.json` is app-layer internal and deliberately not part of what a host reads. See
 `INTEGRATION.md`.
+
+The host claim is advisory and checked only at connect. For claim keys, refusals, takeover
+notifications, and lifetime rules, see [NukeConnectRequest](INTEGRATION.md#nukeconnectrequest).
+Three choices are deliberate:
+
+- No other verb checks the claim. The transport authenticates nothing, and the editor would not
+  carry a claim token.
+- `force` publishes `NukeHostDisconnectEvent` instead of closing a socket. The transport can only
+  close every connection, which would drop the editor too.
+- A library reload keeps the claim. Any client can trigger a reload with
+  `NukeSetCurrentProjectRequest`, and dropping the claim would let a second host in. An idle
+  timeout would not help, since the editor's traffic would keep a dead host's claim alive.
 
 ### 2. Load a workflow
 

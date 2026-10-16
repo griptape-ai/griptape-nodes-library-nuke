@@ -31,6 +31,16 @@ class Notification:
     PARAMETER_VALUE = "NukeParameterValueEvent"
     EXECUTION_STATE = "NukeExecutionStateEvent"
     EXECUTION_NODES = "NukeExecutionNodesEvent"
+    HOST_DISCONNECT = "NukeHostDisconnectEvent"
+
+
+class DisconnectCause:
+    """New causes are additive and do not require a protocol version bump."""
+
+    CLAIM_TAKEN = "claim_taken"
+
+
+DISCONNECT_CAUSES = (DisconnectCause.CLAIM_TAKEN,)
 
 
 class NodeState:

@@ -11,7 +11,7 @@ import pytest
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api import execution_bridge
+from nuke_host_api import execution_bridge, notify
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultSuccess,
@@ -45,7 +45,7 @@ def verdicts(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[NukeExecutionStat
         if isinstance(payload, NukeExecutionStateEvent):
             published.append(payload)
 
-    monkeypatch.setattr(execution_bridge, "publish", capture)
+    monkeypatch.setattr(notify, "publish", capture)
     execution_bridge.ensure_installed()
     yield published
     execution_bridge.uninstall()

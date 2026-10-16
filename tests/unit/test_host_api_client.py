@@ -9,15 +9,16 @@ happens to be running.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+import os
+import pathlib
+import sys
+import tempfile
+from typing import Any
 
 import pytest
 
 from tests.integration import host_api_client
 from tests.integration.host_api_client import HostClient, detail_of, result_of, succeeded
-
-if TYPE_CHECKING:
-    import pathlib
 
 REGISTRY = {
     "engines": [
@@ -30,11 +31,29 @@ REGISTRY = {
 
 @pytest.fixture
 def data_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """Redirect both runtime-directory fallbacks so tests cannot probe real sockets."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setattr(tempfile, "tempdir", str(runtime))
     root = tmp_path / "griptape_nodes"
-    (root / "ipc").mkdir(parents=True)
+    root.mkdir(parents=True)
     (root / "engines.json").write_text(json.dumps(REGISTRY))
     return root
+
+
+def expected_socket_path(engine_id: str) -> str:
+    """Compose the path independently so the assertion is not socket_path_for() twice."""
+    if sys.platform == "win32":
+        return f"\\\\.\\pipe\\griptape_nodes_{engine_id}"
+    return str(host_api_client.socket_dir() / f"{engine_id}.sock")
+
+
+def socket_for(engine_id: str) -> pathlib.Path:
+    path = pathlib.Path(host_api_client.socket_path_for(engine_id))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class TestDiscovery:
@@ -43,7 +62,17 @@ class TestDiscovery:
         engines = host_api_client.discover()
         assert [engine.id for engine in engines] == ["aaa-111", "bbb-222"]
         assert [engine.name for engine in engines] == ["honest-red-ant", "quiet-blue-fox"]
-        assert engines[0].socket_path.endswith("griptape_nodes/ipc/aaa-111.sock")
+        assert engines[0].socket_path == expected_socket_path("aaa-111")
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows addresses a named pipe, so there is no socket dir to resolve",
+    )
+    def test_a_socket_is_resolved_as_runtime_state_outside_the_data_home(self, data_home: pathlib.Path) -> None:
+        """Short runtime paths avoid macOS's 104-byte ``sun_path`` limit."""
+        resolved = pathlib.Path(host_api_client.socket_path_for("aaa-111"))
+        assert data_home not in resolved.parents
+        assert resolved.parent.name == f"gtn-{os.getuid()}"
 
     def test_only_the_registrys_default_is_flagged_default(self, data_home: pathlib.Path) -> None:
         assert data_home.exists()
@@ -55,12 +84,13 @@ class TestDiscovery:
         engines = {engine.id: engine for engine in host_api_client.discover()}
         assert not engines["aaa-111"].running
 
-        (data_home / "ipc" / "aaa-111.sock").touch()
+        socket_for("aaa-111").touch()
         assert host_api_client.discover()[0].running
 
     def test_the_default_engine_is_preferred_when_several_are_running(self, data_home: pathlib.Path) -> None:
-        (data_home / "ipc" / "aaa-111.sock").touch()
-        (data_home / "ipc" / "bbb-222.sock").touch()
+        assert data_home.exists()
+        socket_for("aaa-111").touch()
+        socket_for("bbb-222").touch()
         chosen = host_api_client.running_engine()
         assert chosen is not None
         assert chosen.id == "bbb-222"

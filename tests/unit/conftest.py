@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nuke_host_api import execution_bridge, flow_run, run_outcome
+from nuke_host_api import execution_bridge, flow_run, notify, run_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -55,6 +55,7 @@ class _NoEngine:
 def _no_real_publish(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every run ends in a published verdict, which would otherwise boot the real engine."""
     monkeypatch.setattr(execution_bridge, "GriptapeNodes", _NoEngine())
+    monkeypatch.setattr(notify, "GriptapeNodes", _NoEngine())
 
 
 @pytest.fixture(autouse=True)

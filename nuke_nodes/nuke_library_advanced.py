@@ -64,6 +64,7 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
         logger.info("Nuke host API ready on protocol version %d", PROTOCOL_VERSION)
 
     def before_library_unregistered(self, library_data: LibrarySchema, library: Library) -> None:  # noqa: ARG002
+        # Keep the host claim across project-switch reloads so another client cannot take it.
         # The engine does not deregister execution listeners on reload.
         uninstall_host_api_bridge()
         # A reload may replace the manifest without restarting the process.

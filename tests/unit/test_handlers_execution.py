@@ -36,7 +36,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryRequest,
 )
 
-from nuke_host_api import execution_bridge, run_outcome
+from nuke_host_api import notify, run_outcome
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultFailure,
@@ -432,7 +432,7 @@ class TestExecuteWorkflow:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         published: list[Any] = []
-        monkeypatch.setattr(execution_bridge, "publish", published.append)
+        monkeypatch.setattr(notify, "publish", published.append)
         use_engine(
             monkeypatch,
             execute_responses(
@@ -571,7 +571,7 @@ class TestGetExecutionState:
                 {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])}
             ),
         )
-        monkeypatch.setattr(execution_bridge, "publish", lambda payload: None)
+        monkeypatch.setattr(notify, "publish", lambda payload: None)
 
         await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
         await settled()

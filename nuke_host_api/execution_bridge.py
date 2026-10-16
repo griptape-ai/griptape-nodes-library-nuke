@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from griptape_nodes.retained_mode.events.base_events import AppEvent
 from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowCancelledEvent,
     ControlFlowResolvedEvent,
@@ -20,7 +19,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.managers.context_manager import ContextManager
 
-from nuke_host_api import run_outcome
+from nuke_host_api import notify, run_outcome
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
@@ -33,14 +32,9 @@ from nuke_host_api.value_types import CONTROL_PARAM_TYPE, UnrepresentableValueEr
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from griptape_nodes.retained_mode.events.base_events import AppPayload, ExecutionPayload
+    from griptape_nodes.retained_mode.events.base_events import ExecutionPayload
 
 logger = logging.getLogger("griptape_nodes")
-
-
-def publish(payload: AppPayload) -> None:
-    """``broadcast_app_event`` reaches in-process listeners only, so IPC needs ``put_event``."""
-    GriptapeNodes.EventManager().put_event(AppEvent(payload=payload))
 
 
 def current_workflow_id() -> str:
@@ -102,7 +96,7 @@ class ExecutionBridge:
         self,
         payload: NukeNodeStateEvent | NukeParameterValueEvent | NukeExecutionStateEvent | NukeExecutionNodesEvent,
     ) -> None:
-        publish(payload)
+        notify.publish(payload)
 
     def _emit_node_state(self, node_name: str, state: str, detail: str = "") -> None:
         self._emit(NukeNodeStateEvent(node_name=node_name, state=state, detail=detail))

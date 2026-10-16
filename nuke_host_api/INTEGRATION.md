@@ -28,11 +28,12 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 | Category | Members |
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
-| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent` |
+| Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent`, `NukeHostDisconnectEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `succeeded`, `failed`, `cancelled` |
+| Disconnect causes | `claim_taken` |
 
 Binding rules:
 
@@ -184,6 +185,18 @@ Topic routing narrows the stream; it does not make the stream yours.
 So the discard rule stands: drop any frame whose `request_id` is not one this host sent and
 whose `payload_type` does not begin with `Nuke`.
 
+### 5. Deciding whether this is the engine to drive
+
+| Question | Where the answer is |
+|---|---|
+| Which engines exist | Configured URLs ([step 2](#2-open-the-connection)); a completed handshake checks liveness |
+| Which engine is this, and is it busy | `NukeConnectResultSuccess` for id, name, version, and session, then `NukeGetExecutionStateRequest` for what is running |
+| Is a Nuke session already driving it | The claim holder named in a connect success or refusal |
+
+The engine's `EngineHeartbeatRequest` returns engine identity, session id, and active workflow
+in one round trip without requiring this library. It is outside the [bound surface](#bound-surface)
+and follows the engine's release cadence. It does not report the Nuke host claim.
+
 ## Frame formats
 
 One JSON object per WebSocket text message. No newline framing, no length prefix: the
@@ -220,7 +233,7 @@ somewhere this host is not listening.
     "request_type": "NukeConnectRequest",
     "request": {
       "client_protocol_versions": [1],
-      "client_name": "Nuke 16.0v7"
+      "client_name": "Nuke 16.0v7 shot_040 dan"
     },
     "request_id": "9f2c...",
     "response_topic": "nuke/reply"
@@ -332,7 +345,8 @@ other verbs answer without it.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `client_protocol_versions` | `list[int]` | `[]` | Every version the host can speak. Empty means "assume current" |
-| `client_name` | `str` | `""` | Free text for logs and support tickets |
+| `client_name` | `str` | `""` | Required, nonblank claim key. Trimmed before use; choose a per-session name |
+| `force` | `bool` | `false` | Take another host's claim after artist confirmation |
 
 | `NukeConnectResultSuccess` field | Type | Notes |
 |---|---|---|
@@ -345,6 +359,23 @@ other verbs answer without it.
 | `engine_id` | `str` | The engine's own id. Empty when the engine has not set one |
 | `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open |
 | `engine_name` | `str` | Human-readable. Empty when the engine could not report one |
+| `host_client_name` | `str` | This host's trimmed `client_name` |
+| `host_connected_at` | `float` | Epoch seconds of this handshake |
+| `displaced_client_name` | `str` | Host displaced by `force`, otherwise empty. Display to the artist |
+
+**The host claim is advisory and checked only at connect.** The first connect claims the
+engine under its trimmed `client_name`. A different name is refused unless `force: true`.
+Other verbs carry no host identity and remain usable without the claim.
+
+The same name reconnects without forcing, including after a dropped socket or a successful
+`NukeSetCurrentProjectRequest`. Identical names bypass conflict detection; include a script
+name, user, or pid to distinguish sessions.
+
+A forced takeover publishes [`NukeHostDisconnectEvent`](#nukehostdisconnectevent) naming the
+displaced host. The transport cannot close one socket, so that host must close its own.
+
+The transport provides no disconnect signal. Claims survive library reloads and last until
+engine restart, even if the host crashes; use `force` to reclaim such an engine.
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
@@ -363,21 +394,44 @@ yet.
   "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool"],
   "engine_id": "a69c283e-...",
   "session_id": "50c24f47-...",
-  "engine_name": "Dan's workstation"
+  "engine_name": "Dan's workstation",
+  "host_client_name": "Nuke 16.0v7 shot_040 dan",
+  "host_connected_at": 1763596991.183,
+  "displaced_client_name": ""
 }
 ```
 
-`NukeConnectResultFailure` carries `supported_protocol_versions` and a message naming the
-window, suitable for display to a user:
+`NukeConnectResultFailure` names the claim holder on a claim refusal. A blank-name or version
+refusal names no host; a version refusal reports the support window:
 
 ```json
 {
   "supported_protocol_versions": [1],
+  "host_client_name": "",
+  "host_connected_at": 0.0,
   "result_details": {
     "result_details": [
       {
         "level": 40,
         "message": "Attempted to connect a host speaking protocol version(s) [99]. Failed because this library supports [1]. Update the host plugin, or install a library version that still supports it."
+      }
+    ]
+  }
+}
+```
+
+Show a claim refusal to the artist. A "connect anyway" action re-sends with `force: true`:
+
+```json
+{
+  "supported_protocol_versions": [1],
+  "host_client_name": "Nuke 16.0v7 shot_040 dan",
+  "host_connected_at": 1763596991.183,
+  "result_details": {
+    "result_details": [
+      {
+        "level": 40,
+        "message": "Attempted to connect Nuke 16.0v7 shot_112 amy. Failed because Nuke 16.0v7 shot_040 dan connected to this engine at 2025-11-19 15:03:11 and is the host it reports. Send force=true to become that host instead. The other host is not disconnected, keeps its own event subscription, and can still drive this engine."
       }
     ]
   }
@@ -1146,7 +1200,7 @@ Preview a project's workspace and validation before activating it with
 ## Notifications
 
 Pushed without a request, labelled with `event_topic`. Nine engine execution event types
-collapse into these four notifications.
+collapse into four notifications; `NukeHostDisconnectEvent` is library-generated.
 
 ### NukeNodeStateEvent
 
@@ -1243,6 +1297,34 @@ length. A flow whose start is also its end emits no non-empty list.
 Subscribe to `event_topic` before executing: a run's events can arrive as soon as its execute
 reply does. If an event is missed while a run is live,
 `NukeGetExecutionStateRequest` returns the top-level `involved_nodes` list.
+
+### NukeHostDisconnectEvent
+
+Requests that the displaced host close its connection after a forced takeover.
+
+| Field | Type | Notes |
+|---|---|---|
+| `client_name` | `str` | The host that must act. Compare it to the `host_client_name` the connect reply echoed, not to the raw string sent |
+| `cause` | `str` | `claim_taken`. Ignore an unknown value rather than treating it as fatal |
+| `reason` | `str` | Written for display to an artist |
+| `replaced_by` | `str` | The host that took the claim. Empty for a cause that is not a takeover |
+
+```json
+{
+  "client_name": "Nuke 16.0v7 shot_040 dan",
+  "cause": "claim_taken",
+  "reason": "Nuke 16.0v7 shot_112 amy connected with force and is the host this engine now reports. Disconnect, and connect again with force to take it back.",
+  "replaced_by": "Nuke 16.0v7 shot_112 amy"
+}
+```
+
+When `client_name` matches this host's echoed `host_client_name`, stop polling, close the
+socket, and show `reason`. Disable automatic reconnect; let the artist decide whether to
+reconnect with `force`.
+
+The event is sent on the shared `event_topic` to every subscriber and is never replayed.
+A host that misses or ignores it can keep driving the engine. Hosts sharing a `client_name`
+both receive the request to disconnect.
 
 ## Value descriptors
 

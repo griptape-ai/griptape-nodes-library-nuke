@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, NodeState, Notification, Verb
+from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause, NodeState, Notification, Verb
 from tests.integration.host_api_client import (
     HostClient,
     detail_of,
@@ -17,6 +17,7 @@ from tests.integration.host_api_client import (
     engines_registry_path,
     result_of,
     running_engine,
+    socket_dir,
     socket_path_for,
     succeeded,
 )
@@ -32,6 +33,9 @@ NOTIFICATION_WINDOW_S = float(os.environ.get("GRIPTAPE_NODES_SMOKE_WINDOW_S", "3
 # Long enough to batch frames, short enough to notice a terminal event promptly.
 DRAIN_TICK_S = 0.5
 
+# A skipif reason is built eagerly for the whole list, ahead of the win32 skip beside it.
+_socket_dir_hint = "a named pipe, not this harness's socket_dir" if sys.platform == "win32" else str(socket_dir())
+
 pytestmark = [
     pytest.mark.skipif(
         sys.platform == "win32",
@@ -41,11 +45,16 @@ pytestmark = [
         ENGINE is None,
         reason=(
             f"No running engine found. Checked {engines_registry_path()} for engine ids and "
-            f"looked for a live socket per id. Start an engine with the local_socket IPC "
-            f"driver enabled; see nuke_host_api/INTEGRATION.md."
+            f"looked for a live socket per id in {_socket_dir_hint}. Start an engine with the "
+            f"local_socket IPC driver enabled; see nuke_host_api/INTEGRATION.md."
         ),
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_engine_env() -> None:
+    """Disable conftest's XDG_DATA_HOME isolation so discovery can read the live engine registry."""
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +67,9 @@ def engine() -> Engine:
 def client(engine: Engine) -> Iterator[HostClient]:
     with HostClient(socket_path=engine.socket_path) as connected:
         handshake = connected.request(
-            Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test"}
+            Verb.CONNECT,
+            # Force, because a panel or an idle Nuke session may still hold the claim.
+            {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
         )
         assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
         try:
@@ -187,9 +198,43 @@ class TestConnect:
         """
         reply = client.request(
             Verb.CONNECT,
-            {"client_protocol_versions": [PROTOCOL_VERSION], "field_from_a_future_version": "ignore me"},
+            {
+                "client_protocol_versions": [PROTOCOL_VERSION],
+                "client_name": "smoke test",
+                "field_from_a_future_version": "ignore me",
+            },
         )
         assert succeeded(reply), f"an unknown field broke connect: {detail_of(reply)}"
+
+    def test_a_second_host_is_refused_until_it_forces_the_claim(self, client: HostClient) -> None:
+        second = {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "second smoke host"}
+        try:
+            refused = client.request(Verb.CONNECT, second)
+            assert not succeeded(refused), "a second host must not connect silently"
+            assert result_of(refused)["host_client_name"] == "smoke test"
+            assert result_of(refused)["host_connected_at"] > 0
+
+            forced = client.request(Verb.CONNECT, {**second, "force": True})
+            assert succeeded(forced), f"a forced connect failed: {detail_of(forced)}"
+            assert result_of(forced)["displaced_client_name"] == "smoke test"
+            assert result_of(forced)["host_client_name"] == "second smoke host"
+
+            client.drain(2)
+            asked = [
+                event
+                for event in client.of_type(Notification.HOST_DISCONNECT)
+                if event.body.get("client_name") == "smoke test"
+            ]
+            assert asked, "a displaced host must be asked to disconnect, since nothing can close its socket"
+            assert asked[-1].body["replaced_by"] == "second smoke host"
+            assert asked[-1].body["cause"] == DisconnectCause.CLAIM_TAKEN
+            assert asked[-1].body["reason"]
+        finally:
+            # Every later test's fixture connects as the smoke host, and the engine outlives this test.
+            client.request(
+                Verb.CONNECT,
+                {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
+            )
 
 
 class TestDescribe:
@@ -383,14 +428,12 @@ class TestExecute:
     def test_a_second_run_is_refused_while_one_is_in_progress(self, client: HostClient) -> None:
         """Serial execution is what makes the missing engine-side execution id survivable."""
         workflow_id = _load_smoke_workflow(client)["workflow_id"]
+        # Send both executes without waiting for replies to reduce the race window.
         client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
+        second = client.reply_for(client.send(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id}))
 
-        state = result_of(client.request(Verb.GET_EXECUTION_STATE))
-        if not state.get("running"):
+        if succeeded(second):
             pytest.skip(f"workflow {workflow_id!r} finished before a second execute could race it")
-
-        second = client.request(Verb.EXECUTE_WORKFLOW, {"workflow_id": workflow_id})
-        assert not succeeded(second), "a second run must be refused, not allowed to displace the first"
         assert "already executing" in detail_of(second).lower()
 
     def test_no_workflow_id_runs_whatever_is_loaded(self, client: HostClient) -> None:
