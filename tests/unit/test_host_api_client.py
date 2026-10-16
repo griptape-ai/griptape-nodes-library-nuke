@@ -9,15 +9,15 @@ happens to be running.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+import os
+import pathlib
+import tempfile
+from typing import Any
 
 import pytest
 
 from tests.integration import host_api_client
 from tests.integration.host_api_client import HostClient, detail_of, result_of, succeeded
-
-if TYPE_CHECKING:
-    import pathlib
 
 REGISTRY = {
     "engines": [
@@ -30,11 +30,26 @@ REGISTRY = {
 
 @pytest.fixture
 def data_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """Point the registry at a tmp data home and sockets at a tmp runtime dir.
+
+    Both platform branches of ``socket_dir`` are redirected, so a test reads the same paths
+    the harness resolves regardless of where it runs.
+    """
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setattr(tempfile, "tempdir", str(runtime))
     root = tmp_path / "griptape_nodes"
-    (root / "ipc").mkdir(parents=True)
+    root.mkdir(parents=True)
     (root / "engines.json").write_text(json.dumps(REGISTRY))
     return root
+
+
+def socket_for(engine_id: str) -> pathlib.Path:
+    path = pathlib.Path(host_api_client.socket_path_for(engine_id))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class TestDiscovery:
@@ -43,7 +58,17 @@ class TestDiscovery:
         engines = host_api_client.discover()
         assert [engine.id for engine in engines] == ["aaa-111", "bbb-222"]
         assert [engine.name for engine in engines] == ["honest-red-ant", "quiet-blue-fox"]
-        assert engines[0].socket_path.endswith("griptape_nodes/ipc/aaa-111.sock")
+        assert engines[0].socket_path == str(host_api_client.socket_dir() / "aaa-111.sock")
+
+    def test_a_socket_is_resolved_as_runtime_state_outside_the_data_home(self, data_home: pathlib.Path) -> None:
+        """The app moved sockets out of the data home for macOS's 104-byte sun_path limit.
+
+        Resolving the old path leaves every live engine undiscoverable, which reads as an
+        engine that is not running rather than as a harness that is looking in the wrong place.
+        """
+        resolved = pathlib.Path(host_api_client.socket_path_for("aaa-111"))
+        assert data_home not in resolved.parents
+        assert resolved.parent.name == f"gtn-{os.getuid()}"
 
     def test_only_the_registrys_default_is_flagged_default(self, data_home: pathlib.Path) -> None:
         assert data_home.exists()
@@ -55,12 +80,13 @@ class TestDiscovery:
         engines = {engine.id: engine for engine in host_api_client.discover()}
         assert not engines["aaa-111"].running
 
-        (data_home / "ipc" / "aaa-111.sock").touch()
+        socket_for("aaa-111").touch()
         assert host_api_client.discover()[0].running
 
     def test_the_default_engine_is_preferred_when_several_are_running(self, data_home: pathlib.Path) -> None:
-        (data_home / "ipc" / "aaa-111.sock").touch()
-        (data_home / "ipc" / "bbb-222.sock").touch()
+        assert data_home.exists()
+        socket_for("aaa-111").touch()
+        socket_for("bbb-222").touch()
         chosen = host_api_client.running_engine()
         assert chosen is not None
         assert chosen.id == "bbb-222"

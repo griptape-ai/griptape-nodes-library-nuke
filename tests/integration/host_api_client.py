@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -31,10 +32,24 @@ def engines_registry_path() -> Path:
     return _xdg_data_home() / "griptape_nodes" / "engines.json"
 
 
+def socket_dir() -> Path:
+    """Mirror the app's own resolution: a socket is runtime state, not data.
+
+    macOS caps ``sun_path`` at 104 bytes, so the app keeps sockets in a short per-uid
+    directory under the platform's runtime dir rather than under a data home.
+    """
+    leaf = f"gtn-{os.getuid()}"
+    if sys.platform.startswith("linux"):
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime_dir:
+            return Path(runtime_dir) / leaf
+    return Path(tempfile.gettempdir()) / leaf
+
+
 def socket_path_for(engine_id: str) -> str:
     if sys.platform == "win32":
         return f"\\\\.\\pipe\\griptape_nodes_{engine_id}"
-    return str(_xdg_data_home() / "griptape_nodes" / "ipc" / f"{engine_id}.sock")
+    return str(socket_dir() / f"{engine_id}.sock")
 
 
 @dataclass
