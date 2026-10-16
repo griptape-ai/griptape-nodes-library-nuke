@@ -25,20 +25,6 @@ def test_the_first_host_takes_the_claim() -> None:
     assert attempt.displaced == ""
 
 
-def test_a_blank_name_is_still_a_claim() -> None:
-    """An unnamed host must block a second one, so the empty string cannot mean "free"."""
-    assert host_claim.claim("   ").holder.client_name == host_claim.UNNAMED_HOST
-    assert not host_claim.claim("Nuke shot_040").granted
-
-
-def test_a_second_unnamed_host_is_refused() -> None:
-    """Two hosts that sent no name cannot be told apart, so a blank name never reconnects."""
-    host_claim.claim("")
-    attempt = host_claim.claim("")
-    assert not attempt.granted
-    assert host_claim.claim("", force=True).displaced == host_claim.UNNAMED_HOST
-
-
 def test_the_same_name_reconnects() -> None:
     """A project switch and a dropped socket both force a reconnect the host did not choose."""
     host_claim.claim("Nuke shot_040")

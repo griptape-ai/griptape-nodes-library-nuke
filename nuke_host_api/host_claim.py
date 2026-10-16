@@ -5,12 +5,10 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-UNNAMED_HOST = "unnamed host"
-
 
 def canonical_name(client_name: str) -> str:
-    """Collapse blank names to one label so a claim is never held by the empty string."""
-    return client_name.strip() or UNNAMED_HOST
+    """Trim the name so surrounding whitespace does not make a second host."""
+    return client_name.strip()
 
 
 @dataclass(frozen=True)
@@ -45,8 +43,7 @@ def claim(client_name: str, *, force: bool = False) -> ClaimAttempt:
 
     name = canonical_name(client_name)
     current = _HELD
-    # An unnamed host cannot be told apart from another, so it never counts as reconnecting.
-    same_host = current is not None and current.client_name == name and name != UNNAMED_HOST
+    same_host = current is not None and current.client_name == name
 
     if current is not None and not same_host and not force:
         return ClaimAttempt(granted=False, holder=current)

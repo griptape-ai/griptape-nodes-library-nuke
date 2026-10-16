@@ -16,6 +16,8 @@ from nuke_host_api.handlers import handle_connect
 from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause
 from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, use_engine
 
+HOST = "Nuke shot_040"
+
 
 @pytest.fixture(autouse=True)
 def _released_claim() -> Iterator[None]:
@@ -48,20 +50,31 @@ async def test_connecting_installs_the_event_bridge(_record_bridge_installs: lis
 
     Forgetting this is silent: every request still succeeds and no event ever arrives.
     """
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert _record_bridge_installs == [True]
 
 
 async def test_a_refused_connect_does_not_install_the_event_bridge(_record_bridge_installs: list[bool]) -> None:
     """A host that could not agree a version must not leave the engine paying for a feed."""
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99], client_name=HOST))
     assert isinstance(result, NukeConnectResultFailure)
     assert _record_bridge_installs == []
 
 
+@pytest.mark.parametrize("client_name", ["", "   "])
+async def test_a_host_with_no_name_is_refused_and_takes_no_claim(client_name: str) -> None:
+    """Two unnamed hosts cannot be told apart, so neither could ever be refused or displaced."""
+    result = await handle_connect(
+        NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=client_name)
+    )
+    assert isinstance(result, NukeConnectResultFailure)
+    assert "client_name" in str(result.result_details)
+    assert host_claim.held() is None
+
+
 async def test_a_matching_version_connects() -> None:
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.protocol_version == PROTOCOL_VERSION
     assert result.value_types == list(VALUE_TYPES)
@@ -69,39 +82,39 @@ async def test_a_matching_version_connects() -> None:
 
 async def test_the_event_topic_is_handed_over() -> None:
     """A host cannot derive this, so failing to return it strands notifications."""
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.event_topic == "sessions/session-abc/response"
 
 
 async def test_both_versions_are_reported() -> None:
     """A support ticket names an engine and a library; a host cannot look either one up."""
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_version == "0.97.0"
     assert result.library_version == "0.3.0"
 
 
 async def test_an_empty_offer_assumes_the_current_version() -> None:
-    result = await handle_connect(NukeConnectRequest())
+    result = await handle_connect(NukeConnectRequest(client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
 
 
 async def test_an_unsupported_version_is_refused_with_the_window() -> None:
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99], client_name=HOST))
     assert isinstance(result, NukeConnectResultFailure)
     assert result.supported_protocol_versions
     assert "99" in str(result.result_details)
 
 
 async def test_the_highest_mutual_version_wins() -> None:
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99, PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99, PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.protocol_version == PROTOCOL_VERSION
 
 
 async def test_identity_is_read_from_the_handshake_not_the_envelope() -> None:
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_id == "engine-xyz"
     assert result.session_id == "session-abc"
@@ -117,7 +130,7 @@ async def test_a_direct_engine_connection_with_no_session_reports_no_session_id(
         {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME},
         session_id="",
     )
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.session_id == ""
     assert result.event_topic == "engines/engine-xyz/response"
@@ -136,7 +149,7 @@ async def test_a_refused_name_lookup_reports_an_empty_name_not_a_failed_connect(
             GetEngineNameRequest: GetEngineNameResultFailure(error_message="boom", result_details="boom"),
         },
     )
-    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION]))
+    result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_name == ""
 

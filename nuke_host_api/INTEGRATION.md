@@ -352,7 +352,7 @@ other verbs answer without it.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `client_protocol_versions` | `list[int]` | `[]` | Every version the host can speak. Empty means "assume current" |
-| `client_name` | `str` | `""` | Names this host, in logs and to whoever connects next. Also the claim key, so make it distinctive |
+| `client_name` | `str` | `""` | Required. Names this host, in logs and to whoever connects next. Also the claim key, so make it distinctive. A blank name is refused |
 | `force` | `bool` | `false` | Take the claim from another host. Only after the artist confirms the refusal below |
 
 | `NukeConnectResultSuccess` field | Type | Notes |
@@ -366,7 +366,7 @@ other verbs answer without it.
 | `engine_id` | `str` | The engine's own id. Empty when the engine has not set one |
 | `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open |
 | `engine_name` | `str` | Human-readable. Empty when the engine could not report one |
-| `host_client_name` | `str` | The host this engine now names, which is this host's `client_name` trimmed, or `unnamed host` when it sent none |
+| `host_client_name` | `str` | The host this engine now names, which is this host's `client_name` trimmed |
 | `host_connected_at` | `float` | Epoch seconds of this handshake |
 | `displaced_client_name` | `str` | The host a `force` took the claim from. Empty unless this connect took one over. Show it: an artist elsewhere is still driving this engine |
 
@@ -389,8 +389,8 @@ other verbs answer without it.
 The same name always reconnects, since a host has to re-handshake after a dropped socket and
 after every successful `NukeSetCurrentProjectRequest`. Two Nuke sessions sending an identical
 `client_name` therefore both connect and neither is warned, so put something per-session in it:
-the script name, the user, the pid. A blank `client_name` never reconnects into a held claim,
-not even its own, so an unnamed host needs `force` after every re-handshake.
+the script name, the user, the pid. A blank `client_name` is refused, since two unnamed hosts
+could never be told apart.
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
@@ -416,8 +416,8 @@ yet.
 }
 ```
 
-`NukeConnectResultFailure` covers two refusals, told apart by `host_client_name`. A version
-refusal names the window and no host:
+`NukeConnectResultFailure` covers three refusals. A version refusal and a blank `client_name`
+name no host. A version refusal names the window:
 
 ```json
 {

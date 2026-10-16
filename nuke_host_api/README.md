@@ -106,9 +106,8 @@ The claim is keyed on `client_name`, so the same name always reconnects. A host 
 re-handshake after a dropped socket and after every successful `NukeSetCurrentProjectRequest`,
 and a claim it could not reclaim would turn its own reconnect into a conflict with itself. The
 cost is that two sessions sending an identical name both connect unwarned, so a host is told to
-put something per-session in the name. A blank name is the exception: two unnamed hosts cannot
-be told apart, so an unnamed host never reconnects into a held claim and needs `force`, which
-makes leaving the name out fail loudly. A host-minted `client_id` would fix that and is additive
+put something per-session in the name. A blank name is refused at connect, since two unnamed
+hosts could never be told apart. A host-minted `client_id` would fix that and is additive
 when a plugin needs it.
 
 It is checked at connect and nowhere else. No other verb carries host identity, and the

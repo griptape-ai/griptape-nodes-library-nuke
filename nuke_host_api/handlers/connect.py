@@ -45,6 +45,18 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
         )
 
     client = host_claim.canonical_name(request.client_name)
+    if not client:
+        return failure(
+            NukeConnectResultFailure,
+            attempted="to connect a host that sent no client_name",
+            because=(
+                "the host claim is keyed on the name, and two unnamed hosts cannot be told apart. "
+                "Send a client_name that differs per session, such as the script name and user."
+            ),
+            error=ValueError,
+            supported_protocol_versions=list(SUPPORTED_PROTOCOL_VERSIONS),
+        )
+
     attempt = host_claim.claim(client, force=request.force)
 
     if not attempt.granted:
