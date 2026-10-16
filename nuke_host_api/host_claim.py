@@ -45,7 +45,8 @@ def claim(client_name: str, *, force: bool = False) -> ClaimAttempt:
 
     name = canonical_name(client_name)
     current = _HELD
-    same_host = current is not None and current.client_name == name
+    # An unnamed host cannot be told apart from another, so it never counts as reconnecting.
+    same_host = current is not None and current.client_name == name and name != UNNAMED_HOST
 
     if current is not None and not same_host and not force:
         return ClaimAttempt(granted=False, holder=current)
@@ -56,7 +57,7 @@ def claim(client_name: str, *, force: bool = False) -> ClaimAttempt:
 
 
 def release() -> None:
-    """Drop the claim so a library reload does not strand one on a host that is gone."""
+    """Drop the claim. Nothing in the engine calls this, since a claim must outlive a reload."""
     global _HELD  # noqa: PLW0603
 
     _HELD = None

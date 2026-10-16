@@ -106,7 +106,9 @@ The claim is keyed on `client_name`, so the same name always reconnects. A host 
 re-handshake after a dropped socket and after every successful `NukeSetCurrentProjectRequest`,
 and a claim it could not reclaim would turn its own reconnect into a conflict with itself. The
 cost is that two sessions sending an identical name both connect unwarned, so a host is told to
-put something per-session in the name. A host-minted `client_id` would fix that and is additive
+put something per-session in the name. A blank name is the exception: two unnamed hosts cannot
+be told apart, so an unnamed host never reconnects into a held claim and needs `force`, which
+makes leaving the name out fail loudly. A host-minted `client_id` would fix that and is additive
 when a plugin needs it.
 
 It is checked at connect and nowhere else. No other verb carries host identity, and the
@@ -126,8 +128,9 @@ than enforced.
 
 A claim never goes stale on its own. The transport gives Python no disconnect signal, which is
 also why the event bridge latches on instead of counting connections, so a crashed Nuke session
-leaves its name on the engine until the library reloads (`before_library_unregistered` releases
-it) or the engine restarts. The alternative, an idle window refreshed by last-seen traffic, would
+leaves its name on the engine until the engine restarts. A library reload keeps the claim on
+purpose, because any client can trigger one with `NukeSetCurrentProjectRequest`, and dropping it
+would let the next connect under any name in while the holder kept working. The alternative, an idle window refreshed by last-seen traffic, would
 be refreshed by the editor's requests too, so it would report a dead host as live. `force` is the
 escape, and the refusal message says so.
 
@@ -609,7 +612,7 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   version bump, so decide deliberately rather than by omission.
 - **The host claim reports a conflict, it does not prevent one.** It is checked at connect and
   nowhere else, a displaced host is asked to leave rather than disconnected, a crashed host's
-  claim never expires, and two hosts sending one `client_name` both connect. A real kick needs
+  claim lasts until the engine restarts, and two hosts sending one `client_name` both connect. A real kick needs
   the app's transport to hand Python a connection id and a way to close one; today it hands
   neither, and no disconnect signal either.
 - **No execution identity.** The engine carries no execution id through its

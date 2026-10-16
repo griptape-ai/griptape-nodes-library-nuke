@@ -383,13 +383,14 @@ other verbs answer without it.
   closes its own socket. Handle it, or a displaced host keeps its feed and keeps working, and
   learns nothing until its next connect.
 - **A claim outlives the host that took it.** The transport gives this library no disconnect
-  signal, so a crashed Nuke session leaves its name on the engine until the library reloads or
-  the engine restarts. `force` is the only escape, which is why the refusal says so.
+  signal, so a crashed Nuke session leaves its name on the engine until the engine restarts. A
+  library reload keeps the claim. `force` is the only escape, which is why the refusal says so.
 
 The same name always reconnects, since a host has to re-handshake after a dropped socket and
 after every successful `NukeSetCurrentProjectRequest`. Two Nuke sessions sending an identical
 `client_name` therefore both connect and neither is warned, so put something per-session in it:
-the script name, the user, the pid.
+the script name, the user, the pid. A blank `client_name` never reconnects into a held claim,
+not even its own, so an unnamed host needs `force` after every re-handshake.
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not

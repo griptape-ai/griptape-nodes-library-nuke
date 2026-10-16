@@ -21,10 +21,15 @@ def test_library_reload_clears_the_cached_version() -> None:
     assert library_version.version.cache_info().currsize == 0
 
 
-def test_library_reload_releases_the_host_claim() -> None:
-    """A reload forces every host to reconnect, so a retained claim would lock the engine."""
+def test_library_reload_keeps_the_host_claim_for_its_holder() -> None:
+    """Any client can trigger a reload with a project switch, so dropping the claim would let a second host in."""
+    host_claim.release()
     host_claim.claim("Nuke shot_040")
 
     NukeLibraryAdvanced().before_library_unregistered(None, None)  # type: ignore[arg-type]
 
-    assert host_claim.held() is None
+    try:
+        assert not host_claim.claim("Nuke shot_112").granted
+        assert host_claim.claim("Nuke shot_040").granted
+    finally:
+        host_claim.release()
