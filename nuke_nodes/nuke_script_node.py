@@ -39,6 +39,7 @@ from griptape_nodes.traits.slider import Slider
 
 from execution.direct import _STRIPPED_PYTHON_VARS, _STRIPPED_QT_VARS, DirectSubprocessProvider
 from execution.installations import NukeInstallation, find_installation, merged_installations
+from nuke_host_api.value_types import nuke_frame_pattern
 from nuke_nodes.script_path import (
     ScriptPathResolution,
     describe_failure,
@@ -61,6 +62,19 @@ _TEMP_SUFFIX: dict[str, str] = {
     "GLTFUrlArtifact": ".glb",
     "VideoUrlArtifact": ".mp4",
 }
+
+
+def _sequence_to_path_and_range(value: Any) -> tuple[str, int, int] | None:
+    """Return (path, first, last) when value is an engine Sequence, else None."""
+    try:
+        from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415
+    except ImportError:
+        return None
+    if not isinstance(value, GtSequence):
+        return None
+    filename = nuke_frame_pattern(value.pattern, value.padding)
+    path = f"{value.directory}/{filename}".replace("\\", "/")
+    return path, value.first, value.last
 
 
 def _path_to_artifact(gt_type: str, path: str) -> Any:
@@ -666,13 +680,9 @@ class NukeScriptNode(SuccessFailureNode):
         situation: str = "save_temp_file",
     ) -> str:
         """Resolve a parameter value to a local file path Nuke can read."""
-        try:
-            from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415
-
-            if isinstance(value, GtSequence):
-                return (value.directory + "/" + value.pattern).replace("\\", "/")
-        except ImportError:
-            pass
+        sequence = _sequence_to_path_and_range(value)
+        if sequence is not None:
+            return sequence[0]
         if isinstance(value, str):
             return value
         try:
@@ -879,9 +889,27 @@ class NukeScriptNode(SuccessFailureNode):
         try:
             for ann in self._annotations:
                 if ann.role == "input":
+                    raw_input = self.get_parameter_value(ann.gt_name) or ""
+                    sequence = _sequence_to_path_and_range(raw_input)
+                    if sequence is not None:
+                        seq_path, seq_first, seq_last = sequence
+                        if seq_last < frame_start or seq_first > frame_end:
+                            logging.getLogger(__name__).warning(
+                                "Input sequence %r covers frames %d-%d but the render range is %d-%d; "
+                                "no input frame falls inside the render.",
+                                ann.gt_name,
+                                seq_first,
+                                seq_last,
+                                frame_start,
+                                frame_end,
+                            )
+                        inputs[ann.gt_name] = ManifestInput(
+                            path=seq_path, node=ann.node_name, first=seq_first, last=seq_last
+                        )
+                        continue
                     inputs[ann.gt_name] = ManifestInput(
                         path=self._artifact_to_path(
-                            self.get_parameter_value(ann.gt_name) or "",
+                            raw_input,
                             name=ann.gt_name,
                             _cleanup=input_tmp_paths,
                         ),

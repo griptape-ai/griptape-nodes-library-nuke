@@ -274,6 +274,64 @@ class TestArtifactToPath:
         assert result == "/out/frames/frame_####.png"
 
 
+def _make_sequence(pattern: str, padding: int, first: int = 1001, last: int = 1002, directory: str = "/out/frames"):
+    from griptape_nodes.common.sequences import MissingItemPolicy  # type: ignore  # noqa: PLC0415, I001
+    from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415, I001
+
+    return GtSequence(
+        entries=[],
+        first=first,
+        last=last,
+        discovered_first=first,
+        discovered_last=last,
+        padding=padding,
+        pattern=pattern,
+        directory=directory,
+        policy=MissingItemPolicy.SPLIT,
+        present_numbers=set(range(first, last + 1)),
+    )
+
+
+class TestSequenceToPathAndRange:
+    def test_returns_path_with_first_and_last(self) -> None:
+        pytest.importorskip("griptape_nodes.common.sequences")
+        from nuke_nodes.nuke_script_node import _sequence_to_path_and_range
+
+        result = _sequence_to_path_and_range(_make_sequence("frame_####.png", 4, first=1001, last=1048))
+        assert result == ("/out/frames/frame_####.png", 1001, 1048)
+
+    def test_printf_token_is_rewritten_to_hashes(self) -> None:
+        """Nuke reads `#` and `%0Nd`; the engine's scanner also emits `@` and `$F`."""
+        pytest.importorskip("griptape_nodes.common.sequences")
+        from nuke_nodes.nuke_script_node import _sequence_to_path_and_range
+
+        result = _sequence_to_path_and_range(_make_sequence("frame_%04d.png", 4))
+        assert result is not None
+        assert result[0] == "/out/frames/frame_####.png"
+
+    def test_at_token_is_rewritten_to_hashes(self) -> None:
+        pytest.importorskip("griptape_nodes.common.sequences")
+        from nuke_nodes.nuke_script_node import _sequence_to_path_and_range
+
+        result = _sequence_to_path_and_range(_make_sequence("frame_@@@@.png", 4))
+        assert result is not None
+        assert result[0] == "/out/frames/frame_####.png"
+
+    def test_backslashes_normalised_to_forward_slashes(self) -> None:
+        pytest.importorskip("griptape_nodes.common.sequences")
+        from nuke_nodes.nuke_script_node import _sequence_to_path_and_range
+
+        result = _sequence_to_path_and_range(_make_sequence("frame_####.png", 4, directory="C:\\shows\\bg"))
+        assert result is not None
+        assert result[0] == "C:/shows/bg/frame_####.png"
+
+    def test_returns_none_for_non_sequence(self) -> None:
+        from nuke_nodes.nuke_script_node import _sequence_to_path_and_range
+
+        assert _sequence_to_path_and_range("/tmp/plate.png") is None
+        assert _sequence_to_path_and_range(None) is None
+
+
 class TestCoerceKnobValue:
     def test_integer_string(self) -> None:
         assert _coerce_knob_value("42") == 42

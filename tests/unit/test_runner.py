@@ -33,7 +33,7 @@ def _run_main(manifest: dict, tmp_path: Path) -> dict:
 
 def _base_manifest(outputs: dict | None = None) -> dict:
     return {
-        "schema": "griptape-nuke-runner/1.1",
+        "schema": "griptape-nuke-runner/1.2",
         "script": "/fake/comp.nk",
         "frame_range": [1001, 1001],
         "inputs": {},
@@ -113,3 +113,84 @@ class TestSequenceOutput:
 
         result = _run_main(manifest, tmp_path)
         assert result["outputs"]["frames"] == pattern.replace("\\", "/")
+
+
+class _FakeKnob:
+    """Stands in for a plain File_Knob, which has no fromUserText."""
+
+    def __init__(self) -> None:
+        self.value: Any = None
+        self.user_text: str | None = None
+
+    def setValue(self, value: Any) -> None:  # noqa: N802
+        self.value = value
+
+
+class _FakeReadFileKnob(_FakeKnob):
+    def fromUserText(self, text: str) -> None:  # noqa: N802
+        self.user_text = text
+
+
+class _FakeReadNode:
+    def __init__(self, *, user_text: bool = True, range_knobs: bool = True) -> None:
+        file_knob = _FakeReadFileKnob() if user_text else _FakeKnob()
+        self.knobs: dict[str, _FakeKnob] = {"file": file_knob}
+        if range_knobs:
+            for name in ("first", "last", "origfirst", "origlast"):
+                self.knobs[name] = _FakeKnob()
+
+    def __getitem__(self, name: str) -> _FakeKnob:
+        return self.knobs[name]
+
+    def knob(self, name: str) -> _FakeKnob | None:
+        return self.knobs.get(name)
+
+
+class TestSetInputFile:
+    def test_sequence_range_goes_through_from_user_text(self) -> None:
+        from nuke_runner.runner import _set_input_file
+
+        node = _FakeReadNode()
+        _set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
+
+        assert node["file"].user_text == "/plates/bg.####.exr 1001-1048"
+        assert node["file"].value is None
+
+    def test_single_file_input_uses_set_value(self) -> None:
+        from nuke_runner.runner import _set_input_file
+
+        node = _FakeReadNode()
+        _set_input_file(node, "/tmp/plate.png", None, None)
+
+        assert node["file"].value == "/tmp/plate.png"
+        assert node["file"].user_text is None
+
+    def test_path_containing_space_falls_back_to_explicit_knobs(self) -> None:
+        """A space makes '<path> <first>-<last>' ambiguous, so the range is set knob by knob."""
+        from nuke_runner.runner import _set_input_file
+
+        node = _FakeReadNode()
+        _set_input_file(node, "/Volumes/My Show/bg.####.exr", 1001, 1048)
+
+        assert node["file"].user_text is None
+        assert node["file"].value == "/Volumes/My Show/bg.####.exr"
+        assert node["first"].value == 1001
+        assert node["last"].value == 1048
+
+    def test_knob_without_from_user_text_sets_orig_range_too(self) -> None:
+        from nuke_runner.runner import _set_input_file
+
+        node = _FakeReadNode(user_text=False)
+        _set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
+
+        assert node["file"].value == "/plates/bg.####.exr"
+        assert node["origfirst"].value == 1001
+        assert node["origlast"].value == 1048
+
+    def test_missing_range_knobs_do_not_raise(self) -> None:
+        from nuke_runner.runner import _set_input_file
+
+        node = _FakeReadNode(user_text=False, range_knobs=False)
+        _set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
+
+        assert node["file"].value == "/plates/bg.####.exr"

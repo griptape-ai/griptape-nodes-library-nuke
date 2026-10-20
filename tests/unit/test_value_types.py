@@ -533,3 +533,26 @@ class TestEngineValue:
     def test_a_read_value_round_trips(self) -> None:
         read = value_types.normalize_value([ImageUrlArtifact("/a/1.png")], "list[ImageUrlArtifact]")["value"]
         assert value_types.engine_value(read) == ["/a/1.png"]
+
+
+class TestNukeFramePattern:
+    """Nuke reads `#` and `%0Nd`; the engine's scanner also emits `@` and `$F`."""
+
+    @pytest.mark.parametrize(
+        ("pattern", "padding", "expected"),
+        [
+            ("frame_####.png", 4, "frame_####.png"),
+            ("frame_%04d.png", 4, "frame_####.png"),
+            ("frame_@@@@.png", 4, "frame_####.png"),
+            ("frame_$F4.png", 4, "frame_####.png"),
+            ("frame_%d.png", 0, "frame_#.png"),
+        ],
+    )
+    def test_token_is_rewritten_to_hashes(self, pattern: str, padding: int, expected: str) -> None:
+        assert value_types.nuke_frame_pattern(pattern, padding) == expected
+
+    def test_only_the_first_token_is_rewritten(self) -> None:
+        assert value_types.nuke_frame_pattern("v%02d/frame_%04d.png", 4) == "v####/frame_%04d.png"
+
+    def test_pattern_without_token_is_unchanged(self) -> None:
+        assert value_types.nuke_frame_pattern("plate.png", 4) == "plate.png"
