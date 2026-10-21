@@ -9,7 +9,13 @@ from typing import NamedTuple
 from urllib.parse import unquote, urlparse
 
 from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro
-from griptape_nodes.files.path_utils import is_url, parse_file_uri as engine_parse_file_uri, parse_static_server_url
+from griptape_nodes.files.path_utils import (
+    is_url,
+    parse_static_server_url,
+)
+from griptape_nodes.files.path_utils import (
+    parse_file_uri as engine_parse_file_uri,
+)
 from griptape_nodes.retained_mode.events.base_events import ResultPayload
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
@@ -174,7 +180,9 @@ def serialize_output(output: dict | None) -> dict[str, str]:
             if value is None:
                 result[param_name] = ""
             elif isinstance(value, (str, bytes)):
-                result[param_name] = _resolve_location(value)
+                result[param_name] = (
+                    f"<binary {len(value)} bytes>" if isinstance(value, bytes) else _resolve_location(value)
+                )
             elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value
                 result[param_name] = f"<binary {len(raw)} bytes>" if isinstance(raw, bytes) else _resolve_location(raw)
@@ -223,9 +231,6 @@ def _resolve_location(value: str) -> str:
         A local path if ``value`` names one (via ``file://`` or a localhost static-server URL);
         otherwise ``value`` unchanged (plain text, or a remote URL with no local path to resolve to).
     """
-    if isinstance(value, bytes):
-        return f"<binary {len(value)} bytes>"
-
     local_path = _parse_file_uri(value)
     if local_path is not None:
         return local_path
