@@ -10,12 +10,9 @@ from urllib.parse import unquote, urlparse
 
 from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro
 from griptape_nodes.files.path_utils import (
-    is_url,
-    parse_static_server_url,
-)
-from griptape_nodes.files.path_utils import (
     parse_file_uri as engine_parse_file_uri,
 )
+from griptape_nodes.files.path_utils import parse_static_server_url
 from griptape_nodes.retained_mode.events.base_events import ResultPayload
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
@@ -235,11 +232,12 @@ def _resolve_location(value: str) -> str:
     if local_path is not None:
         return local_path
 
-    if is_url(value):
+    # Only a localhost static-server URL has a local file to resolve to; gate the workspace lookup
+    # on that prefix so a remote URL never boots the engine's ConfigManager just to be handed back.
+    if value.startswith(("http://localhost:", "https://localhost:")):
         workspace_path = Path(GriptapeNodes.ConfigManager().workspace_path)
         static_server_path = parse_static_server_url(value, workspace_path)
         if static_server_path is not None:
             return str(static_server_path)
-        return value
 
     return value
