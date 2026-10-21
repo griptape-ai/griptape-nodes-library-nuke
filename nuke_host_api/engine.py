@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppStartSessionRequest,
+    AppStartSessionResultSuccess,
     GetEngineNameRequest,
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
@@ -28,6 +31,10 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsResultSuccess,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+
+logger = logging.getLogger("griptape_nodes")
+
+HOST_CLIENT_TYPE = "nuke"
 
 
 @dataclass(frozen=True)
@@ -74,6 +81,31 @@ def engine_id() -> str:
 def session_id() -> str:
     """Return the current session's id, or empty when no session is open."""
     return GriptapeNodes.get_session_id() or ""
+
+
+async def ensure_session() -> bool:
+    """Start the engine's session, or join the open one, so the host has somewhere to be listed."""
+    attempt = await request(AppStartSessionRequest(), AppStartSessionResultSuccess)
+    if attempt.value is None:
+        logger.warning("Nuke host API: could not start a session for the host: %s", attempt.details)
+        return False
+    return True
+
+
+def attach_host_client(client_id: str) -> None:
+    """List the host on the session for engine discovery; a no-op on engines that predate it."""
+    manager = GriptapeNodes.SessionManager()
+    attach = getattr(manager, "attach_client", None)
+    if attach is None:
+        logger.debug("Nuke host API: this engine does not report session clients")
+        return
+    attach(client_id, HOST_CLIENT_TYPE)
+
+
+def detach_host_client(client_id: str) -> None:
+    detach = getattr(GriptapeNodes.SessionManager(), "detach_client", None)
+    if detach is not None:
+        detach(client_id)
 
 
 async def engine_name() -> str:
