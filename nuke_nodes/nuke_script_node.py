@@ -826,6 +826,12 @@ class NukeScriptNode(SuccessFailureNode):
             if ann.role == "input":
                 raw = self.get_parameter_value(ann.gt_name) or ""
                 if raw:
+                    sequence = _sequence_to_path_and_range(raw)
+                    if sequence is not None:
+                        inputs[ann.gt_name] = ManifestInput(
+                            path=sequence.path, node=ann.node_name, first=sequence.first, last=sequence.last
+                        )
+                        continue
                     # Paths are baked as absolute references into the .nk copy, so they must
                     # outlive this call. Persist them as node outputs, not temp files.
                     inputs[ann.gt_name] = ManifestInput(

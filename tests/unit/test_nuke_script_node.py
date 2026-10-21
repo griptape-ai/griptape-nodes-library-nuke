@@ -891,6 +891,50 @@ class TestProcess:
         assert resolve_path_1 not in deleted_paths
 
 
+class TestSaveBakedCopy:
+    def test_sequence_input_carries_its_range_into_the_bake_manifest(self, tmp_path: Path) -> None:
+        from execution.provider import JobResult, JobStatus
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._ensure_annotations = MagicMock()
+        node._annotations = [
+            GriptapeAnnotation(node_name="ReadPlate", role="input", gt_name="plate", gt_type="Sequence")
+        ]
+        node._expose_knobs = []
+        sequence = _make_sequence("bg.####.exr", 4, first=1001, last=1048, directory="/plates")
+
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "baked_script_path": str(tmp_path / "baked.nk"),
+                "plate": sequence,
+            }.get(name)
+        )
+
+        fake_result = JobResult(handle="handle-bake", status=JobStatus.SUCCEEDED, return_code=0, log=[], outputs={})
+
+        with (
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            instance = MockProvider.return_value
+            instance.submit.return_value = "handle-bake"
+            instance.result.return_value = fake_result
+
+            result = node._save_baked_copy(MagicMock(), MagicMock())
+
+        assert result.success
+        plate = instance.submit.call_args.args[0].inputs["plate"]
+        assert plate.path == "/plates/bg.####.exr"
+        assert (plate.first, plate.last) == (1001, 1048)
+
+
 class TestScriptPathMacroResolution:
     """Issue #153: a Script Path carrying a project macro must resolve, not be used literally."""
 

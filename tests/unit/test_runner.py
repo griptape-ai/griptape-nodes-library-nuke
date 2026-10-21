@@ -148,29 +148,29 @@ class _FakeReadNode:
 
 class TestSetInputFile:
     def test_sequence_range_goes_through_from_user_text(self) -> None:
-        from nuke_runner.runner import _set_input_file
+        from nuke_runner.read_input import set_input_file
 
         node = _FakeReadNode()
-        _set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
+        set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
 
         assert node["file"].user_text == "/plates/bg.####.exr 1001-1048"
         assert node["file"].value is None
 
     def test_single_file_input_uses_set_value(self) -> None:
-        from nuke_runner.runner import _set_input_file
+        from nuke_runner.read_input import set_input_file
 
         node = _FakeReadNode()
-        _set_input_file(node, "/tmp/plate.png", None, None)
+        set_input_file(node, "/tmp/plate.png", None, None)
 
         assert node["file"].value == "/tmp/plate.png"
         assert node["file"].user_text is None
 
     def test_path_containing_space_falls_back_to_explicit_knobs(self) -> None:
         """A space makes '<path> <first>-<last>' ambiguous, so the range is set knob by knob."""
-        from nuke_runner.runner import _set_input_file
+        from nuke_runner.read_input import set_input_file
 
         node = _FakeReadNode()
-        _set_input_file(node, "/Volumes/My Show/bg.####.exr", 1001, 1048)
+        set_input_file(node, "/Volumes/My Show/bg.####.exr", 1001, 1048)
 
         assert node["file"].user_text is None
         assert node["file"].value == "/Volumes/My Show/bg.####.exr"
@@ -178,19 +178,50 @@ class TestSetInputFile:
         assert node["last"].value == 1048
 
     def test_knob_without_from_user_text_sets_orig_range_too(self) -> None:
-        from nuke_runner.runner import _set_input_file
+        from nuke_runner.read_input import set_input_file
 
         node = _FakeReadNode(user_text=False)
-        _set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
+        set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
 
         assert node["file"].value == "/plates/bg.####.exr"
         assert node["origfirst"].value == 1001
         assert node["origlast"].value == 1048
 
     def test_missing_range_knobs_do_not_raise(self) -> None:
-        from nuke_runner.runner import _set_input_file
+        from nuke_runner.read_input import set_input_file
 
         node = _FakeReadNode(user_text=False, range_knobs=False)
-        _set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
+        set_input_file(node, "/plates/bg.####.exr", 1001, 1048)
 
         assert node["file"].value == "/plates/bg.####.exr"
+
+
+class TestBakerInputs:
+    def test_sequence_input_range_is_applied_before_saving(self, tmp_path: Path) -> None:
+        manifest_path = tmp_path / "manifest.json"
+        output_path = tmp_path / "output.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "script": "/fake/comp.nk",
+                    "inputs": {
+                        "plate": {"path": "/plates/bg.####.exr", "node": "ReadPlate", "first": 1001, "last": 1048}
+                    },
+                    "knob_overrides": [],
+                    "bake_output_path": str(tmp_path / "baked.nk"),
+                }
+            )
+        )
+        read_node = _FakeReadNode()
+        _nuke.scriptOpen = MagicMock()
+        _nuke.scriptSaveAs = MagicMock()
+        _nuke.toNode.return_value = read_node
+
+        from nuke_runner.baker import main
+
+        with patch("sys.argv", ["baker.py", "--manifest", str(manifest_path), "--output-manifest", str(output_path)]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 0
+        assert read_node["file"].user_text == "/plates/bg.####.exr 1001-1048"
