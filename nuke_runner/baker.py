@@ -55,6 +55,21 @@ def main() -> None:
         set_input_file(node, path, spec.get("first"), spec.get("last"))
         print(f"input {gt_name!r}: {spec['node']}.file = {path}", file=sys.stderr)
 
+    # Write nodes get their file knob set the same way runner.py sets it, so a baked
+    # copy opened in Nuke renders where the node would have rendered. No placeholder is
+    # created and nothing executes here; only the knob is rewritten.
+    for gt_name, spec in manifest.get("outputs", {}).items():
+        node = nuke.toNode(spec["node"])
+        if node is None:
+            print(f"WARNING: output node {spec['node']!r} not found", file=sys.stderr)
+            continue
+        if node.knob("file") is None:
+            print(f"WARNING: output node {spec['node']!r} has no file knob; skipping", file=sys.stderr)
+            continue
+        out_path = spec["path"].replace("\\", "/")
+        node["file"].setValue(out_path)
+        print(f"output {gt_name!r}: {spec['node']}.file = {out_path}", file=sys.stderr)
+
     for override in manifest.get("knob_overrides", []):
         node = nuke.toNode(override["node"])
         if node is None:
