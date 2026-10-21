@@ -11,10 +11,11 @@ import tempfile
 import urllib.request
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from griptape_nodes.common.macro_parser import ParsedMacro
 from griptape_nodes.common.macro_parser.exceptions import MacroSyntaxError
+from griptape_nodes.common.sequences.models import Sequence
 from griptape_nodes.exe_types.core_types import NodeMessageResult, Parameter, ParameterGroup
 from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_types.parameter_button import ParameterButton
@@ -64,17 +65,21 @@ _TEMP_SUFFIX: dict[str, str] = {
 }
 
 
-def _sequence_to_path_and_range(value: Any) -> tuple[str, int, int] | None:
-    """Return (path, first, last) when value is an engine Sequence, else None."""
-    try:
-        from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415
-    except ImportError:
-        return None
-    if not isinstance(value, GtSequence):
+class SequencePathAndRange(NamedTuple):
+    """A frame sequence as a Nuke-readable path plus its inclusive frame range."""
+
+    path: str
+    first: int
+    last: int
+
+
+def _sequence_to_path_and_range(value: Any) -> SequencePathAndRange | None:
+    """Return the Nuke path and frame range when value is an engine Sequence, else None."""
+    if not isinstance(value, Sequence):
         return None
     filename = nuke_frame_pattern(value.pattern, value.padding)
     path = f"{value.directory}/{filename}".replace("\\", "/")
-    return path, value.first, value.last
+    return SequencePathAndRange(path, value.first, value.last)
 
 
 def _path_to_artifact(gt_type: str, path: str) -> Any:
@@ -682,7 +687,7 @@ class NukeScriptNode(SuccessFailureNode):
         """Resolve a parameter value to a local file path Nuke can read."""
         sequence = _sequence_to_path_and_range(value)
         if sequence is not None:
-            return sequence[0]
+            return sequence.path
         if isinstance(value, str):
             return value
         try:
@@ -892,19 +897,18 @@ class NukeScriptNode(SuccessFailureNode):
                     raw_input = self.get_parameter_value(ann.gt_name) or ""
                     sequence = _sequence_to_path_and_range(raw_input)
                     if sequence is not None:
-                        seq_path, seq_first, seq_last = sequence
-                        if seq_last < frame_start or seq_first > frame_end:
+                        if sequence.last < frame_start or sequence.first > frame_end:
                             logging.getLogger(__name__).warning(
                                 "Input sequence %r covers frames %d-%d but the render range is %d-%d; "
                                 "no input frame falls inside the render.",
                                 ann.gt_name,
-                                seq_first,
-                                seq_last,
+                                sequence.first,
+                                sequence.last,
                                 frame_start,
                                 frame_end,
                             )
                         inputs[ann.gt_name] = ManifestInput(
-                            path=seq_path, node=ann.node_name, first=seq_first, last=seq_last
+                            path=sequence.path, node=ann.node_name, first=sequence.first, last=sequence.last
                         )
                         continue
                     inputs[ann.gt_name] = ManifestInput(
