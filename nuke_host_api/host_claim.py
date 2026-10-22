@@ -25,7 +25,7 @@ class ClaimAttempt:
     displaced: str = ""
 
 
-# Claims survive library reloads and last until engine restart.
+# Claims survive library reloads and last until the holder disconnects or the engine restarts.
 _HELD: HostClaim | None = None
 
 
