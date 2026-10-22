@@ -53,6 +53,27 @@ class NukeConnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
 
 @dataclass
 @PayloadRegistry.register
+class NukeDisconnectRequest(RequestPayload):
+    client_name: str = ""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeDisconnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """``released`` is false when another host, or none, held the claim."""
+
+    released: bool
+    host_client_name: str = ""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukeDisconnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """The request named no host."""
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeListWorkflowsRequest(RequestPayload):
     runnable_only: bool = True
 

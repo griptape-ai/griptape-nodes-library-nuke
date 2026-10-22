@@ -48,6 +48,16 @@ def claim(client_name: str, *, force: bool = False) -> ClaimAttempt:
     return ClaimAttempt(granted=True, holder=_HELD, displaced=displaced)
 
 
+def release_if_held_by(client_name: str) -> bool:
+    """A name match is enough: a host could already take the claim by name with ``force``."""
+    global _HELD  # noqa: PLW0603
+
+    if _HELD is None or _HELD.client_name != canonical_name(client_name):
+        return False
+    _HELD = None
+    return True
+
+
 def release() -> None:
     """Not called on library unload: the claim must survive reloads."""
     global _HELD  # noqa: PLW0603

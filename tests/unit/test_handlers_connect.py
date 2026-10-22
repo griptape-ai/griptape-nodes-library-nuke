@@ -11,8 +11,15 @@ from griptape_nodes.retained_mode.events.app_events import (
 )
 
 from nuke_host_api import execution_bridge, host_claim, notify
-from nuke_host_api.events import NukeConnectRequest, NukeConnectResultFailure, NukeConnectResultSuccess
-from nuke_host_api.handlers import handle_connect
+from nuke_host_api.events import (
+    NukeConnectRequest,
+    NukeConnectResultFailure,
+    NukeConnectResultSuccess,
+    NukeDisconnectRequest,
+    NukeDisconnectResultFailure,
+    NukeDisconnectResultSuccess,
+)
+from nuke_host_api.handlers import handle_connect, handle_disconnect
 from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause
 from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, use_engine
 
@@ -237,3 +244,50 @@ async def test_a_refused_connect_asks_nobody_to_disconnect(_published: list[Any]
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
     assert _published == []
+
+
+async def test_disconnecting_lets_another_host_connect_without_force() -> None:
+    """Closing Nuke and reopening it under a new script name must not need a takeover."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+
+    result = await handle_disconnect(NukeDisconnectRequest(client_name="Nuke shot_040"))
+    assert isinstance(result, NukeDisconnectResultSuccess)
+    assert result.released
+    assert result.host_client_name == ""
+
+    reconnect = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert isinstance(reconnect, NukeConnectResultSuccess)
+    assert reconnect.displaced_client_name == ""
+
+
+async def test_a_displaced_host_disconnecting_leaves_the_new_host_in_place() -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_112", force=True))
+
+    result = await handle_disconnect(NukeDisconnectRequest(client_name="Nuke shot_040"))
+    assert isinstance(result, NukeDisconnectResultSuccess)
+    assert not result.released
+    assert result.host_client_name == "Nuke shot_112"
+    held = host_claim.held()
+    assert held is not None
+    assert held.client_name == "Nuke shot_112"
+
+
+async def test_disconnecting_twice_succeeds_without_releasing_again() -> None:
+    """A host may send it on both script close and app exit."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_disconnect(NukeDisconnectRequest(client_name="Nuke shot_040"))
+
+    result = await handle_disconnect(NukeDisconnectRequest(client_name="Nuke shot_040"))
+    assert isinstance(result, NukeDisconnectResultSuccess)
+    assert not result.released
+
+
+@pytest.mark.parametrize("client_name", ["", "   "])
+async def test_a_disconnect_with_no_name_is_refused_and_keeps_the_claim(client_name: str) -> None:
+    await handle_connect(NukeConnectRequest(client_name=HOST))
+
+    result = await handle_disconnect(NukeDisconnectRequest(client_name=client_name))
+    assert isinstance(result, NukeDisconnectResultFailure)
+    assert "client_name" in str(result.result_details)
+    assert host_claim.held() is not None
