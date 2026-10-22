@@ -465,6 +465,21 @@ class TestSerializeOutput:
         }
         assert serialize_output(output) == {"image": "/home/artist/GriptapeNodes/staticfiles/clip.mp4"}
 
+    def test_external_static_server_url_resolves_to_absolute_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The gizmo moves its static files outside the workspace, so the runner emits `/external/` URLs.
+
+        This is the shape a published gizmo's own outputs actually take, not the `/workspace/` shape.
+        Resolving it needs engine >= 0.104.1 (engine #5827); on an older engine the URL falls through
+        verbatim and Nuke is handed a non-path, which is the bug this test guards against.
+        """
+        config_manager = Mock()
+        config_manager.workspace_path = Path("/home/artist/GriptapeNodes")
+        monkeypatch.setattr(output_paths.GriptapeNodes, "ConfigManager", staticmethod(lambda: config_manager))
+
+        url = "http://localhost:60856/external/projects/shot/griptape_run/staticfiles/clip.mp4?t=1786574231"
+        output = {"Node": {"image": _FakeValueArtifact(url)}}
+        assert serialize_output(output) == {"image": "/projects/shot/griptape_run/staticfiles/clip.mp4"}
+
     def test_legacy_url_only_artifact_is_still_resolved(self) -> None:
         """An artifact exposing only .url (no .value) falls back to the url attribute and resolves."""
         output = {"Node": {"image": _FakeLegacyUrlArtifact("file:///renders/gen.png")}}
