@@ -5,7 +5,15 @@ import time
 
 from nuke_host_api import execution_bridge, host_claim, library_version, notify
 from nuke_host_api.dispatch import failure, verb
-from nuke_host_api.engine import engine_id, engine_name, engine_version, event_topic, session_id
+from nuke_host_api.engine import (
+    engine_id,
+    engine_name,
+    engine_version,
+    event_topic,
+    join_session_as_host,
+    leave_session_as_host,
+    session_id,
+)
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
@@ -90,6 +98,13 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
                 replaced_by=client,
             )
         )
+
+    # Engine discovery lists the session's clients, so the host joins (or opens) the session
+    # under its claim name. Neither step can fail the handshake: a host that cannot be
+    # listed can still drive the engine, as it always could.
+    if attempt.displaced:
+        await leave_session_as_host(attempt.displaced)
+    await join_session_as_host(client)
 
     # The bridge is engine-global, so defer its cost until a host needs notifications.
     execution_bridge.ensure_installed()

@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 from griptape_nodes.retained_mode.events.app_events import (
+    AppStartSessionRequest,
+    AppStartSessionResultFailure,
     GetEngineNameRequest,
     GetEngineNameResultFailure,
     GetEngineVersionRequest,
@@ -21,7 +23,7 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.handlers import handle_connect, handle_disconnect
 from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause
-from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, use_engine
+from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, FakeEngine, use_engine
 
 HOST = "Nuke shot_040"
 
@@ -41,8 +43,8 @@ def _published(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 
 @pytest.fixture(autouse=True)
-def _fake_engine(monkeypatch: pytest.MonkeyPatch) -> None:
-    use_engine(monkeypatch, {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME})
+def _fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
+    return use_engine(monkeypatch, {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME})
 
 
 @pytest.fixture(autouse=True)
@@ -128,10 +130,10 @@ async def test_identity_is_read_from_the_handshake_not_the_envelope() -> None:
     assert result.engine_name == "Engine One"
 
 
-async def test_a_direct_engine_connection_with_no_session_reports_no_session_id(
+async def test_a_direct_engine_connection_with_no_session_opens_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A host connecting straight to an engine, with no session layered on top, gets empty."""
+    """Discovery lists clients per session, so a host on a sessionless engine opens one to be seen."""
     use_engine(
         monkeypatch,
         {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME},
@@ -139,8 +141,55 @@ async def test_a_direct_engine_connection_with_no_session_reports_no_session_id(
     )
     result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
+    assert result.session_id == "session-opened"
+    assert result.event_topic == "sessions/session-opened/response"
+
+
+async def test_a_connect_joins_the_session_under_its_claim_name(_fake_engine: FakeEngine) -> None:
+    """Engine discovery shows who holds an engine, so the start request must carry the trimmed name."""
+    await handle_connect(NukeConnectRequest(client_name="  Nuke shot_040 "))
+
+    starts = [r for r in _fake_engine.requests if isinstance(r, AppStartSessionRequest)]
+    assert [(r.client_id, r.client_type) for r in starts] == [("Nuke shot_040", "nuke")]
+    assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
+
+
+async def test_a_takeover_delists_the_displaced_host(_fake_engine: FakeEngine) -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_112", force=True))
+
+    assert _fake_engine.session_clients == [("Nuke shot_112", "nuke")]
+
+
+async def test_a_refused_connect_lists_nobody(_fake_engine: FakeEngine) -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+
+    assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
+
+
+async def test_the_same_host_reconnecting_is_listed_once(_fake_engine: FakeEngine) -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+
+    assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
+
+
+async def test_a_session_that_will_not_start_still_connects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Being listed in discovery is a courtesy; driving the engine never depended on a session."""
+    fake = use_engine(
+        monkeypatch,
+        {
+            GetEngineVersionRequest: ENGINE_VERSION,
+            GetEngineNameRequest: ENGINE_NAME,
+            AppStartSessionRequest: AppStartSessionResultFailure(result_details="no sessions here"),
+        },
+        session_id="",
+    )
+    result = await handle_connect(NukeConnectRequest(client_name=HOST))
+    assert isinstance(result, NukeConnectResultSuccess)
     assert result.session_id == ""
-    assert result.event_topic == "engines/engine-xyz/response"
+    assert fake.session_clients == []
 
 
 async def test_a_refused_name_lookup_reports_an_empty_name_not_a_failed_connect(
