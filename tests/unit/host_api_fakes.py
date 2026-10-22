@@ -12,6 +12,8 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppDetachSessionClientRequest,
+    AppDetachSessionClientResultSuccess,
     AppStartSessionRequest,
     AppStartSessionResultSuccess,
     GetEngineNameResultSuccess,
@@ -86,25 +88,6 @@ ENGINE_VERSION = GetEngineVersionResultSuccess(major=0, minor=97, patch=0, resul
 ENGINE_NAME = GetEngineNameResultSuccess(engine_name="Engine One", result_details="ok")
 
 
-class FakeSessionManager:
-    """Records the clients a handler attaches and detaches."""
-
-    def __init__(self) -> None:
-        self.attached: list[tuple[str, str]] = []
-        self.detached: list[str] = []
-
-    def attach_client(self, client_id: str, client_type: str) -> bool:
-        self.attached.append((client_id, client_type))
-        return True
-
-    def detach_client(self, client_id: str) -> None:
-        self.detached.append(client_id)
-
-
-class LegacySessionManager:
-    """An engine from before sessions listed their clients."""
-
-
 class FakeEngine:
     """Dispatches ahandle_request by request type, recording call order.
 
@@ -122,23 +105,31 @@ class FakeEngine:
         session_id: str = "session-abc",
         engine_id: str = "engine-xyz",
         suspends: bool = False,
-        session_manager: Any = None,
     ) -> None:
         self._responses = responses or {}
         self._session_id = session_id
         self._engine_id = engine_id
         self._suspends = suspends
-        self.session_manager = session_manager if session_manager is not None else FakeSessionManager()
         self.requests: list[Any] = []
+        # What the engine's session would list, kept in attach order like the real manager.
+        self.session_clients: list[tuple[str, str]] = []
 
     async def ahandle_request(self, request: Any) -> Any:
         if self._suspends:
             await asyncio.sleep(0)
         self.requests.append(request)
-        if isinstance(request, AppStartSessionRequest) and type(request) not in self._responses:
-            # Mirrors the engine: a start opens a session when none is active, else joins it.
-            self._session_id = self._session_id or "session-opened"
-            return AppStartSessionResultSuccess(session_id=self._session_id, result_details="ok")
+        if type(request) not in self._responses:
+            # Session verbs mirror the engine unless a test overrides them: a start opens a
+            # session when none is active, else joins it, and lists a named client.
+            if isinstance(request, AppStartSessionRequest):
+                self._session_id = self._session_id or "session-opened"
+                if request.client_id:
+                    self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
+                    self.session_clients.append((request.client_id, request.client_type))
+                return AppStartSessionResultSuccess(session_id=self._session_id, result_details="ok")
+            if isinstance(request, AppDetachSessionClientRequest):
+                self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
+                return AppDetachSessionClientResultSuccess(result_details="ok")
         response = self._responses.get(type(request))
         if response is None:
             msg = f"FakeEngine has no response configured for {type(request).__name__}"
@@ -150,9 +141,6 @@ class FakeEngine:
 
     def get_engine_id(self) -> str:
         return self._engine_id
-
-    def SessionManager(self) -> Any:  # noqa: N802
-        return self.session_manager
 
 
 def use_engine(monkeypatch: pytest.MonkeyPatch, responses: dict[type, Any] | None = None, **kwargs: Any) -> FakeEngine:
