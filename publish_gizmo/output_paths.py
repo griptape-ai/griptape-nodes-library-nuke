@@ -166,7 +166,7 @@ def serialize_output(output: dict | None) -> dict[str, str]:
     if not output:
         return {}
 
-    # Values pass through verbatim: the engine substitutes an output parameter's macros only for
+    # Macros are not resolved here: the engine substitutes an output parameter's macros only for
     # str/dict/list values, and NukeEndFlow converts artifact-wrapped macros to str upstream so
     # they qualify. Anything still in braces by here names a variable that could not be resolved.
     result: dict[str, str] = {}
@@ -212,22 +212,7 @@ def _parse_file_uri(location: str) -> str | None:
 
 
 def _resolve_location(value: str) -> str:
-    """Resolve a workflow output value to a path Nuke can open.
-
-    Every real Griptape ``*UrlArtifact`` (``UrlArtifact`` and its ``ImageUrlArtifact`` /
-    ``VideoUrlArtifact`` / ``AudioUrlArtifact`` subclasses) carries its URL in ``.value``, so this
-    is where a ``file://`` URI or engine static-server URL for a workflow output actually shows up.
-    Delegates to the engine's own ``path_utils`` helpers -- the same ``parse_file_uri`` ->
-    ``is_url`` -> ``parse_static_server_url`` chain ``File._resolve_plain_path`` uses -- rather than
-    keeping a local parser that drifts from the engine's UNC/localhost/percent-encoding handling.
-
-    Args:
-        value: Raw string value from the artifact, which may or may not be a URL.
-
-    Returns:
-        A local path if ``value`` names one (via ``file://`` or a localhost static-server URL);
-        otherwise ``value`` unchanged (plain text, or a remote URL with no local path to resolve to).
-    """
+    """Resolve a file:// or localhost static-server URL to a local path; return anything else unchanged."""
     local_path = _parse_file_uri(value)
     if local_path is not None:
         return local_path
