@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppDetachSessionClientRequest,
+    AppDetachSessionClientResultSuccess,
     AppStartSessionRequest,
     AppStartSessionResultSuccess,
     GetEngineNameRequest,
@@ -83,29 +85,21 @@ def session_id() -> str:
     return GriptapeNodes.get_session_id() or ""
 
 
-async def ensure_session() -> bool:
-    """Start the engine's session, or join the open one, so the host has somewhere to be listed."""
-    attempt = await request(AppStartSessionRequest(), AppStartSessionResultSuccess)
+async def join_session_as_host(client_id: str) -> None:
+    """Start or join the engine's session with the host listed on it, so discovery shows who holds the engine."""
+    attempt = await request(
+        AppStartSessionRequest(client_id=client_id, client_type=HOST_CLIENT_TYPE),
+        AppStartSessionResultSuccess,
+    )
     if attempt.value is None:
-        logger.warning("Nuke host API: could not start a session for the host: %s", attempt.details)
-        return False
-    return True
+        logger.warning("Nuke host API: could not join a session as %s: %s", client_id, attempt.details)
 
 
-def attach_host_client(client_id: str) -> None:
-    """List the host on the session for engine discovery; a no-op on engines that predate it."""
-    manager = GriptapeNodes.SessionManager()
-    attach = getattr(manager, "attach_client", None)
-    if attach is None:
-        logger.debug("Nuke host API: this engine does not report session clients")
-        return
-    attach(client_id, HOST_CLIENT_TYPE)
-
-
-def detach_host_client(client_id: str) -> None:
-    detach = getattr(GriptapeNodes.SessionManager(), "detach_client", None)
-    if detach is not None:
-        detach(client_id)
+async def leave_session_as_host(client_id: str) -> None:
+    """Delist a displaced host; nothing to do when no session was ever opened."""
+    attempt = await request(AppDetachSessionClientRequest(client_id=client_id), AppDetachSessionClientResultSuccess)
+    if attempt.value is None:
+        logger.debug("Nuke host API: could not delist %s: %s", client_id, attempt.details)
 
 
 async def engine_name() -> str:
