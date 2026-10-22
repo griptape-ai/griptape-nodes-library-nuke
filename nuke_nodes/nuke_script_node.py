@@ -640,7 +640,7 @@ class NukeScriptNode(SuccessFailureNode):
             # Outside aprocess the engine leaves flow variables unsubstituted, and
             # GetPathForMacroRequest does not consult them. contains_variable_macro is
             # checked first so a plain path never touches the engine at all.
-            variables = VariableResolver.get_variables_without_memoizing(self.name)
+            variables = VariableResolver.get_variables_without_memoizing(self.engine, self.name)
             if variables:
                 raw = VariableResolver.resolve_string(raw, variables, self.name)
         # anchor_dir/library_dir are passed uncalled: each reaches the engine, and only a

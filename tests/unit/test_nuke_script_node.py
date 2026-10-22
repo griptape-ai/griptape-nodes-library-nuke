@@ -318,6 +318,7 @@ def _make_node() -> Any:
         node.metadata = {}
         node.parameter_output_values = MagicMock()  # type: ignore[assignment]
         node.name = "NukeScriptNode1"
+        node._engine = MagicMock()
 
         # Stub framework methods used by our code
         node.add_parameter = MagicMock()

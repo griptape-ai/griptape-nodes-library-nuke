@@ -115,7 +115,7 @@ def workflow_anchor_dir() -> str | None:
 
 def library_dir(node_type: str) -> str | None:
     """Return the folder of the library that provides node_type, for anchoring shipped-template paths."""
-    library_name = GriptapeNodes.LibraryManager().get_library_name_for_node_type(node_type)
+    library_name = GriptapeNodes.LibraryManager().catalog.get_library_name_for_node_type(node_type)
     if library_name is None:
         return None
     result = GriptapeNodes.handle_request(GetLibrarySourceInfoRequest(library=library_name))
