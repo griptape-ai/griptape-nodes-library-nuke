@@ -12,6 +12,7 @@ class Verb:
     """Wire request type names."""
 
     CONNECT = "NukeConnectRequest"
+    DISCONNECT = "NukeDisconnectRequest"
     LIST_WORKFLOWS = "NukeListWorkflowsRequest"
     DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
     LOAD_WORKFLOW = "NukeLoadWorkflowRequest"

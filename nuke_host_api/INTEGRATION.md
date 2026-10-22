@@ -27,7 +27,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
+| Verbs | `NukeConnectRequest`, `NukeDisconnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent`, `NukeHostDisconnectEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
@@ -54,6 +54,7 @@ project verbs read and change engine-wide project state and need no loaded workf
 | Verb | Needs a loaded workflow | Takes a `workflow_id` |
 |---|---|---|
 | `NukeConnectRequest` | no | no |
+| `NukeDisconnectRequest` | no | no |
 | `NukeListWorkflowsRequest` | no | no |
 | `NukeDescribeWorkflowRequest` | no | yes, required |
 | `NukeListProjectsRequest` | no | no |
@@ -374,8 +375,10 @@ name, user, or pid to distinguish sessions.
 A forced takeover publishes [`NukeHostDisconnectEvent`](#nukehostdisconnectevent) naming the
 displaced host. The transport cannot close one socket, so that host must close its own.
 
-The transport provides no disconnect signal. Claims survive library reloads and last until
-engine restart, even if the host crashes; use `force` to reclaim such an engine.
+The transport provides no disconnect signal, so a host releases its claim with
+[`NukeDisconnectRequest`](#nukedisconnectrequest) before closing. Otherwise claims survive
+library reloads and last until engine restart, even if the host crashes; use `force` to
+reclaim such an engine.
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
@@ -437,6 +440,38 @@ Show a claim refusal to the artist. A "connect anyway" action re-sends with `for
   }
 }
 ```
+
+### NukeDisconnectRequest
+
+Send before closing the socket, on script close and on Nuke exit. It releases the host claim
+so the next host connects without `force`. It does not close the connection, unsubscribe the
+host, or stop notifications.
+
+| Request field | Type | Default | Notes |
+|---|---|---|---|
+| `client_name` | `str` | `""` | Required, nonblank. The `client_name` this host connected with; trimmed before use |
+
+| `NukeDisconnectResultSuccess` field | Type | Notes |
+|---|---|---|
+| `released` | `bool` | Whether this request released the claim |
+| `host_client_name` | `str` | The claim holder after the request, empty when none |
+
+The claim is released only when this host holds it. A host displaced by `force` gets
+`released: false` and leaves its successor's claim in place, so it is safe to send
+unconditionally. Sending it twice succeeds the second time with `released: false`.
+
+```json
+{
+  "released": true,
+  "host_client_name": ""
+}
+```
+
+`NukeDisconnectResultFailure` means the request had a blank `client_name`. The claim is
+unchanged.
+
+A library older than this verb answers with the engine's failure for an unknown request type.
+Treat that as nothing to release and close anyway.
 
 ### NukeListWorkflowsRequest
 
@@ -1319,7 +1354,8 @@ Requests that the displaced host close its connection after a forced takeover.
 ```
 
 When `client_name` matches this host's echoed `host_client_name`, stop polling, close the
-socket, and show `reason`. Disable automatic reconnect; let the artist decide whether to
+socket, and show `reason`. Sending `NukeDisconnectRequest` first is harmless; it releases
+nothing. Disable automatic reconnect; let the artist decide whether to
 reconnect with `force`.
 
 The event is sent on the shared `event_topic` to every subscriber and is never replayed.

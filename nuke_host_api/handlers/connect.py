@@ -10,6 +10,9 @@ from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
     NukeConnectResultSuccess,
+    NukeDisconnectRequest,
+    NukeDisconnectResultFailure,
+    NukeDisconnectResultSuccess,
     NukeHostDisconnectEvent,
 )
 from nuke_host_api.protocol import (
@@ -105,4 +108,33 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
         host_connected_at=attempt.holder.connected_at,
         displaced_client_name=attempt.displaced,
         result_details=f"Connected {client} on host API protocol version {mutual[0]}.",
+    )
+
+
+@verb(NukeDisconnectRequest)
+async def handle_disconnect(
+    request: NukeDisconnectRequest,
+) -> NukeDisconnectResultSuccess | NukeDisconnectResultFailure:
+    client = host_claim.canonical_name(request.client_name)
+    if not client:
+        return failure(
+            NukeDisconnectResultFailure,
+            attempted="to disconnect a host that sent no client_name",
+            because="the host claim is keyed on the name. Send the client_name this host connected with.",
+            error=ValueError,
+        )
+
+    released = host_claim.release_if_held_by(client)
+    holder = host_claim.held()
+    if released:
+        details = f"Released the host claim held by {client}."
+    elif holder is None:
+        details = f"{client} held no claim, and no host holds one."
+    else:
+        details = f"{client} held no claim. {holder.client_name} holds it and keeps it."
+
+    return NukeDisconnectResultSuccess(
+        released=released,
+        host_client_name=holder.client_name if holder else "",
+        result_details=details,
     )

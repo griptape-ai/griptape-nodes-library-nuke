@@ -236,6 +236,23 @@ class TestConnect:
                 {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
             )
 
+    def test_a_disconnect_frees_the_engine_for_another_host(self, client: HostClient) -> None:
+        try:
+            released = client.request(Verb.DISCONNECT, {"client_name": "smoke test"})
+            assert succeeded(released), f"disconnect failed: {detail_of(released)}"
+            assert result_of(released)["released"] is True
+
+            other = client.request(
+                Verb.CONNECT, {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "second smoke host"}
+            )
+            assert succeeded(other), f"a host was refused after the holder disconnected: {detail_of(other)}"
+            assert result_of(other)["displaced_client_name"] == ""
+        finally:
+            client.request(
+                Verb.CONNECT,
+                {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
+            )
+
 
 class TestDescribe:
     def test_listed_workflows_carry_an_id_and_a_label(self, client: HostClient) -> None:

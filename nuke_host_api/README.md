@@ -40,8 +40,8 @@ tests/unit/
   test_dispatch.py                 request guard, failure wording
   test_library_version.py          manifest read and reload reset
   test_handlers_routes.py          every declared verb is routed exactly once
-  test_handlers_connect.py         negotiation, event stream gating
-  test_host_claim.py               claim grant, reconnect, refusal, takeover
+  test_handlers_connect.py         negotiation, event stream gating, disconnect
+  test_host_claim.py               claim grant, reconnect, refusal, takeover, release
   test_notify.py                   a payload leaves as an AppEvent on the IPC path
   test_handlers_workflows.py       discovery and parameter publication
   test_handlers_load.py            argument checks, load ordering, read-back
@@ -104,6 +104,8 @@ Three choices are deliberate:
   carry a claim token.
 - `force` publishes `NukeHostDisconnectEvent` instead of closing a socket. The transport can only
   close every connection, which would drop the editor too.
+- `NukeDisconnectRequest` releases the claim only for the name that holds it. It is the host's
+  cooperation standing in for a transport disconnect signal, and a crash still needs `force`.
 - A library reload keeps the claim. Any client can trigger a reload with
   `NukeSetCurrentProjectRequest`, and dropping the claim would let a second host in. An idle
   timeout would not help, since the editor's traffic would keep a dead host's claim alive.

@@ -84,3 +84,23 @@ def test_releasing_frees_the_engine_for_any_host() -> None:
     host_claim.release()
     assert host_claim.held() is None
     assert host_claim.claim("Nuke shot_112").granted
+
+
+def test_the_holder_releases_its_own_claim() -> None:
+    host_claim.claim("Nuke shot_040")
+    assert host_claim.release_if_held_by("  Nuke shot_040  ")
+    assert host_claim.held() is None
+
+
+def test_a_displaced_host_cannot_release_its_successors_claim() -> None:
+    """A host taken over by force may still disconnect cleanly, and must not free the engine."""
+    host_claim.claim("Nuke shot_040")
+    host_claim.claim("Nuke shot_112", force=True)
+    assert not host_claim.release_if_held_by("Nuke shot_040")
+    held = host_claim.held()
+    assert held is not None
+    assert held.client_name == "Nuke shot_112"
+
+
+def test_releasing_an_unclaimed_engine_does_nothing() -> None:
+    assert not host_claim.release_if_held_by("Nuke shot_040")
