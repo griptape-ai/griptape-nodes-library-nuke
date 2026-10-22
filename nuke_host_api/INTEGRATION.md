@@ -195,8 +195,8 @@ whose `payload_type` does not begin with `Nuke`.
 
 The engine's `EngineHeartbeatRequest` returns engine identity, session id, and active workflow
 in one round trip without requiring this library. It is outside the [bound surface](#bound-surface)
-and follows the engine's release cadence. On engines that report session clients, its
-`clients` list, and the same list on the cloud engine registry, carries the claim holder as
+and follows the engine's release cadence. Its `clients` list, and the same list on the cloud
+engine registry, carries the claim holder as
 `{"client_id": <trimmed client_name>, "client_type": "nuke", "connected_at": <ISO time>}`.
 Nothing expires an entry: it leaves when a `force` connect displaces it or the session ends,
 so a host that crashed stays listed until one of those happens.
