@@ -238,6 +238,6 @@ def _resolve_location(value: str) -> str:
         workspace_path = Path(GriptapeNodes.ConfigManager().workspace_path)
         static_server_path = parse_static_server_url(value, workspace_path)
         if static_server_path is not None:
-            return str(static_server_path)
+            return normalize_for_nuke(str(static_server_path))
 
     return value

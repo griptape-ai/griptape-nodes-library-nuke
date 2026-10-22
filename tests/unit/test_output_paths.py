@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import Mock
 
 import pytest
@@ -479,6 +479,25 @@ class TestSerializeOutput:
         url = "http://localhost:60856/external/projects/shot/griptape_run/staticfiles/clip.mp4?t=1786574231"
         output = {"Node": {"image": _FakeValueArtifact(url)}}
         assert serialize_output(output) == {"image": "/projects/shot/griptape_run/staticfiles/clip.mp4"}
+
+    def test_static_server_url_on_windows_reaches_nuke_with_forward_slashes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nuke's TCL layer treats a backslash as an escape, so a Windows path must not leave here with any."""
+        config_manager = Mock()
+        config_manager.workspace_path = Path("/unused")
+        monkeypatch.setattr(output_paths.GriptapeNodes, "ConfigManager", staticmethod(lambda: config_manager))
+        windows_path = PureWindowsPath("C:/ws/staticfiles/clip.mp4")
+        monkeypatch.setattr(output_paths, "parse_static_server_url", lambda _url, _workspace: windows_path)
+        assert "\\" in str(windows_path)
+
+        output = {"Node": {"image": _FakeValueArtifact("http://localhost:8124/workspace/staticfiles/clip.mp4")}}
+        assert serialize_output(output) == {"image": "C:/ws/staticfiles/clip.mp4"}
+
+    def test_file_uri_with_drive_letter_in_the_host_slot_is_not_treated_as_unc(self) -> None:
+        """`file://C:/x` puts the drive where a host would go; it must stay `C:/x`, never `//C:/x`."""
+        output = {"Node": {"image": _FakeValueArtifact("file://C:/renders/gen.png")}}
+        assert serialize_output(output) == {"image": "C:/renders/gen.png"}
 
     def test_legacy_url_only_artifact_is_still_resolved(self) -> None:
         """An artifact exposing only .url (no .value) falls back to the url attribute and resolves."""
