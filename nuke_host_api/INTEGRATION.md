@@ -350,7 +350,7 @@ other verbs answer without it.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `client_protocol_versions` | `list[int]` | `[]` | Every version the host can speak. Empty means "assume current" |
-| `client_name` | `str` | `""` | Required, nonblank claim key. Trimmed before use; choose a per-session name |
+| `client_name` | `str` | `""` | Required, nonblank claim key. Trimmed before use; choose a per-session name. It is published verbatim as `client_id` in engine discovery, visible to the whole organization, so pick it knowing that |
 | `force` | `bool` | `false` | Take another host's claim after artist confirmation |
 
 | `NukeConnectResultSuccess` field | Type | Notes |
