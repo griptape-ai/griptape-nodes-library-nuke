@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from griptape_nodes.common.sequences.models import MissingItemPolicy, Sequence
 from griptape_nodes.retained_mode.events.os_events import (
     DeleteFileRequest,
     WriteFileRequest,
@@ -14,7 +15,12 @@ from griptape_nodes.retained_mode.events.os_events import (
     WriteFileResultSuccess,
 )
 
-from nuke_nodes.nuke_script_node import _coerce_knob_value, _path_to_artifact
+from nuke_nodes.nuke_script_node import (
+    SequencePathAndRange,
+    _coerce_knob_value,
+    _path_to_artifact,
+    _sequence_to_path_and_range,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -272,6 +278,49 @@ class TestArtifactToPath:
         node = _make_node()
         result = node._artifact_to_path(seq)
         assert result == "/out/frames/frame_####.png"
+
+
+def _make_sequence(
+    pattern: str, padding: int, first: int = 1001, last: int = 1002, directory: str = "/out/frames"
+) -> Sequence:
+    return Sequence(
+        entries=[],
+        first=first,
+        last=last,
+        discovered_first=first,
+        discovered_last=last,
+        padding=padding,
+        pattern=pattern,
+        directory=directory,
+        policy=MissingItemPolicy.SPLIT,
+        present_numbers=set(range(first, last + 1)),
+    )
+
+
+class TestSequenceToPathAndRange:
+    def test_returns_path_with_first_and_last(self) -> None:
+        result = _sequence_to_path_and_range(_make_sequence("frame_####.png", 4, first=1001, last=1048))
+        assert result == SequencePathAndRange("/out/frames/frame_####.png", 1001, 1048)
+
+    def test_printf_token_is_rewritten_to_hashes(self) -> None:
+        """Nuke reads `#` and `%0Nd`; the engine's scanner also emits `@` and `$F`."""
+        result = _sequence_to_path_and_range(_make_sequence("frame_%04d.png", 4))
+        assert result is not None
+        assert result.path == "/out/frames/frame_####.png"
+
+    def test_at_token_is_rewritten_to_hashes(self) -> None:
+        result = _sequence_to_path_and_range(_make_sequence("frame_@@@@.png", 4))
+        assert result is not None
+        assert result.path == "/out/frames/frame_####.png"
+
+    def test_backslashes_normalised_to_forward_slashes(self) -> None:
+        result = _sequence_to_path_and_range(_make_sequence("frame_####.png", 4, directory="C:\\shows\\bg"))
+        assert result is not None
+        assert result.path == "C:/shows/bg/frame_####.png"
+
+    def test_returns_none_for_non_sequence(self) -> None:
+        assert _sequence_to_path_and_range("/tmp/plate.png") is None
+        assert _sequence_to_path_and_range(None) is None
 
 
 class TestCoerceKnobValue:
@@ -841,6 +890,176 @@ class TestProcess:
         deleted_paths = {c.args[0].path for c in delete_calls}
         assert canonical_path_1 in deleted_paths
         assert resolve_path_1 not in deleted_paths
+
+
+class TestSaveBakedCopy:
+    def test_sequence_input_carries_its_range_into_the_bake_manifest(self, tmp_path: Path) -> None:
+        from execution.provider import JobResult, JobStatus
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._ensure_annotations = MagicMock()
+        node._annotations = [
+            GriptapeAnnotation(node_name="ReadPlate", role="input", gt_name="plate", gt_type="Sequence")
+        ]
+        node._expose_knobs = []
+        sequence = _make_sequence("bg.####.exr", 4, first=1001, last=1048, directory="/plates")
+
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "baked_script_path": str(tmp_path / "baked.nk"),
+                "plate": sequence,
+            }.get(name)
+        )
+
+        fake_result = JobResult(handle="handle-bake", status=JobStatus.SUCCEEDED, return_code=0, log=[], outputs={})
+
+        with (
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            instance = MockProvider.return_value
+            instance.submit.return_value = "handle-bake"
+            instance.result.return_value = fake_result
+
+            result = node._save_baked_copy(MagicMock(), MagicMock())
+
+        assert result.success
+        plate = instance.submit.call_args.args[0].inputs["plate"]
+        assert plate.path == "/plates/bg.####.exr"
+        assert (plate.first, plate.last) == (1001, 1048)
+
+    def test_sequence_output_path_is_sent_in_the_bake_manifest(self, tmp_path: Path) -> None:
+        """A baked copy must point its Write nodes where a render would have written."""
+        from execution.provider import JobResult, JobStatus
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._ensure_annotations = MagicMock()
+        node._annotations = [
+            GriptapeAnnotation(node_name="WriteOut", role="output", gt_name="frames", gt_type="Sequence")
+        ]
+        node._expose_knobs = []
+        node._resolve_sequence_output_path = MagicMock(return_value="/out/nuke/frames/frame_####.png")
+
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "baked_script_path": str(tmp_path / "baked.nk"),
+            }.get(name)
+        )
+
+        fake_result = JobResult(handle="h", status=JobStatus.SUCCEEDED, return_code=0, log=[], outputs={})
+
+        with (
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            instance = MockProvider.return_value
+            instance.submit.return_value = "h"
+            instance.result.return_value = fake_result
+
+            result = node._save_baked_copy(MagicMock(), MagicMock())
+
+        assert result.success
+        frames = instance.submit.call_args.args[0].outputs["frames"]
+        assert frames.path == "/out/nuke/frames/frame_####.png"
+        assert frames.node == "WriteOut"
+        assert frames.type == "Sequence"
+
+    def test_single_image_output_is_sent_in_the_bake_manifest(self, tmp_path: Path) -> None:
+        from execution.provider import JobResult, JobStatus
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._ensure_annotations = MagicMock()
+        node._annotations = [
+            GriptapeAnnotation(node_name="WriteOut", role="output", gt_name="beauty", gt_type="ImageArtifact")
+        ]
+        node._expose_knobs = []
+
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "baked_script_path": str(tmp_path / "baked.nk"),
+            }.get(name)
+        )
+
+        fake_result = JobResult(handle="h", status=JobStatus.SUCCEEDED, return_code=0, log=[], outputs={})
+        mock_dest_cls = _mock_artifact_to_path_dest("/out/beauty.png")
+
+        with (
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            instance = MockProvider.return_value
+            instance.submit.return_value = "h"
+            instance.result.return_value = fake_result
+
+            result = node._save_baked_copy(MagicMock(), MagicMock())
+
+        assert result.success
+        beauty = instance.submit.call_args.args[0].outputs["beauty"]
+        assert beauty.path == "/out/beauty.png"
+        assert beauty.type == "ImageArtifact"
+
+    def test_bake_does_not_create_placeholder_output_files(self, tmp_path: Path) -> None:
+        """process() pre-creates placeholders for the runner; a bake renders nothing."""
+        from execution.provider import JobResult, JobStatus
+        from script_parser.annotation import GriptapeAnnotation
+
+        nk_file = tmp_path / "test.nk"
+        nk_file.write_text("")
+
+        node = _make_node()
+        node._ensure_annotations = MagicMock()
+        node._annotations = [
+            GriptapeAnnotation(node_name="WriteOut", role="output", gt_name="beauty", gt_type="ImageArtifact")
+        ]
+        node._expose_knobs = []
+        node._write_scratch_file = MagicMock()
+
+        node.get_parameter_value = MagicMock(
+            side_effect=lambda name: {
+                "script_path": str(nk_file),
+                "nuke_executable": "/usr/bin/nuke",
+                "baked_script_path": str(tmp_path / "baked.nk"),
+            }.get(name)
+        )
+
+        fake_result = JobResult(handle="h", status=JobStatus.SUCCEEDED, return_code=0, log=[], outputs={})
+        mock_dest_cls = _mock_artifact_to_path_dest("/out/beauty.png")
+
+        with (
+            patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
+            patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls),
+            patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
+        ):
+            MockGT.ConfigManager.return_value.get_config_value.return_value = None
+            instance = MockProvider.return_value
+            instance.submit.return_value = "h"
+            instance.result.return_value = fake_result
+
+            node._save_baked_copy(MagicMock(), MagicMock())
+
+        node._write_scratch_file.assert_not_called()
 
 
 class TestScriptPathMacroResolution:

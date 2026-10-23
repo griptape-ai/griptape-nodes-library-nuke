@@ -33,7 +33,7 @@ _TILE_COLOR_ROLE = 0x5FAD4EFF
 _TILE_COLOR_EXPOSE = 0x9B59B6FF
 
 # Artifact types available when marking a node as an input.
-_INPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact"]
+_INPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "Sequence"]
 
 # Artifact types available when marking a node as an output.
 _OUTPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "Sequence", "ThreeDUrlArtifact"]

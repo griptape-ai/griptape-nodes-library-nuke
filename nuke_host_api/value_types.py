@@ -258,6 +258,11 @@ def _numeric_value_type(value: int | float, declared_engine_type: str | None) ->
     return ValueType.INT
 
 
+def nuke_frame_pattern(pattern: str, padding: int | None) -> str:
+    """Rewrite a scanner frame token into the `#` form Nuke reads."""
+    return _FRAME_TOKEN.sub("#" * max(padding or 0, 1), pattern, count=1)
+
+
 def _is_sequence(value: dict[str, Any]) -> bool:
     return "pattern" in value and "entries" in value
 
@@ -268,8 +273,7 @@ def _normalize_sequence(value: dict[str, Any], declared_engine_type: str | None)
     # An empty scan result has no pattern and no entries.
     if not pattern or not value.get("entries"):
         return None, None
-    padding = "#" * max(value.get("padding") or 0, 1)
-    filename = _FRAME_TOKEN.sub(padding, str(pattern), count=1)
+    filename = nuke_frame_pattern(str(pattern), value.get("padding"))
     directory = value.get("directory")
     path = f"{directory}/{filename}" if directory else filename
     value_type, entry = _normalize_string(path, declared_engine_type)

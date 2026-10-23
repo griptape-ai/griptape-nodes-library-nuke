@@ -22,6 +22,7 @@ nuke_runner/             Headless runner — scripts that run inside nuke -t (st
   runner.py                Entry point; reads manifest, runs Write nodes, collects outputs
   introspect.py            Knob schema introspection; writes JSON to temp file
   baker.py                 Bakes knob override values into a copy of the .nk before render
+  read_input.py            Points an annotated Read node at an input, carrying a sequence's frame range
   exporter.py              Extracts camera matrices and converts meshes to GLB for 3D outputs
   manifest.py              JobManifest dataclass and schema
 execution/               Execution layer — launches and polls Nuke subprocesses
@@ -52,7 +53,7 @@ Makefile                 All dev workflows (check, fix, version, deps)
 
 **Language and runtime**
 - Griptape-side code: Python 3.12 (matches `pyproject.toml`).
-- Nuke-runner scripts (`nuke_runner/runner.py`, `nuke_runner/introspect.py`): Python 3.10+ (must run inside Nuke 15+'s bundled interpreter). These files must be **stdlib only** — no third-party imports. `nuke` itself is available.
+- Nuke-runner scripts (`nuke_runner/runner.py`, `nuke_runner/baker.py`, `nuke_runner/introspect.py`, `nuke_runner/read_input.py`): Python 3.10+ (must run inside Nuke 15+'s bundled interpreter). These files must be **stdlib only** — no third-party imports. `nuke` itself is available.
 - PySide6 first, PySide2 fallback. Match the pattern in `publish_gizmo/run_button.py`.
 
 **Dependencies**

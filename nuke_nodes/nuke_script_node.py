@@ -11,10 +11,11 @@ import tempfile
 import urllib.request
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from griptape_nodes.common.macro_parser import ParsedMacro
 from griptape_nodes.common.macro_parser.exceptions import MacroSyntaxError
+from griptape_nodes.common.sequences.models import Sequence
 from griptape_nodes.exe_types.core_types import NodeMessageResult, Parameter, ParameterGroup
 from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_types.parameter_button import ParameterButton
@@ -39,6 +40,7 @@ from griptape_nodes.traits.slider import Slider
 
 from execution.direct import _STRIPPED_PYTHON_VARS, _STRIPPED_QT_VARS, DirectSubprocessProvider
 from execution.installations import NukeInstallation, find_installation, merged_installations
+from nuke_host_api.value_types import nuke_frame_pattern
 from nuke_nodes.script_path import (
     ScriptPathResolution,
     describe_failure,
@@ -56,11 +58,30 @@ from script_parser.sidecar import read_knob_schema, read_sidecar
 _RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "runner.py"))
 _BAKE_RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "baker.py"))
 
+_SEQUENCE_OUTPUT_MACRO = "{outputs}/nuke/{node_name}/{param_name}/frame_####.png"
+
 _TEMP_SUFFIX: dict[str, str] = {
     "ThreeDUrlArtifact": ".obj",
     "GLTFUrlArtifact": ".glb",
     "VideoUrlArtifact": ".mp4",
 }
+
+
+class SequencePathAndRange(NamedTuple):
+    """A frame sequence as a Nuke-readable path plus its inclusive frame range."""
+
+    path: str
+    first: int
+    last: int
+
+
+def _sequence_to_path_and_range(value: Any) -> SequencePathAndRange | None:
+    """Return the Nuke path and frame range when value is an engine Sequence, else None."""
+    if not isinstance(value, Sequence):
+        return None
+    filename = nuke_frame_pattern(value.pattern, value.padding)
+    path = f"{value.directory}/{filename}".replace("\\", "/")
+    return SequencePathAndRange(path, value.first, value.last)
 
 
 def _path_to_artifact(gt_type: str, path: str) -> Any:
@@ -666,13 +687,9 @@ class NukeScriptNode(SuccessFailureNode):
         situation: str = "save_temp_file",
     ) -> str:
         """Resolve a parameter value to a local file path Nuke can read."""
-        try:
-            from griptape_nodes.common.sequences import Sequence as GtSequence  # type: ignore  # noqa: PLC0415
-
-            if isinstance(value, GtSequence):
-                return (value.directory + "/" + value.pattern).replace("\\", "/")
-        except ImportError:
-            pass
+        sequence = _sequence_to_path_and_range(value)
+        if sequence is not None:
+            return sequence.path
         if isinstance(value, str):
             return value
         try:
@@ -777,6 +794,18 @@ class NukeScriptNode(SuccessFailureNode):
 
         return errors or None
 
+    def _resolve_sequence_output_path(self, param_name: str) -> str:
+        """Resolve the project-managed frame pattern a sequence output renders into."""
+        macro_result = GriptapeNodes.handle_request(
+            GetPathForMacroRequest(
+                parsed_macro=ParsedMacro(_SEQUENCE_OUTPUT_MACRO),
+                variables={"node_name": self.name, "param_name": param_name},
+            )
+        )
+        if not isinstance(macro_result, GetPathForMacroResultSuccess):
+            raise RuntimeError(f"Could not resolve output path for sequence {param_name!r}")
+        return str(macro_result.absolute_path).replace("\\", "/")
+
     def _save_baked_copy(
         self,
         button: Button,  # noqa: ARG002
@@ -811,12 +840,40 @@ class NukeScriptNode(SuccessFailureNode):
             if ann.role == "input":
                 raw = self.get_parameter_value(ann.gt_name) or ""
                 if raw:
+                    sequence = _sequence_to_path_and_range(raw)
+                    if sequence is not None:
+                        inputs[ann.gt_name] = ManifestInput(
+                            path=sequence.path, node=ann.node_name, first=sequence.first, last=sequence.last
+                        )
+                        continue
                     # Paths are baked as absolute references into the .nk copy, so they must
                     # outlive this call. Persist them as node outputs, not temp files.
                     inputs[ann.gt_name] = ManifestInput(
                         path=self._artifact_to_path(raw, name=ann.gt_name, situation="save_node_output"),
                         node=ann.node_name,
                     )
+
+        outputs: dict[str, ManifestOutput] = {}
+        for ann in self._annotations:
+            if ann.role == "input":
+                continue
+            # A bake only rewrites knobs, so unlike process() it resolves the destination
+            # without pre-creating a placeholder file: nothing renders into it here.
+            # ImageSequenceArtifact: backward-compat for sidecars annotated before engine 0.93
+            if ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
+                outputs[ann.gt_name] = ManifestOutput(
+                    path=self._resolve_sequence_output_path(ann.gt_name),
+                    node=ann.node_name,
+                    type="Sequence",
+                )
+            else:
+                suffix = _TEMP_SUFFIX.get(ann.gt_type or "", ".png")
+                dest = ProjectFileDestination.from_situation(f"{self.name}_{ann.gt_name}{suffix}", "save_node_output")
+                outputs[ann.gt_name] = ManifestOutput(
+                    path=str(dest.resolve()).replace("\\", "/"),
+                    node=ann.node_name,
+                    type=ann.gt_type or "ImageArtifact",
+                )
 
         knob_overrides: list[KnobOverride] = []
         for ek in self._expose_knobs:
@@ -829,7 +886,7 @@ class NukeScriptNode(SuccessFailureNode):
         manifest = JobManifest(
             script=str(script_path),
             inputs=inputs,
-            outputs={},
+            outputs=outputs,
             knob_overrides=knob_overrides,
             env=env,
             bake_output_path=str(baked_path),
@@ -879,9 +936,26 @@ class NukeScriptNode(SuccessFailureNode):
         try:
             for ann in self._annotations:
                 if ann.role == "input":
+                    raw_input = self.get_parameter_value(ann.gt_name) or ""
+                    sequence = _sequence_to_path_and_range(raw_input)
+                    if sequence is not None:
+                        if sequence.last < frame_start or sequence.first > frame_end:
+                            logging.getLogger(__name__).warning(
+                                "Input sequence %r covers frames %d-%d but the render range is %d-%d; "
+                                "no input frame falls inside the render.",
+                                ann.gt_name,
+                                sequence.first,
+                                sequence.last,
+                                frame_start,
+                                frame_end,
+                            )
+                        inputs[ann.gt_name] = ManifestInput(
+                            path=sequence.path, node=ann.node_name, first=sequence.first, last=sequence.last
+                        )
+                        continue
                     inputs[ann.gt_name] = ManifestInput(
                         path=self._artifact_to_path(
-                            self.get_parameter_value(ann.gt_name) or "",
+                            raw_input,
                             name=ann.gt_name,
                             _cleanup=input_tmp_paths,
                         ),
@@ -889,15 +963,7 @@ class NukeScriptNode(SuccessFailureNode):
                     )
                 # ImageSequenceArtifact: backward-compat for sidecars annotated before engine 0.93
                 elif ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
-                    macro_result = GriptapeNodes.handle_request(
-                        GetPathForMacroRequest(
-                            parsed_macro=ParsedMacro("{outputs}/nuke/{node_name}/{param_name}/frame_####.png"),
-                            variables={"node_name": self.name, "param_name": ann.gt_name},
-                        )
-                    )
-                    if not isinstance(macro_result, GetPathForMacroResultSuccess):
-                        raise RuntimeError(f"Could not resolve output path for sequence {ann.gt_name!r}")
-                    seq_path = str(macro_result.absolute_path).replace("\\", "/")
+                    seq_path = self._resolve_sequence_output_path(ann.gt_name)
                     GriptapeNodes.handle_request(MakeDirectoryRequest(path=os.path.dirname(seq_path)))
                     outputs[ann.gt_name] = ManifestOutput(
                         path=seq_path,
