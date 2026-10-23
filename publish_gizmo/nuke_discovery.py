@@ -30,6 +30,10 @@ def discover_nuke_executables() -> list[str]:
     def add(candidate: Path) -> None:
         if not candidate.is_file():
             return
+        # Nuke ships a crash reporter (nukeCrashFeedback) beside the main binary.
+        # Windows globbing is case-insensitive, so "Nuke*.exe" matches it too.
+        if "crash" in candidate.name.lower():
+            return
         # macOS app binaries may not report X_OK reliably; Windows uses .exe only.
         if sys.platform not in ("win32", "darwin") and not os.access(candidate, os.X_OK):
             return
@@ -49,8 +53,6 @@ def discover_nuke_executables() -> list[str]:
                 return
             for pattern in ("Nuke*", "nuke*"):
                 for exe in macos_dir.glob(pattern):
-                    if "crash" in exe.name.lower():
-                        continue
                     add(exe)
 
         if applications.is_dir():
