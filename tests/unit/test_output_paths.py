@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import Mock
 
 import pytest
@@ -38,14 +38,16 @@ _NK_DIR = "/projects/shot_010/comp"
 _COMPANION = "/library/griptape/my_workflow"
 
 
-class _FakeUrlArtifact:
-    def __init__(self, url: str) -> None:
-        self.url = url
-
-
 class _FakeValueArtifact:
     def __init__(self, value: str | bytes) -> None:
         self.value = value
+
+
+class _FakeLegacyUrlArtifact:
+    """An artifact that exposes only .url, exercising the backward-compatible fallback branch."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
 
 
 @pytest.fixture
@@ -400,17 +402,111 @@ class TestSerializeOutput:
         assert serialize_output({"Node": {"caption": None}}) == {"caption": ""}
 
     def test_unix_file_uri_keeps_leading_slash(self) -> None:
-        output = {"Node": {"image": _FakeUrlArtifact("file:///renders/gen.png")}}
+        output = {"Node": {"image": _FakeValueArtifact("file:///renders/gen.png")}}
         assert serialize_output(output) == {"image": "/renders/gen.png"}
 
     def test_windows_file_uri_drops_slash_before_drive_letter(self) -> None:
-        output = {"Node": {"image": _FakeUrlArtifact("file:///C:/renders/gen.png")}}
+        output = {"Node": {"image": _FakeValueArtifact("file:///C:/renders/gen.png")}}
         assert serialize_output(output) == {"image": "C:/renders/gen.png"}
 
+    def test_localhost_file_uri_collapses_to_local_path(self) -> None:
+        output = {"Node": {"image": _FakeValueArtifact("file://localhost/renders/gen.png")}}
+        assert serialize_output(output) == {"image": "/renders/gen.png"}
+
+    def test_localhost_file_uri_keeps_windows_drive(self) -> None:
+        """localhost and a Windows drive letter combine: the host is dropped, the drive is kept."""
+        output = {"Node": {"image": _FakeValueArtifact("file://localhost/C:/renders/gen.png")}}
+        assert serialize_output(output) == {"image": "C:/renders/gen.png"}
+
+    def test_file_uri_percent_encoding_is_decoded(self) -> None:
+        output = {"Node": {"image": _FakeValueArtifact("file:///renders/with%20spaces.png")}}
+        assert serialize_output(output) == {"image": "/renders/with spaces.png"}
+
+    def test_file_uri_percent_encoded_braces_are_decoded(self) -> None:
+        """%7B/%7D must decode back to {} so a downstream macro reader sees a macro, not literal text."""
+        output = {"Node": {"image": _FakeValueArtifact("file:///%7Boutputs%7D/gen.png")}}
+        assert serialize_output(output) == {"image": "/{outputs}/gen.png"}
+
+    def test_unc_file_uri_resolves_to_network_share(self) -> None:
+        """A Windows network share is the standard UNC spelling, not an unhandled remote host."""
+        output = {"Node": {"image": _FakeValueArtifact("file://myserver/share/gen.png")}}
+        assert serialize_output(output) == {"image": "//myserver/share/gen.png"}
+
+    def test_unc_file_uri_percent_encoding_is_decoded(self) -> None:
+        output = {"Node": {"image": _FakeValueArtifact("file://myserver/share/with%20space.png")}}
+        assert serialize_output(output) == {"image": "//myserver/share/with space.png"}
+
     def test_non_file_url_is_passed_through_verbatim(self) -> None:
-        """Only a file:// URI names something on disk; anything else is Nuke's problem, not ours to rewrite."""
-        output = {"Node": {"image": _FakeUrlArtifact("https://example.invalid/renders/gen.png")}}
+        """A remote URL names no local file; it's Nuke's problem, not ours to rewrite."""
+        output = {"Node": {"image": _FakeValueArtifact("https://example.invalid/renders/gen.png")}}
         assert serialize_output(output) == {"image": "https://example.invalid/renders/gen.png"}
+
+    def test_remote_url_never_consults_the_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A non-localhost URL must resolve without booting the engine to read its workspace path.
+
+        Reaching for ConfigManager here constructs a real engine in a unit test; only a localhost
+        static-server URL has a workspace file to look up, so every other URL must short-circuit.
+        """
+        config_manager = Mock(side_effect=AssertionError("ConfigManager must not be consulted for a remote URL"))
+        monkeypatch.setattr(output_paths.GriptapeNodes, "ConfigManager", staticmethod(config_manager))
+
+        remote_static_lookalike = "http://example.com/workspace/staticfiles/clip.mp4"
+        output = {"Node": {"image": _FakeValueArtifact(remote_static_lookalike)}}
+        assert serialize_output(output) == {"image": remote_static_lookalike}
+
+    def test_static_server_url_resolves_to_workspace_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Engine node outputs pass around static-server URLs; the gizmo needs the real path they serve."""
+        config_manager = Mock()
+        config_manager.workspace_path = Path("/home/artist/GriptapeNodes")
+        monkeypatch.setattr(output_paths.GriptapeNodes, "ConfigManager", staticmethod(lambda: config_manager))
+
+        output = {
+            "Node": {"image": _FakeValueArtifact("http://localhost:8124/workspace/staticfiles/clip.mp4?t=1786574231")}
+        }
+        assert serialize_output(output) == {"image": "/home/artist/GriptapeNodes/staticfiles/clip.mp4"}
+
+    def test_external_static_server_url_resolves_to_absolute_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The gizmo moves its static files outside the workspace, so the runner emits `/external/` URLs.
+
+        This is the shape a published gizmo's own outputs actually take, not the `/workspace/` shape.
+        Resolving it needs engine >= 0.104.1 (engine #5827); on an older engine the URL falls through
+        verbatim and Nuke is handed a non-path, which is the bug this test guards against.
+        """
+        config_manager = Mock()
+        config_manager.workspace_path = Path("/home/artist/GriptapeNodes")
+        monkeypatch.setattr(output_paths.GriptapeNodes, "ConfigManager", staticmethod(lambda: config_manager))
+
+        url = "http://localhost:60856/external/projects/shot/griptape_run/staticfiles/clip.mp4?t=1786574231"
+        output = {"Node": {"image": _FakeValueArtifact(url)}}
+        assert serialize_output(output) == {"image": "/projects/shot/griptape_run/staticfiles/clip.mp4"}
+
+    def test_static_server_url_on_windows_reaches_nuke_with_forward_slashes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nuke's TCL layer treats a backslash as an escape, so a Windows path must not leave here with any."""
+        config_manager = Mock()
+        config_manager.workspace_path = Path("/unused")
+        monkeypatch.setattr(output_paths.GriptapeNodes, "ConfigManager", staticmethod(lambda: config_manager))
+        windows_path = PureWindowsPath("C:/ws/staticfiles/clip.mp4")
+        monkeypatch.setattr(output_paths, "parse_static_server_url", lambda _url, _workspace: windows_path)
+        assert "\\" in str(windows_path)
+
+        output = {"Node": {"image": _FakeValueArtifact("http://localhost:8124/workspace/staticfiles/clip.mp4")}}
+        assert serialize_output(output) == {"image": "C:/ws/staticfiles/clip.mp4"}
+
+    def test_file_uri_with_drive_letter_in_the_host_slot_is_not_treated_as_unc(self) -> None:
+        """`file://C:/x` puts the drive where a host would go; it must stay `C:/x`, never `//C:/x`."""
+        output = {"Node": {"image": _FakeValueArtifact("file://C:/renders/gen.png")}}
+        assert serialize_output(output) == {"image": "C:/renders/gen.png"}
+
+    def test_legacy_url_only_artifact_is_still_resolved(self) -> None:
+        """An artifact exposing only .url (no .value) falls back to the url attribute and resolves."""
+        output = {"Node": {"image": _FakeLegacyUrlArtifact("file:///renders/gen.png")}}
+        assert serialize_output(output) == {"image": "/renders/gen.png"}
+
+    def test_bare_string_value_is_resolved(self) -> None:
+        """A plain file:// string that never reached an artifact wrapper still resolves to a path."""
+        assert serialize_output({"Node": {"image": "file:///renders/gen.png"}}) == {"image": "/renders/gen.png"}
 
     def test_binary_artifact_value_is_summarized(self) -> None:
         output = {"Node": {"blob": _FakeValueArtifact(b"1234")}}

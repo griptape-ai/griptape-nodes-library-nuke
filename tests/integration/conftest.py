@@ -17,7 +17,6 @@ import griptape_nodes.retained_mode.managers.config_manager as config_manager_mo
 import griptape_nodes.retained_mode.managers.secrets_manager as secrets_manager_module
 import pytest
 from griptape_nodes.node_library.library_registry import LibraryRegistry
-from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.engine import reset_root_engine
 
 from nuke_host_api import run_outcome
@@ -32,7 +31,6 @@ def _reset_engine() -> None:
     """Drop the root ``Engine`` and clear its process-global registries."""
     reset_root_engine()
     LibraryRegistry._clear()
-    WorkflowRegistry._workflows.clear()
     run_outcome.clear()
 
 

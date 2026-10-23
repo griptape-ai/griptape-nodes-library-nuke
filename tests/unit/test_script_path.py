@@ -36,6 +36,10 @@ class FakeLibraryManager:
     def get_library_name_for_node_type(self, node_type: str) -> str | None:  # noqa: ARG002
         return self._library_name
 
+    @property
+    def catalog(self) -> FakeLibraryManager:
+        return self
+
 
 class FakeEngine:
     """Stands in for the GriptapeNodes facade, recording the macros it was asked to resolve."""

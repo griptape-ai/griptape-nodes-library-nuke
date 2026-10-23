@@ -6,8 +6,13 @@ import logging
 import os
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import unquote, urlparse
 
 from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro
+from griptape_nodes.files.path_utils import (
+    parse_file_uri as engine_parse_file_uri,
+)
+from griptape_nodes.files.path_utils import parse_static_server_url
 from griptape_nodes.retained_mode.events.base_events import ResultPayload
 from griptape_nodes.retained_mode.events.project_events import (
     GetPathForMacroRequest,
@@ -161,7 +166,7 @@ def serialize_output(output: dict | None) -> dict[str, str]:
     if not output:
         return {}
 
-    # Values pass through verbatim: the engine substitutes an output parameter's macros only for
+    # Macros are not resolved here: the engine substitutes an output parameter's macros only for
     # str/dict/list values, and NukeEndFlow converts artifact-wrapped macros to str upstream so
     # they qualify. Anything still in braces by here names a variable that could not be resolved.
     result: dict[str, str] = {}
@@ -171,24 +176,53 @@ def serialize_output(output: dict | None) -> dict[str, str]:
         for param_name, value in params.items():
             if value is None:
                 result[param_name] = ""
-            elif hasattr(value, "url"):
-                result[param_name] = _path_from_file_url(str(value.url))
+            elif isinstance(value, (str, bytes)):
+                result[param_name] = (
+                    f"<binary {len(value)} bytes>" if isinstance(value, bytes) else _resolve_location(value)
+                )
             elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value
-                result[param_name] = f"<binary {len(raw)} bytes>" if isinstance(raw, bytes) else raw
+                result[param_name] = f"<binary {len(raw)} bytes>" if isinstance(raw, bytes) else _resolve_location(raw)
+            elif hasattr(value, "url"):
+                result[param_name] = _resolve_location(str(value.url))
             else:
                 result[param_name] = str(value)
 
     return result
 
 
-def _path_from_file_url(url: str) -> str:
-    """Convert a file:// URI to a plain path Nuke can open."""
-    if not url.startswith("file://"):
-        return url
-    url = url[7:]  # -> /C:/... on Windows, /unix/... on Unix
-    # Both spellings have three slashes, so the third is dropped only before a drive letter; a Unix
-    # absolute path needs to keep it.
-    if len(url) >= 3 and url[0] == "/" and url[1].isalpha() and url[2] == ":":
-        url = url[1:]  # -> C:/... on Windows
-    return url
+def _parse_file_uri(location: str) -> str | None:
+    """Use the engine's parser for supported URIs and handle UNC network shares locally."""
+    local_path = engine_parse_file_uri(location)
+    if local_path is not None:
+        return local_path
+    if not location.startswith("file://"):
+        return None
+
+    parsed = urlparse(location)
+    if parsed.scheme != "file":
+        return None
+    if not parsed.netloc or parsed.netloc.lower() in ("", "localhost"):
+        return None
+
+    path = unquote(parsed.path or "")
+    if not path.startswith("/"):
+        return None
+    return f"//{parsed.netloc}{path}"
+
+
+def _resolve_location(value: str) -> str:
+    """Resolve a file:// or localhost static-server URL to a local path; return anything else unchanged."""
+    local_path = _parse_file_uri(value)
+    if local_path is not None:
+        return local_path
+
+    # Only a localhost static-server URL has a local file to resolve to; gate the workspace lookup
+    # on that prefix so a remote URL never boots the engine's ConfigManager just to be handed back.
+    if value.startswith(("http://localhost:", "https://localhost:")):
+        workspace_path = Path(GriptapeNodes.ConfigManager().workspace_path)
+        static_server_path = parse_static_server_url(value, workspace_path)
+        if static_server_path is not None:
+            return normalize_for_nuke(str(static_server_path))
+
+    return value
