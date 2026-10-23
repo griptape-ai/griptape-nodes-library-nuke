@@ -670,7 +670,7 @@ can leave nothing loaded at all.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `workflow_id` | `str` | `""` | From `NukeListWorkflowsRequest`. Mutually exclusive with `file_path` |
-| `file_path` | `str` | `""` | Absolute path to a workflow file the engine has not registered. Imported, registered, then loaded. Mutually exclusive with `workflow_id` |
+| `file_path` | `str` | `""` | Absolute path to a workflow file the engine has not registered. Imported, registered, then loaded. Mutually exclusive with `workflow_id`. A path written on another OS opens on the engine's OS when the current project's per-platform `workspace_dir` or `directories` give that folder for both |
 
 Send exactly one. Both is refused rather than resolved, because they can name different
 workflows; neither is refused too.

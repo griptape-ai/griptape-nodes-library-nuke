@@ -9,7 +9,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultSuccess,
 )
 
-from nuke_host_api import engine, flow_run, parameter_values, run_outcome, shape
+from nuke_host_api import engine, flow_run, host_paths, parameter_values, run_outcome, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
@@ -60,7 +60,8 @@ async def handle_load_workflow(
 
 async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
     if request.file_path:
-        imported = await engine.request(ImportWorkflowRequest(file_path=request.file_path), ImportWorkflowResultSuccess)
+        engine_file_path = await host_paths.engine_path(request.file_path)
+        imported = await engine.request(ImportWorkflowRequest(file_path=engine_file_path), ImportWorkflowResultSuccess)
         if imported.value is None:
             return failure(
                 NukeLoadWorkflowResultFailure,

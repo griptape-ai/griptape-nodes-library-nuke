@@ -38,6 +38,10 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueRequest,
     SetParameterValueResultSuccess,
 )
+from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultFailure,
+)
 from griptape_nodes.retained_mode.events.workflow_events import (
     ImportWorkflowRequest,
     ImportWorkflowResultSuccess,
@@ -192,6 +196,7 @@ def load_responses(overrides: dict[type, Any] | None = None) -> dict[type, Any]:
         ImportWorkflowRequest: ImportWorkflowResultSuccess(workflow_name="wf1", result_details="imported"),
         RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
         GetParameterValueRequest: respond_to_get_value,
+        GetCurrentProjectRequest: GetCurrentProjectResultFailure(result_details="no current project"),
     }
     responses.update(overrides or {})
     return responses

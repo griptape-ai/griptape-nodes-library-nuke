@@ -8,9 +8,12 @@ moment it does.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from griptape_nodes.common.project_templates import DEFAULT_PROJECT_TEMPLATE, PerPlatformProjectPath
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -18,6 +21,12 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultFailure,
+)
+from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultSuccess,
+    GetPathForMacroRequest,
+    GetPathForMacroResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
     ImportWorkflowRequest,
@@ -30,7 +39,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultFailure,
 )
 
-from nuke_host_api import engine, flow_run, run_outcome
+from nuke_host_api import engine, flow_run, host_paths, run_outcome
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
     NukeLoadWorkflowResultFailure,
@@ -158,6 +167,34 @@ class TestLoadWorkflow:
         assert result.workflow_id == "wf1"
         imported = next(r for r in engine.requests if isinstance(r, ImportWorkflowRequest))
         assert imported.file_path == "/shots/sq010/comp.py"
+
+    async def test_a_file_path_from_a_host_on_another_os_is_imported_from_the_engines_mount(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The engine may run on another OS, where the host's absolute path names nothing."""
+        monkeypatch.setattr(host_paths, "active_platform_key", lambda: "linux")
+        template = DEFAULT_PROJECT_TEMPLATE.model_copy(
+            update={"workspace_dir": PerPlatformProjectPath(darwin="/Volumes/share", linux="/mnt/share")}
+        )
+        engine = use_engine(
+            monkeypatch,
+            load_responses(
+                {
+                    GetCurrentProjectRequest: GetCurrentProjectResultSuccess(
+                        project_info=MagicMock(template=template), result_details="current"
+                    ),
+                    GetPathForMacroRequest: GetPathForMacroResultSuccess(
+                        resolved_path=Path("/mnt/share"), absolute_path=Path("/mnt/share"), result_details="resolved"
+                    ),
+                }
+            ),
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(file_path="/Volumes/share/sq010/comp.py"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        imported = next(r for r in engine.requests if isinstance(r, ImportWorkflowRequest))
+        assert imported.file_path == str(Path("/mnt/share/sq010/comp.py"))
 
     async def test_a_file_the_engine_cannot_import_is_refused_before_anything_is_cleared(
         self, monkeypatch: pytest.MonkeyPatch
@@ -318,13 +355,14 @@ class TestLoadWorkflow:
         assert len(engine.requests) == 4 + declared
         assert sum(isinstance(r, GetParameterValueRequest) for r in engine.requests) == declared
 
-    async def test_a_file_path_load_costs_one_engine_request_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_file_path_load_costs_two_engine_requests_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """One reads the current project to translate the path, one imports it."""
         engine = use_engine(monkeypatch, load_responses())
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(file_path="/shots/sq010/comp.py"))
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
-        assert len(engine.requests) == 5 + len(result.inputs) + len(result.outputs)
+        assert len(engine.requests) == 6 + len(result.inputs) + len(result.outputs)
 
     async def test_a_parameter_the_engine_will_not_answer_for_is_reported_not_omitted(
         self, monkeypatch: pytest.MonkeyPatch
