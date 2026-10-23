@@ -139,6 +139,12 @@ parameter's declaration and its current value have different lifetimes, so they 
 is worse than refusing. A `file_path` is imported and registered first, so a host can hand
 over a file an artist picked and learn the resulting id from the reply.
 
+A host may run on a different OS from the engine, so its `file_path` names shared storage by its
+own mount. Before importing, the handler matches the path against the current project's
+per-platform `workspace_dir` and `directories` values for every OS and opens the engine's
+matching folder (`host_paths.py`). The engine does not attempt this itself, since only this
+layer knows the path came from a host. A path no project folder covers is imported as written.
+
 Every check this verb makes itself happens before the engine is touched, including reading the
 registry to reject an unknown id, so a request refused on its own arguments leaves the loaded
 graph intact. A `file_path` is imported and registered before those checks run, so a refusal
