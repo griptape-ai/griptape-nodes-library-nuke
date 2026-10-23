@@ -12,8 +12,8 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
-    AppDetachSessionClientRequest,
-    AppDetachSessionClientResultSuccess,
+    AppLeaveSessionRequest,
+    AppLeaveSessionResultSuccess,
     AppStartSessionRequest,
     AppStartSessionResultSuccess,
     GetEngineNameResultSuccess,
@@ -127,9 +127,9 @@ class FakeEngine:
                     self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
                     self.session_clients.append((request.client_id, request.client_type))
                 return AppStartSessionResultSuccess(session_id=self._session_id, result_details="ok")
-            if isinstance(request, AppDetachSessionClientRequest):
+            if isinstance(request, AppLeaveSessionRequest):
                 self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
-                return AppDetachSessionClientResultSuccess(result_details="ok")
+                return AppLeaveSessionResultSuccess(result_details="ok")
         response = self._responses.get(type(request))
         if response is None:
             msg = f"FakeEngine has no response configured for {type(request).__name__}"

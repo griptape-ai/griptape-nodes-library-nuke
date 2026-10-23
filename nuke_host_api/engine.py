@@ -6,8 +6,8 @@ import logging
 from dataclasses import dataclass
 
 from griptape_nodes.retained_mode.events.app_events import (
-    AppDetachSessionClientRequest,
-    AppDetachSessionClientResultSuccess,
+    AppLeaveSessionRequest,
+    AppLeaveSessionResultSuccess,
     AppStartSessionRequest,
     AppStartSessionResultSuccess,
     GetEngineNameRequest,
@@ -88,7 +88,7 @@ def session_id() -> str:
 async def join_session_as_host(client_id: str) -> None:
     """Start or join the engine's session with the host listed on it, so discovery shows who holds the engine."""
     attempt = await request(
-        AppStartSessionRequest(client_id=client_id, client_type=HOST_CLIENT_TYPE),
+        AppStartSessionRequest(client_id=client_id, client_type=HOST_CLIENT_TYPE, client_label=client_id),
         AppStartSessionResultSuccess,
     )
     if attempt.value is None:
@@ -97,7 +97,7 @@ async def join_session_as_host(client_id: str) -> None:
 
 async def leave_session_as_host(client_id: str) -> None:
     """Delist a displaced host; nothing to do when no session was ever opened."""
-    attempt = await request(AppDetachSessionClientRequest(client_id=client_id), AppDetachSessionClientResultSuccess)
+    attempt = await request(AppLeaveSessionRequest(client_id=client_id), AppLeaveSessionResultSuccess)
     if attempt.value is None:
         logger.debug("Nuke host API: could not delist %s: %s", client_id, attempt.details)
 
