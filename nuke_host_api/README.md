@@ -365,8 +365,8 @@ or not the reload details hold.
 ### Push, with a recovery path
 
 Notifications are real pushes, not polling: the bridge subscribes in-process, translates,
-and `put_event(AppEvent(...))` reaches every connected socket. Three limits shape how a
-plugin must use it.
+and `put_event(AppEvent(...))` reaches every connection subscribed to `event_topic`. Three
+limits shape how a plugin must use it.
 
 - **Fire and forget.** The Rust fan-out drops send errors on the floor. No acks, no
   backpressure, no delivery guarantee.
@@ -381,15 +381,14 @@ plugin must use it.
   reads. A host that skips connect gets replies and no events.
 
 The transport a plugin uses is `websocket_direct`, not `local_socket`, and the slow-reader
-hazard is why. `local_socket` writes to every client serially under one lock, so a client
-that stops reading long enough to fill its socket buffer is dropped from the broadcast set
-on the first write error and receives nothing further, replies included, while its read side
-stays open. Observed by hand while running the smoke tests, and asserted by no test: a
-single-threaded client that paused between requests hit a 60 second reply timeout on a healthy
-socket, and a wedged client also delays delivery to the editor. `websocket_direct` gives each
-connection its own unbounded queue and writer task, so a slow reader costs engine memory
-instead of frames and stalls nobody. A plugin still reads on a dedicated thread that never
-blocks.
+hazard is why. `local_socket` writes to its clients serially under one lock, so a client that
+stops reading long enough to fill its socket buffer is dropped on the first write error and
+receives nothing further, replies included, while its read side stays open. Observed by hand
+while running the smoke tests, and asserted by no test: a single-threaded client that paused
+between requests hit a 60 second reply timeout on a healthy socket, and a wedged client also
+delays delivery to the editor. `websocket_direct` gives each connection its own unbounded
+queue and writer task, so a slow reader costs engine memory instead of frames and stalls
+nobody. A plugin still reads on a dedicated thread that never blocks.
 
 `NukeGetExecutionStateRequest` and `NukeGetParameterValuesRequest` together are the recovery
 path: a reconnecting host that missed every notification reads what is running from the
