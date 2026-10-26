@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ from nuke_nodes.nuke_script_node import (
     _coerce_knob_value,
     _path_to_artifact,
     _sequence_to_path_and_range,
+    _warn_if_outside_render_range,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -280,6 +282,32 @@ class TestArtifactToPath:
         node = _make_node()
         result = node._artifact_to_path(seq)
         assert result == "/out/frames/frame_####.png"
+
+
+class TestWarnIfOutsideRenderRange:
+    @pytest.mark.parametrize(
+        ("first", "last", "expected"),
+        [
+            (10, 20, False),
+            (1, 15, False),
+            (15, 30, False),
+            (5, 10, False),
+            (20, 25, False),
+            (1, 9, True),
+            (21, 30, True),
+        ],
+    )
+    def test_warns_only_when_no_frame_overlaps_the_render(self, first: int, last: int, expected: bool) -> None:
+        """Render range is 10-20; a sequence warns only when it shares no frame with it."""
+        warned = _warn_if_outside_render_range("plate", SequencePathAndRange("/x.####.png", first, last), 10, 20)
+        assert warned is expected
+
+    def test_the_warning_names_the_parameter_and_both_ranges(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING):
+            _warn_if_outside_render_range("plate", SequencePathAndRange("/x.####.png", 1, 5), 10, 20)
+        assert "'plate'" in caplog.text
+        assert "1-5" in caplog.text
+        assert "10-20" in caplog.text
 
 
 def _make_sequence(

@@ -117,6 +117,23 @@ def _sequence_to_path_and_range(value: Any, param_name: str = "") -> SequencePat
     return SequencePathAndRange(path, value.first, value.last)
 
 
+def _warn_if_outside_render_range(
+    param_name: str, sequence: SequencePathAndRange, frame_start: int, frame_end: int
+) -> bool:
+    """Warn when no frame of an input sequence falls inside the render range; True if warned."""
+    if sequence.first <= frame_end and sequence.last >= frame_start:
+        return False
+    logging.getLogger(__name__).warning(
+        "Input sequence %r covers frames %d-%d but the render range is %d-%d; no input frame falls inside the render.",
+        param_name,
+        sequence.first,
+        sequence.last,
+        frame_start,
+        frame_end,
+    )
+    return True
+
+
 def _path_to_artifact(gt_type: str, path: str) -> Any:
     """Convert a runner output file path to the appropriate Griptape artifact."""
     if gt_type in {"ThreeDUrlArtifact", "GLTFUrlArtifact"}:
@@ -1001,16 +1018,7 @@ class NukeScriptNode(SuccessFailureNode):
                     raw_input = self.get_parameter_value(ann.gt_name) or ""
                     sequence = _sequence_to_path_and_range(raw_input, ann.gt_name)
                     if sequence is not None:
-                        if sequence.last < frame_start or sequence.first > frame_end:
-                            logging.getLogger(__name__).warning(
-                                "Input sequence %r covers frames %d-%d but the render range is %d-%d; "
-                                "no input frame falls inside the render.",
-                                ann.gt_name,
-                                sequence.first,
-                                sequence.last,
-                                frame_start,
-                                frame_end,
-                            )
+                        _warn_if_outside_render_range(ann.gt_name, sequence, frame_start, frame_end)
                         inputs[ann.gt_name] = ManifestInput(
                             path=sequence.path, node=ann.node_name, first=sequence.first, last=sequence.last
                         )
