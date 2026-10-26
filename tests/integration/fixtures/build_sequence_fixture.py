@@ -21,6 +21,9 @@ def main() -> None:
     parser.add_argument("--frames-dir", required=True)
     parser.add_argument("--script-out", required=True)
     parser.add_argument("--last", type=int, default=5)
+    # Authoring the Write as exr while the runner's destination is .png is how a comp
+    # comes to write EXR data under a .png name.
+    parser.add_argument("--write-file-type", default="png")
     args, _ = parser.parse_known_args()
 
     frames = f"{args.frames_dir}/plate.%04d.png".replace("\\", "/")
@@ -38,7 +41,7 @@ def main() -> None:
     read = nuke.nodes.Read(name="ReadPlate")
     # fromUserText with a 1-1 range is how a .nk comes to hold a stale authored range.
     read["file"].fromUserText(f"{frames} 1-1")
-    write = nuke.nodes.Write(name="WriteOut", file=f"{args.frames_dir}/out.%04d.png", file_type="png")
+    write = nuke.nodes.Write(name="WriteOut", file=f"{args.frames_dir}/out.%04d.png", file_type=args.write_file_type)
     write.setInput(0, read)
     nuke.scriptSaveAs(args.script_out, overwrite=1)
 

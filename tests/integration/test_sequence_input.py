@@ -21,8 +21,7 @@ pytestmark = pytest.mark.skipif(not NUKE_EXE, reason="NUKE_EXECUTABLE not set")
 LAST_FRAME = 5
 
 
-@pytest.fixture
-def sequence_script(tmp_path: pathlib.Path) -> tuple[str, str]:
+def _build_fixture(tmp_path: pathlib.Path, write_file_type: str = "png") -> tuple[str, str]:
     """Build a .nk via Nuke itself; returns (script path, frames dir)."""
     assert NUKE_EXE is not None
     frames_dir = tmp_path / "frames"
@@ -41,6 +40,7 @@ def sequence_script(tmp_path: pathlib.Path) -> tuple[str, str]:
             f"--frames-dir={frames_arg}",
             f"--script-out={script_arg}",
             f"--last={LAST_FRAME}",
+            f"--write-file-type={write_file_type}",
         ],
         capture_output=True,
         text=True,
@@ -50,6 +50,11 @@ def sequence_script(tmp_path: pathlib.Path) -> tuple[str, str]:
     rendered = sorted(frames_dir.glob("plate.*.png"))
     assert len(rendered) == LAST_FRAME, f"expected {LAST_FRAME} source frames, got {len(rendered)}"
     return str(script_out), str(frames_dir)
+
+
+@pytest.fixture
+def sequence_script(tmp_path: pathlib.Path) -> tuple[str, str]:
+    return _build_fixture(tmp_path)
 
 
 def _run(script: str, frames_dir: str, out_dir: pathlib.Path, first: int | None, last: int | None):
@@ -126,3 +131,19 @@ def test_single_file_input_without_range_still_loads(sequence_script: tuple[str,
     result = _run(script, frames_dir, out_dir, first=None, last=None)
     assert result.return_code == 0, f"runner exited {result.return_code}:\n" + "\n".join(result.log[-20:])
     assert list(out_dir.glob("out.*.png")), "no output written for a rangeless input"
+
+
+def test_write_authored_as_exr_produces_real_pngs_at_a_png_destination(tmp_path: pathlib.Path) -> None:
+    """file_type outranks the extension, so an exr comp wrote EXR data under a .png name."""
+    script, frames_dir = _build_fixture(tmp_path, write_file_type="exr")
+    out_dir = tmp_path / "out_exr"
+    out_dir.mkdir()
+
+    result = _run(script, frames_dir, out_dir, first=1, last=LAST_FRAME)
+    assert result.return_code == 0, f"runner exited {result.return_code}:\n" + "\n".join(result.log[-20:])
+
+    written = sorted(out_dir.glob("out.*.png"))
+    assert len(written) == LAST_FRAME, f"expected {LAST_FRAME} output frames, got {len(written)}"
+    for frame in written:
+        magic = frame.read_bytes()[:4]
+        assert magic == b"\x89PNG", f"{frame.name} is not a PNG: {magic!r} (EXR magic is b'v/1\\x01')"

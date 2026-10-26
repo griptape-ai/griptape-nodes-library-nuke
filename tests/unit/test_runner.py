@@ -146,6 +146,58 @@ class _FakeReadNode:
         return self.knobs.get(name)
 
 
+class _FakeWriteNode:
+    def __init__(self, *, file_type: bool = True) -> None:
+        self.knobs: dict[str, _FakeKnob] = {"file": _FakeKnob()}
+        if file_type:
+            self.knobs["file_type"] = _FakeKnob()
+            self.knobs["file_type"].setValue("exr")
+
+    def __getitem__(self, name: str) -> _FakeKnob:
+        return self.knobs[name]
+
+    def knob(self, name: str) -> _FakeKnob | None:
+        return self.knobs.get(name)
+
+
+class TestSetOutputFile:
+    def test_authored_file_type_is_cleared_so_the_extension_wins(self) -> None:
+        """file_type outranks the extension, so an exr comp wrote EXR data into a .png."""
+        from nuke_runner.read_input import set_output_file
+
+        node = _FakeWriteNode()
+        set_output_file(node, "/out/frame_####.png")
+
+        assert node["file"].value == "/out/frame_####.png"
+        assert node["file_type"].value == " "
+
+    def test_extensionless_destination_keeps_its_file_type(self) -> None:
+        """With no extension the knob is the only format signal; clearing fails execute()."""
+        from nuke_runner.read_input import set_output_file
+
+        node = _FakeWriteNode()
+        set_output_file(node, "/out/frame_####")
+
+        assert node["file"].value == "/out/frame_####"
+        assert node["file_type"].value == "exr"
+
+    def test_a_dot_in_a_parent_directory_does_not_count_as_an_extension(self) -> None:
+        from nuke_runner.read_input import set_output_file
+
+        node = _FakeWriteNode()
+        set_output_file(node, "/out/v1.2/frame_####")
+
+        assert node["file_type"].value == "exr"
+
+    def test_missing_file_type_knob_does_not_raise(self) -> None:
+        from nuke_runner.read_input import set_output_file
+
+        node = _FakeWriteNode(file_type=False)
+        set_output_file(node, "/out/frame_####.png")
+
+        assert node["file"].value == "/out/frame_####.png"
+
+
 class TestSetInputFile:
     def test_sequence_range_goes_through_from_user_text(self) -> None:
         from nuke_runner.read_input import set_input_file

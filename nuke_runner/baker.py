@@ -20,7 +20,7 @@ import nuke
 
 # nuke -t runs this file as a script, so a sibling module imports only once this directory is on sys.path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from read_input import set_input_file  # noqa: E402
+from read_input import set_input_file, set_output_file  # noqa: E402
 
 
 def main() -> None:
@@ -67,7 +67,7 @@ def main() -> None:
             print(f"WARNING: output node {spec['node']!r} has no file knob; skipping", file=sys.stderr)
             continue
         out_path = spec["path"].replace("\\", "/")
-        node["file"].setValue(out_path)
+        set_output_file(node, out_path)
         print(f"output {gt_name!r}: {spec['node']}.file = {out_path}", file=sys.stderr)
 
     for override in manifest.get("knob_overrides", []):
