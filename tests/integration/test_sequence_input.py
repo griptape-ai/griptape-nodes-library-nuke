@@ -28,17 +28,19 @@ def sequence_script(tmp_path: pathlib.Path) -> tuple[str, str]:
     frames_dir = tmp_path / "frames"
     frames_dir.mkdir()
     script_out = tmp_path / "seq_comp.nk"
+    frames_arg = str(frames_dir).replace("\\", "/")
+    script_arg = str(script_out).replace("\\", "/")
     result = subprocess.run(  # noqa: S603
         [
             NUKE_EXE,
             "-t",
             BUILDER,
-            "--frames-dir",
-            str(frames_dir).replace("\\", "/"),
-            "--script-out",
-            str(script_out).replace("\\", "/"),
-            "--last",
-            str(LAST_FRAME),
+            # nuke -t claims a bare numeric argument as a frame range and drops it before
+            # sys.argv reaches the script, so "--last", "5" arrives as "--last" alone.
+            # The = form keeps the value attached.
+            f"--frames-dir={frames_arg}",
+            f"--script-out={script_arg}",
+            f"--last={LAST_FRAME}",
         ],
         capture_output=True,
         text=True,
