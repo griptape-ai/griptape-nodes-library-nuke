@@ -85,9 +85,9 @@ and queueing as documented app behaviour rather than as behaviour this library p
 A host connects over `websocket_direct`, a WebSocket server the engine binds on loopback.
 There are two other transports and neither is the one to build a plugin on:
 `websocket_api` is the outbound link to the hosted service and accepts no local
-connections, and `local_socket` (Unix socket, named pipe on Windows) fans every frame out
-to every client with no topic routing, drops a slow reader permanently, and serializes that
-fan-out under one lock.
+connections, and `local_socket` (Unix socket, named pipe on Windows) drops a slow reader
+permanently and serializes its writes under one lock. It routes by topic the same way
+`websocket_direct` does, so the subscribe-then-connect order in step 3 holds on either.
 
 ### 1. Enable the transport, once per machine
 

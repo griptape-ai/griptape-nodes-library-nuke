@@ -15,9 +15,9 @@ from typing import Any
 
 REPLY_TOPIC = "nuke-smoke/reply"
 
-# Short on purpose. A stalled socket means this client was dropped from the engine's
-# broadcast set and will never receive another frame, so waiting a minute to find that out
-# only makes a failing run slower to read.
+# Short on purpose. A stalled socket means this client is not subscribed to the topic or was
+# dropped by the engine as a slow reader, and either way will never receive another frame, so
+# waiting a minute to find that out only makes a failing run slower to read.
 DEFAULT_TIMEOUT_S = 20.0
 
 
@@ -120,12 +120,19 @@ class HostClient:
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.settimeout(self.timeout_s)
         self._sock.connect(self.socket_path)
+        # The engine delivers a frame only to connections subscribed to its topic, and reads
+        # one connection's lines in order, so this lands before any request naming the topic.
+        self.subscribe(REPLY_TOPIC)
         return self
 
     def __exit__(self, *_exc: object) -> None:
         if self._sock is not None:
             self._sock.close()
             self._sock = None
+
+    def subscribe(self, topic: str) -> None:
+        """Ask the engine to deliver frames published on this topic to this connection."""
+        self._send({"type": "subscribe", "topic": topic, "payload": {}})
 
     def request(self, request_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send one request and return the reply payload whose request_id matches."""
@@ -207,7 +214,7 @@ class HostClient:
         payload = frame.get("payload") or {}
         if frame.get("type") == "app_event" or payload.get("event_type") == "AppEvent":
             payload_type = str(payload.get("payload_type") or "")
-            # Every outbound frame reaches every client on this transport, so anything that
+            # The event topic is shared with every library and the editor, so anything that
             # is not this protocol's is someone else's traffic.
             if payload_type.startswith("Nuke"):
                 self.notifications.append(Notification(type=payload_type, body=payload.get("payload") or {}))
