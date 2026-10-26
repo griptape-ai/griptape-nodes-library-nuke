@@ -839,6 +839,15 @@ class NukeScriptNode(SuccessFailureNode):
             raise RuntimeError(f"Could not resolve output path for sequence {param_name!r}")
         return str(macro_result.absolute_path).replace("\\", "/")
 
+    def _build_knob_overrides(self) -> list[KnobOverride]:
+        """Collect the exposed-knob values the run should override."""
+        overrides: list[KnobOverride] = []
+        for ek in self._expose_knobs:
+            raw = self.get_parameter_value(ek.param_name)
+            if raw not in (None, ""):
+                overrides.append(KnobOverride(node=ek.target_node, knob=ek.target_knob, value=_coerce_knob_value(raw)))
+        return overrides
+
     def _save_baked_copy(
         self,
         button: Button,  # noqa: ARG002
@@ -892,6 +901,9 @@ class NukeScriptNode(SuccessFailureNode):
                 continue
             # A bake only rewrites knobs, so unlike process() it resolves the destination
             # without pre-creating a placeholder file: nothing renders into it here.
+            # The two branches cannot share a destination: a sequence needs a frame
+            # pattern Nuke expands per frame, which only the macro resolver produces,
+            # while ProjectFileDestination names one concrete file.
             # ImageSequenceArtifact: backward-compat for sidecars annotated before engine 0.93
             if ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
                 outputs[ann.gt_name] = ManifestOutput(
@@ -908,13 +920,7 @@ class NukeScriptNode(SuccessFailureNode):
                     type=ann.gt_type or "ImageArtifact",
                 )
 
-        knob_overrides: list[KnobOverride] = []
-        for ek in self._expose_knobs:
-            raw = self.get_parameter_value(ek.param_name)
-            if raw not in (None, ""):
-                knob_overrides.append(
-                    KnobOverride(node=ek.target_node, knob=ek.target_knob, value=_coerce_knob_value(raw))
-                )
+        knob_overrides = self._build_knob_overrides()
 
         manifest = JobManifest(
             script=str(script_path),
@@ -941,6 +947,29 @@ class NukeScriptNode(SuccessFailureNode):
             details=f"Baked copy saved to:\n{baked_path}",
             altered_workflow_state=False,
         )
+
+    def _publish_outputs(
+        self,
+        rendered: dict[str, str],
+        declared: dict[str, ManifestOutput],
+        frame_start: int,
+        frame_end: int,
+    ) -> None:
+        """Turn each path the runner wrote into the artifact its parameter declares."""
+        for gt_name, path in rendered.items():
+            if gt_name not in declared:
+                logging.getLogger(__name__).warning("Nuke runner returned unknown output key %r; skipping", gt_name)
+                continue
+            ann_type = declared[gt_name].type
+            if ann_type != "Sequence":
+                self.parameter_output_values[gt_name] = _path_to_artifact(ann_type, path)
+                continue
+            scan_result = GriptapeNodes.handle_request(
+                ScanSequencesRequest(path=path, start_number=frame_start, end_number=frame_end)
+            )
+            if not isinstance(scan_result, ScanSequencesResultSuccess) or not scan_result.sequences:
+                raise RuntimeError(f"No frames found for sequence at {path!r}")
+            self.parameter_output_values[gt_name] = scan_result.sequences[0]
 
     def process(self) -> None:
         self._clear_execution_status()
@@ -1020,13 +1049,7 @@ class NukeScriptNode(SuccessFailureNode):
                         type=ann.gt_type or "ImageArtifact",
                     )
 
-            knob_overrides: list[KnobOverride] = []
-            for ek in self._expose_knobs:
-                raw = self.get_parameter_value(ek.param_name)
-                if raw not in (None, ""):
-                    knob_overrides.append(
-                        KnobOverride(node=ek.target_node, knob=ek.target_knob, value=_coerce_knob_value(raw))
-                    )
+            knob_overrides = self._build_knob_overrides()
 
             manifest = JobManifest(
                 script=script_path,
@@ -1048,25 +1071,7 @@ class NukeScriptNode(SuccessFailureNode):
                 self._handle_failure_exception(RuntimeError(msg))
                 return
 
-            for gt_name, path in result.outputs.items():
-                if gt_name not in outputs:
-                    logging.getLogger(__name__).warning("Nuke runner returned unknown output key %r; skipping", gt_name)
-                    continue
-                ann_type = outputs[gt_name].type
-                if ann_type == "Sequence":
-                    scan_result = GriptapeNodes.handle_request(
-                        ScanSequencesRequest(
-                            path=path,
-                            start_number=frame_start,
-                            end_number=frame_end,
-                        )
-                    )
-                    if isinstance(scan_result, ScanSequencesResultSuccess) and scan_result.sequences:
-                        self.parameter_output_values[gt_name] = scan_result.sequences[0]
-                    else:
-                        raise RuntimeError(f"No frames found for sequence at {path!r}")
-                else:
-                    self.parameter_output_values[gt_name] = _path_to_artifact(ann_type, path)
+            self._publish_outputs(result.outputs, outputs, frame_start, frame_end)
 
             self._set_status_results(was_successful=True, result_details="Render complete.")
         finally:
