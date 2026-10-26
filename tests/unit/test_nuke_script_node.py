@@ -14,6 +14,8 @@ from griptape_nodes.retained_mode.events.os_events import (
     WriteFileResultFailure,
     WriteFileResultSuccess,
 )
+from griptape_nodes.retained_mode.events.project_events import GetPathForMacroResultSuccess
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from nuke_nodes.nuke_script_node import (
     SequencePathAndRange,
@@ -321,6 +323,33 @@ class TestSequenceToPathAndRange:
     def test_returns_none_for_non_sequence(self) -> None:
         assert _sequence_to_path_and_range("/tmp/plate.png") is None
         assert _sequence_to_path_and_range(None) is None
+
+    def test_macro_directory_is_resolved_to_an_absolute_path(self) -> None:
+        """ScanSequencesRequest preserves macros, so Sequence.directory can be {inputs}/x."""
+        result = MagicMock(spec=GetPathForMacroResultSuccess)
+        result.absolute_path = "/workspace/inputs/probe"
+        with patch.object(GriptapeNodes, "handle_request", return_value=result):
+            resolved = _sequence_to_path_and_range(_make_sequence("frame_####.png", 4, directory="{inputs}/probe"))
+        assert resolved is not None
+        assert resolved.path == "/workspace/inputs/probe/frame_####.png"
+
+    def test_plain_directory_never_reaches_the_engine(self) -> None:
+        with patch.object(GriptapeNodes, "handle_request") as handle:
+            result = _sequence_to_path_and_range(_make_sequence("frame_####.png", 4))
+        handle.assert_not_called()
+        assert result is not None
+        assert result.path == "/out/frames/frame_####.png"
+
+    def test_empty_scan_is_rejected_rather_than_becoming_a_root_path(self) -> None:
+        """ScanSequence synthesises first=0/last=-1/pattern="" when nothing matched."""
+        empty = _make_sequence("", 0, first=0, last=-1, directory="")
+        with pytest.raises(ValueError, match="no frames"):
+            _sequence_to_path_and_range(empty, "plate")
+
+    def test_rejection_names_the_parameter(self) -> None:
+        empty = _make_sequence("", 0, first=0, last=-1, directory="")
+        with pytest.raises(ValueError, match="'plate'"):
+            _sequence_to_path_and_range(empty, "plate")
 
 
 class TestCoerceKnobValue:

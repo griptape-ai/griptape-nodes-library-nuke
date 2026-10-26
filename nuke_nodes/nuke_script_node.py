@@ -75,12 +75,45 @@ class SequencePathAndRange(NamedTuple):
     last: int
 
 
-def _sequence_to_path_and_range(value: Any) -> SequencePathAndRange | None:
+def _resolve_macro_dir(directory: str) -> str:
+    """Expand a macro-form sequence directory; a plain path is returned untouched."""
+    # Sequence.directory is documented as "Absolute directory the sequence was scanned
+    # from", but ScanSequencesRequest promises macro-preserving paths and the request
+    # contract is what holds -- scan.py builds Sequence with the caller's original
+    # directory, so a ScanSequence node upstream yields "{inputs}/probe".
+    if "{" not in directory:
+        return directory
+    try:
+        macro = ParsedMacro(directory)
+    except MacroSyntaxError:
+        return directory
+    result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=macro, variables={}))
+    if isinstance(result, GetPathForMacroResultSuccess):
+        return str(result.absolute_path)
+    return directory
+
+
+def _reject_unusable_sequence(param_name: str, value: Sequence) -> None:
+    """Raise when a Sequence carries no frames, rather than handing Nuke a bad path."""
+    # The standard library's ScanSequence node synthesises an empty result as
+    # Sequence(first=0, last=-1, pattern="", directory=""), which would otherwise format
+    # to the path "/" -- a path Nuke accepts and then renders black frames from.
+    if value.pattern and value.first <= value.last:
+        return
+    raise ValueError(
+        f"Input {param_name!r} received a sequence with no frames "
+        f"(range {value.first} to {value.last}). Check the upstream scan: the pattern "
+        "matched nothing on disk."
+    )
+
+
+def _sequence_to_path_and_range(value: Any, param_name: str = "") -> SequencePathAndRange | None:
     """Return the Nuke path and frame range when value is an engine Sequence, else None."""
     if not isinstance(value, Sequence):
         return None
+    _reject_unusable_sequence(param_name, value)
     filename = nuke_frame_pattern(value.pattern, value.padding)
-    path = f"{value.directory}/{filename}".replace("\\", "/")
+    path = f"{_resolve_macro_dir(value.directory)}/{filename}".replace("\\", "/")
     return SequencePathAndRange(path, value.first, value.last)
 
 
@@ -687,7 +720,7 @@ class NukeScriptNode(SuccessFailureNode):
         situation: str = "save_temp_file",
     ) -> str:
         """Resolve a parameter value to a local file path Nuke can read."""
-        sequence = _sequence_to_path_and_range(value)
+        sequence = _sequence_to_path_and_range(value, name)
         if sequence is not None:
             return sequence.path
         if isinstance(value, str):
@@ -840,7 +873,7 @@ class NukeScriptNode(SuccessFailureNode):
             if ann.role == "input":
                 raw = self.get_parameter_value(ann.gt_name) or ""
                 if raw:
-                    sequence = _sequence_to_path_and_range(raw)
+                    sequence = _sequence_to_path_and_range(raw, ann.gt_name)
                     if sequence is not None:
                         inputs[ann.gt_name] = ManifestInput(
                             path=sequence.path, node=ann.node_name, first=sequence.first, last=sequence.last
@@ -937,7 +970,7 @@ class NukeScriptNode(SuccessFailureNode):
             for ann in self._annotations:
                 if ann.role == "input":
                     raw_input = self.get_parameter_value(ann.gt_name) or ""
-                    sequence = _sequence_to_path_and_range(raw_input)
+                    sequence = _sequence_to_path_and_range(raw_input, ann.gt_name)
                     if sequence is not None:
                         if sequence.last < frame_start or sequence.first > frame_end:
                             logging.getLogger(__name__).warning(
