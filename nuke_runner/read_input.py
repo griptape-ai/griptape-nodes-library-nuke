@@ -5,6 +5,13 @@ Stdlib only — runs inside Nuke's bundled interpreter.
 
 from __future__ import annotations
 
+import re
+
+# A path whose own tail already reads as a frame range, e.g. "/plates/shot 1-5". Nuke
+# splits the trailing whitespace token off as the range, so appending another one would
+# leave the path's own range behind as part of the filename.
+_TRAILING_RANGE = re.compile(r".* \d+-\d+$")
+
 
 def set_input_file(node: object, path: str, first: object, last: object) -> None:
     """Point a Read node at `path`, carrying a sequence range across when there is one."""
@@ -13,9 +20,10 @@ def set_input_file(node: object, path: str, first: object, last: object) -> None
     # first/last/origfirst/origlast/origset together. setValue sets the path alone and
     # leaves whatever range the .nk was saved with. Deliberately not nuke.getFileNameList:
     # the engine already scanned this sequence, and a second scan could disagree with it.
-    # The range is split from the path on whitespace, so a path holding a space is
-    # ambiguous and takes the explicit-knob branch instead.
-    if first is not None and last is not None and hasattr(knob, "fromUserText") and " " not in path:
+    # Nuke splits only the final whitespace token off as the range, so an ordinary spaced
+    # path like "/plates/My Show/bg.####.exr" round-trips fine -- verified against Nuke
+    # 17.0v1. Only a path whose own tail already reads as a range is ambiguous.
+    if first is not None and last is not None and hasattr(knob, "fromUserText") and not _TRAILING_RANGE.match(path):
         knob.fromUserText(f"{path} {first}-{last}")
         return
 

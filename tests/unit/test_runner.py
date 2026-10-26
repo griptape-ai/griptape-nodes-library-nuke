@@ -217,15 +217,24 @@ class TestSetInputFile:
         assert node["file"].value == "/tmp/plate.png"
         assert node["file"].user_text is None
 
-    def test_path_containing_space_falls_back_to_explicit_knobs(self) -> None:
-        """A space makes '<path> <first>-<last>' ambiguous, so the range is set knob by knob."""
+    def test_ordinary_spaced_path_still_goes_through_from_user_text(self) -> None:
+        """Nuke splits only the final whitespace token, so a spaced path round-trips."""
         from nuke_runner.read_input import set_input_file
 
         node = _FakeReadNode()
         set_input_file(node, "/Volumes/My Show/bg.####.exr", 1001, 1048)
 
+        assert node["file"].user_text == "/Volumes/My Show/bg.####.exr 1001-1048"
+
+    def test_path_whose_tail_is_already_a_range_falls_back_to_explicit_knobs(self) -> None:
+        """Appending a range to '/plates/shot 1-5' would strand the path's own range."""
+        from nuke_runner.read_input import set_input_file
+
+        node = _FakeReadNode()
+        set_input_file(node, "/plates/shot 1-5", 1001, 1048)
+
         assert node["file"].user_text is None
-        assert node["file"].value == "/Volumes/My Show/bg.####.exr"
+        assert node["file"].value == "/plates/shot 1-5"
         assert node["first"].value == 1001
         assert node["last"].value == 1048
 

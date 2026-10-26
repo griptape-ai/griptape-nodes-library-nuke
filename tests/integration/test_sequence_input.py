@@ -104,7 +104,7 @@ def test_sequence_input_renders_every_frame_distinctly(
 def test_sequence_input_path_containing_space_still_carries_its_range(
     sequence_script: tuple[str, str], tmp_path: pathlib.Path
 ) -> None:
-    """A space defeats the '<path> <first>-<last>' form, so the explicit-knob branch runs."""
+    """Nuke splits only the final whitespace token, so a spaced path keeps its range."""
     script, frames_dir = sequence_script
     spaced_dir = tmp_path / "My Show"
     spaced_dir.mkdir()
