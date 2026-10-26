@@ -192,7 +192,7 @@ whose `payload_type` does not begin with `Nuke`.
 |---|---|
 | Which engines exist | Configured URLs ([step 2](#2-open-the-connection)); a completed handshake checks liveness |
 | Which engine is this, and is it busy | `NukeConnectResultSuccess` for id, name, version, and session, then `NukeGetExecutionStateRequest` for what is running |
-| Is a Nuke session already driving it | The claim holder named in a connect success or refusal; before connecting, the `clients` list in engine discovery |
+| Is a Nuke session already driving it | The claim holder named in a connect success or refusal. Before connecting, the `clients` list in engine discovery is a hint only: an empty list does not mean the engine is unclaimed |
 
 The engine's `EngineHeartbeatRequest` returns engine identity, session id, and active workflow
 in one round trip without requiring this library. It is outside the [bound surface](#bound-surface)
@@ -200,7 +200,11 @@ and follows the engine's release cadence. Its `clients` list, and the same list 
 engine registry, carries the claim holder as
 `{"client_id": <trimmed client_name>, "client_type": "nuke", "connected_at": <ISO time>}`.
 Nothing expires an entry: it leaves when a `force` connect displaces it or the session ends,
-so a host that crashed stays listed until one of those happens.
+so a host that crashed stays listed until one of those happens. The list and the claim can also
+drift the other way: the claim lasts until engine restart, but the engine clears its client list
+whenever the session ends or changes (an editor ending or replacing the session, for example),
+and nothing re-lists the holder. So a host may be absent from `clients` and still hold the claim.
+Treat the list as a hint and the connect reply or refusal as the answer.
 
 ## Frame formats
 
