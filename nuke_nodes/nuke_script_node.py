@@ -119,10 +119,10 @@ def _sequence_to_path_and_range(value: Any, param_name: str = "") -> SequencePat
 
 def _warn_if_outside_render_range(
     param_name: str, sequence: SequencePathAndRange, frame_start: int, frame_end: int
-) -> bool:
-    """Warn when no frame of an input sequence falls inside the render range; True if warned."""
+) -> None:
+    """Warn when no frame of an input sequence falls inside the render range."""
     if sequence.first <= frame_end and sequence.last >= frame_start:
-        return False
+        return
     logging.getLogger(__name__).warning(
         "Input sequence %r covers frames %d-%d but the render range is %d-%d; no input frame falls inside the render.",
         param_name,
@@ -131,7 +131,6 @@ def _warn_if_outside_render_range(
         frame_start,
         frame_end,
     )
-    return True
 
 
 def _path_to_artifact(gt_type: str, path: str) -> Any:

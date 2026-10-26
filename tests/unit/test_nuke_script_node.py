@@ -297,10 +297,13 @@ class TestWarnIfOutsideRenderRange:
             (21, 30, True),
         ],
     )
-    def test_warns_only_when_no_frame_overlaps_the_render(self, first: int, last: int, expected: bool) -> None:
+    def test_warns_only_when_no_frame_overlaps_the_render(
+        self, caplog: pytest.LogCaptureFixture, first: int, last: int, expected: bool
+    ) -> None:
         """Render range is 10-20; a sequence warns only when it shares no frame with it."""
-        warned = _warn_if_outside_render_range("plate", SequencePathAndRange("/x.####.png", first, last), 10, 20)
-        assert warned is expected
+        with caplog.at_level(logging.WARNING):
+            _warn_if_outside_render_range("plate", SequencePathAndRange("/x.####.png", first, last), 10, 20)
+        assert bool(caplog.records) is expected
 
     def test_the_warning_names_the_parameter_and_both_ranges(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
