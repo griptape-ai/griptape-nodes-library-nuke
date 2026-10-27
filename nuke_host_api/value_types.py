@@ -48,6 +48,7 @@ ENGINE_TYPE_TO_VALUE_TYPE = {
     "Sequence": ValueType.IMAGE,
     "VideoArtifact": ValueType.MOVIE,
     "VideoUrlArtifact": ValueType.MOVIE,
+    "EXRPartArtifact": ValueType.IMAGE,
     "str": ValueType.TEXT,
     "string": ValueType.TEXT,
     "int": ValueType.INT,
@@ -79,6 +80,10 @@ MEDIA_ENTRY_FIELDS = frozenset({"path", "format", "first", "last"})
 TYPE_KEY = "$type"
 VALUE_KEY = "$value"
 _BYTES_TYPE_NAMES = frozenset({"builtins:bytes", "builtins:bytearray"})
+
+# The openexr library's descriptors are plain dataclasses that locate their file in a field, not
+# griptape artifacts with a value. Matched by class name so this library need not depend on it.
+_PATH_FIELD_BY_DESCRIPTOR = {"EXRPartArtifact": "file_path"}
 
 
 class UnrepresentableValueError(ValueError):
@@ -182,6 +187,10 @@ def _untagged(data: Any) -> Any:
         msg = "It holds raw bytes the engine never saved to a file."
         raise UnrepresentableValueError(msg)
     if VALUE_KEY not in data:
+        class_name = str(tag).rsplit(":", 1)[-1]
+        path_field = _PATH_FIELD_BY_DESCRIPTOR.get(class_name)
+        if path_field is not None:
+            return {"type": class_name, "value": data.get(path_field)}
         return {key: _untagged(item) for key, item in data.items() if key != TYPE_KEY}
     state = data[VALUE_KEY]
     if tag == "builtins:dict" and isinstance(state, dict):
