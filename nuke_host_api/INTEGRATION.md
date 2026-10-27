@@ -457,8 +457,9 @@ Show a claim refusal to the artist. A "connect anyway" action re-sends with `for
 ### NukeDisconnectRequest
 
 Send before closing the socket, on script close and on Nuke exit. It releases the host claim
-so the next host connects without `force`. It does not close the connection, unsubscribe the
-host, or stop notifications.
+so the next host connects without `force`, and delists the host from the engine's session so
+discovery stops showing it. It does not close the connection, unsubscribe the host, or stop
+notifications.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
