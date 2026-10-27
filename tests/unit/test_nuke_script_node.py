@@ -943,18 +943,33 @@ class TestProcess:
 class TestResolveNodeOutputPath:
     """Output destinations come from the project's node-output situation, resolved without a write."""
 
-    def test_single_file_output_resolves_under_project_outputs(self) -> None:
-        path = _make_node()._resolve_node_output_path("beauty", ".exr")
+    def test_single_file_output_is_pinned_to_the_first_version_under_the_node_directory(self) -> None:
+        mock_dest_cls = _mock_project_file_destination(resolved_path="/proj/outputs/NukeScriptNode1/beauty_v001.exr")
 
-        assert path.endswith("/outputs/NukeScriptNode1/beauty_v001.exr")
+        with patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls):
+            path = _make_node()._resolve_node_output_path("beauty", ".exr")
+
+        assert path == "/proj/outputs/NukeScriptNode1/beauty_v001.exr"
+        mock_dest_cls.from_situation.assert_called_once_with(
+            "beauty.exr", "save_node_output", sub_dirs="NukeScriptNode1", _index=1
+        )
+        mock_dest_cls.from_situation.return_value.write_bytes.assert_not_called()
+
+    def test_windows_separators_are_normalised_for_nuke(self) -> None:
+        mock_dest_cls = _mock_project_file_destination(resolved_path="C:\\proj\\outputs\\beauty_v001.exr")
+
+        with patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls):
+            path = _make_node()._resolve_node_output_path("beauty", ".exr")
+
+        assert path == "C:/proj/outputs/beauty_v001.exr"
 
     def test_sequence_output_is_a_directory_beside_the_single_file_name(self) -> None:
-        node = _make_node()
+        mock_dest_cls = _mock_project_file_destination(resolved_path="/proj/outputs/NukeScriptNode1/frames_v001.png")
 
-        single = node._resolve_node_output_path("frames", ".png")
-        sequence = node._resolve_sequence_output_path("frames")
+        with patch("nuke_nodes.nuke_script_node.ProjectFileDestination", mock_dest_cls):
+            sequence = _make_node()._resolve_sequence_output_path("frames")
 
-        assert sequence == single.removesuffix(".png") + "/frame_####.png"
+        assert sequence == "/proj/outputs/NukeScriptNode1/frames_v001/frame_####.png"
 
 
 class TestSaveBakedCopy:
