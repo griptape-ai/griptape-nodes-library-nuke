@@ -240,6 +240,11 @@ def _as_object(plain: Any) -> _EngineObject | None:
     return None
 
 
+def _is_engine_sequence(engine_object: _EngineObject) -> bool:
+    """Shape as well as name, since the bare class name also matches a library's own ``Sequence``."""
+    return engine_object.class_name == SEQUENCE_ENGINE_TYPE and _is_sequence(engine_object.state)
+
+
 def _value_field(class_name: str) -> str:
     reading = _CLASS_READINGS.get(class_name)
     return reading.field if reading else _DEFAULT_VALUE_FIELD
@@ -258,7 +263,7 @@ def _list_items(plain: Any) -> list[Any] | None:
     if isinstance(plain, (list, tuple)):
         return list(plain)
     engine_object = _as_object(plain)
-    if engine_object is None or engine_object.class_name == SEQUENCE_ENGINE_TYPE:
+    if engine_object is None or _is_engine_sequence(engine_object):
         return None
     inner = engine_object.state.get(_value_field(engine_object.class_name))
     return list(inner) if isinstance(inner, list) else None
@@ -337,7 +342,7 @@ def _normalize_sequence(value: dict[str, Any], declared_engine_type: str | None)
 def _normalize_object(engine_object: _EngineObject, declared_engine_type: str | None) -> tuple[str | None, Any]:
     """Keyed by the object's own class, which is what the engine says the value is."""
     class_name = engine_object.class_name
-    if class_name == SEQUENCE_ENGINE_TYPE:
+    if _is_engine_sequence(engine_object):
         return _normalize_sequence(engine_object.state, declared_engine_type)
     reading = _CLASS_READINGS.get(class_name)
     if reading is not None and reading.holds_bytes:

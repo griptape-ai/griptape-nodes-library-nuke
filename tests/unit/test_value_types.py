@@ -32,6 +32,15 @@ class PlateDescriptor:
     value: str
 
 
+class LibraryModels:
+    @dataclass
+    class Sequence:
+        """A library's own edit sequence, sharing only its class name with the engine's ``Sequence``."""
+
+        name: str
+        shots: list[str]
+
+
 @dataclass
 class RenderStats:
     """A library value with no field a host can read."""
@@ -556,6 +565,10 @@ class TestValueCodec:
     def test_a_dataclass_with_no_readable_field_names_its_class(self) -> None:
         with pytest.raises(UnrepresentableValueError, match="RenderStats"):
             value_types.normalize_value(RenderStats(1920, 1080), "RenderStats")
+
+    def test_a_library_class_named_sequence_is_not_read_as_a_frame_sequence(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="Sequence"):
+            value_types.normalize_value(LibraryModels.Sequence("edit_v3", ["sh010"]), "any")
 
     def test_a_list_of_exr_parts_is_one_entry_each(self) -> None:
         parts = [EXRPartArtifact("/show/a.exr"), EXRPartArtifact("/show/b.exr")]
