@@ -142,6 +142,8 @@ async def handle_disconnect(
     released = host_claim.release_if_held_by(client)
     holder = host_claim.held()
     if released:
+        # Discovery lists the host by its claim name, so a clean disconnect delists it too.
+        await leave_session_as_host(client)
         details = f"Released the host claim held by {client}."
     elif holder is None:
         details = f"{client} held no claim, and no host holds one."

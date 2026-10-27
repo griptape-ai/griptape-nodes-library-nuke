@@ -269,6 +269,24 @@ async def test_a_refused_second_host_does_not_install_the_event_bridge(
     assert _record_bridge_installs == [True]
 
 
+async def test_a_clean_disconnect_delists_the_host(_fake_engine: FakeEngine) -> None:
+    """Discovery shows the claim holder, so releasing the claim must also leave the session."""
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
+
+    await handle_disconnect(NukeDisconnectRequest(client_name="Nuke shot_040"))
+
+    assert _fake_engine.session_clients == []
+
+
+async def test_a_disconnect_from_a_non_holder_delists_nobody(_fake_engine: FakeEngine) -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+
+    await handle_disconnect(NukeDisconnectRequest(client_name="Nuke shot_112"))
+
+    assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
+
+
 async def test_a_takeover_asks_the_displaced_host_to_disconnect(_published: list[Any]) -> None:
     """The transport cannot close another host's socket, so the host must close its own."""
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
