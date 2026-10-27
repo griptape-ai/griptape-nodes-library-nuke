@@ -6,7 +6,7 @@ from nuke_runner.manifest import SCHEMA_VERSION, JobManifest, ManifestInput, Man
 
 # Canonical JSON from PRD §7.4
 PRD_CANONICAL_JSON = """{
-  "schema": "griptape-nuke-runner/1.1",
+  "schema": "griptape-nuke-runner/1.2",
   "script": "/path/to/my_comp.nk",
   "frame_range": [1001, 1001],
   "inputs": {
@@ -83,10 +83,38 @@ def test_manifest_from_json_rejects_wrong_schema_version() -> None:
 
 
 def test_manifest_from_json_rejects_v1_0_schema() -> None:
-    """schema 1.0 used list[str] paths; 1.1 reader must reject it cleanly."""
+    """schema 1.0 used list[str] paths; the current reader must reject it cleanly."""
     old_json = PRD_CANONICAL_JSON.replace(SCHEMA_VERSION, "griptape-nuke-runner/1.0")
     with pytest.raises(ValueError, match="Unsupported manifest schema"):
         JobManifest.from_json(old_json)
+
+
+def test_manifest_from_json_rejects_v1_1_schema() -> None:
+    """schema 1.1 inputs carried no frame range; a 1.1 manifest must not load silently."""
+    old_json = PRD_CANONICAL_JSON.replace(SCHEMA_VERSION, "griptape-nuke-runner/1.1")
+    with pytest.raises(ValueError, match="Unsupported manifest schema"):
+        JobManifest.from_json(old_json)
+
+
+def test_manifest_input_without_range_round_trips_as_none() -> None:
+    manifest = JobManifest.from_json(PRD_CANONICAL_JSON)
+    assert manifest.inputs["source_image"].first is None
+    assert manifest.inputs["source_image"].last is None
+
+    roundtripped = JobManifest.from_json(manifest.to_json())
+    assert roundtripped.inputs["source_image"].first is None
+    assert roundtripped.inputs["source_image"].last is None
+
+
+def test_manifest_input_preserves_sequence_frame_range() -> None:
+    manifest = JobManifest(
+        script="/comp.nk",
+        inputs={"plate": ManifestInput(path="/plates/bg.####.exr", node="ReadBG", first=1001, last=1048)},
+    )
+    roundtripped = JobManifest.from_json(manifest.to_json())
+    assert roundtripped.inputs["plate"].path == "/plates/bg.####.exr"
+    assert roundtripped.inputs["plate"].first == 1001
+    assert roundtripped.inputs["plate"].last == 1048
 
 
 def test_manifest_output_raises_type_error_for_list_path() -> None:

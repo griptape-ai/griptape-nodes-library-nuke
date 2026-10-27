@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import nuke  # type: ignore[import-not-found]
+
+# nuke -t runs this file as a script, so a sibling module imports only once this directory is on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from read_input import set_input_file, set_output_file  # noqa: E402
 
 # Artifact types whose output is written by a Nuke execute call on a file-knob node.
 _EXECUTE_TYPES = {
@@ -57,7 +62,7 @@ def main() -> None:
                 print(f"WARNING: input node {spec['node']!r} not found in script", file=sys.stderr)
                 continue
             path = spec["path"].replace("\\", "/")
-            node["file"].setValue(path)
+            set_input_file(node, path, spec.get("first"), spec.get("last"))
             print(f"input {gt_name!r}: {spec['node']}.file = {path}", file=sys.stderr)
 
         # Apply knob overrides
@@ -96,7 +101,7 @@ def main() -> None:
             if node is None:
                 print(f"WARNING: output node {spec['node']!r} not found in script", file=sys.stderr)
                 continue
-            node["file"].setValue(out_path)
+            set_output_file(node, out_path)
             print(f"executing {spec['node']} frames {first}-{last} → {out_path}", file=sys.stderr)
             try:
                 nuke.execute(spec["node"], first, last)

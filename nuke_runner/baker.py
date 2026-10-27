@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import nuke
+
+# nuke -t runs this file as a script, so a sibling module imports only once this directory is on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from read_input import set_input_file, set_output_file  # noqa: E402
 
 
 def main() -> None:
@@ -47,8 +52,23 @@ def main() -> None:
             print(f"WARNING: input node {spec['node']!r} not found", file=sys.stderr)
             continue
         path = spec["path"].replace("\\", "/")
-        node["file"].setValue(path)
+        set_input_file(node, path, spec.get("first"), spec.get("last"))
         print(f"input {gt_name!r}: {spec['node']}.file = {path}", file=sys.stderr)
+
+    # Write nodes get their file knob set the same way runner.py sets it, so a baked
+    # copy opened in Nuke renders where the node would have rendered. No placeholder is
+    # created and nothing executes here; only the knob is rewritten.
+    for gt_name, spec in manifest.get("outputs", {}).items():
+        node = nuke.toNode(spec["node"])
+        if node is None:
+            print(f"WARNING: output node {spec['node']!r} not found", file=sys.stderr)
+            continue
+        if node.knob("file") is None:
+            print(f"WARNING: output node {spec['node']!r} has no file knob; skipping", file=sys.stderr)
+            continue
+        out_path = spec["path"].replace("\\", "/")
+        set_output_file(node, out_path)
+        print(f"output {gt_name!r}: {spec['node']}.file = {out_path}", file=sys.stderr)
 
     for override in manifest.get("knob_overrides", []):
         node = nuke.toNode(override["node"])
