@@ -759,11 +759,6 @@ class TestProcess:
         except (ImportError, AttributeError):
             pytest.skip("Sequence API not available in this engine version")
 
-        from griptape_nodes.retained_mode.events.project_events import (
-            GetPathForMacroRequest,
-            GetPathForMacroResultSuccess,
-        )
-
         from execution.provider import JobResult, JobStatus
         from script_parser.annotation import GriptapeAnnotation
 
@@ -785,9 +780,8 @@ class TestProcess:
             }.get(name)
         )
 
-        macro_success = MagicMock(spec=GetPathForMacroResultSuccess)
-        macro_success.absolute_path = tmp_path / "NukeScriptNode1" / "frames" / "frame_####.png"
-        seq_path = str(macro_success.absolute_path).replace("\\", "/")
+        seq_path = (tmp_path / "NukeScriptNode1" / "frames_v001" / "frame_####.png").as_posix()
+        node._resolve_sequence_output_path = MagicMock(return_value=seq_path)
 
         fake_result = JobResult(
             handle="handle-seq",
@@ -812,17 +806,12 @@ class TestProcess:
         scan_success = MagicMock(spec=ScanSequencesResultSuccess)
         scan_success.sequences = [fake_sequence]
 
-        def _handle_request(req: object) -> object:
-            if isinstance(req, GetPathForMacroRequest):
-                return macro_success
-            return scan_success
-
         with (
             patch("nuke_nodes.nuke_script_node.DirectSubprocessProvider") as MockProvider,
             patch("nuke_nodes.nuke_script_node.GriptapeNodes") as MockGT,
         ):
             MockGT.ConfigManager.return_value.get_config_value.return_value = None
-            MockGT.handle_request.side_effect = _handle_request
+            MockGT.handle_request.return_value = scan_success
             instance = MockProvider.return_value
             instance.submit.return_value = "handle-seq"
             instance.result.return_value = fake_result
@@ -949,6 +938,23 @@ class TestProcess:
         deleted_paths = {c.args[0].path for c in delete_calls}
         assert canonical_path_1 in deleted_paths
         assert resolve_path_1 not in deleted_paths
+
+
+class TestResolveNodeOutputPath:
+    """Output destinations come from the project's node-output situation, resolved without a write."""
+
+    def test_single_file_output_resolves_under_project_outputs(self) -> None:
+        path = _make_node()._resolve_node_output_path("beauty", ".exr")
+
+        assert path.endswith("/outputs/NukeScriptNode1/beauty_v001.exr")
+
+    def test_sequence_output_is_a_directory_beside_the_single_file_name(self) -> None:
+        node = _make_node()
+
+        single = node._resolve_node_output_path("frames", ".png")
+        sequence = node._resolve_sequence_output_path("frames")
+
+        assert sequence == single.removesuffix(".png") + "/frame_####.png"
 
 
 class TestSaveBakedCopy:

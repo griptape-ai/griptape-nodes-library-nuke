@@ -58,7 +58,8 @@ from script_parser.sidecar import read_knob_schema, read_sidecar
 _RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "runner.py"))
 _BAKE_RUNNER_SCRIPT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "nuke_runner", "baker.py"))
 
-_SEQUENCE_OUTPUT_MACRO = "{outputs}/nuke/{node_name}/{param_name}/frame_####.png"
+_SEQUENCE_OUTPUT_FRAME_PATTERN = "frame_####.png"
+_NODE_OUTPUT_SITUATION = "save_node_output"
 
 _TEMP_SUFFIX: dict[str, str] = {
     "ThreeDUrlArtifact": ".obj",
@@ -843,17 +844,26 @@ class NukeScriptNode(SuccessFailureNode):
 
         return errors or None
 
-    def _resolve_sequence_output_path(self, param_name: str) -> str:
-        """Resolve the project-managed frame pattern a sequence output renders into."""
-        macro_result = GriptapeNodes.handle_request(
-            GetPathForMacroRequest(
-                parsed_macro=ParsedMacro(_SEQUENCE_OUTPUT_MACRO),
-                variables={"node_name": self.name, "param_name": param_name},
-            )
+    def _resolve_node_output_path(self, param_name: str, suffix: str) -> str:
+        """Resolve where the node-output situation puts this parameter's file, without writing it.
+
+        The default project template's version slot is required and only a write fills it,
+        so it is pinned to the first version: a rerun renders over the same path. The node
+        gets its own directory so no other node's outputs can share a name with these.
+        """
+        dest = ProjectFileDestination.from_situation(
+            f"{param_name}{suffix}", _NODE_OUTPUT_SITUATION, sub_dirs=self.name, _index=1
         )
-        if not isinstance(macro_result, GetPathForMacroResultSuccess):
-            raise RuntimeError(f"Could not resolve output path for sequence {param_name!r}")
-        return str(macro_result.absolute_path).replace("\\", "/")
+        return str(dest.resolve()).replace("\\", "/")
+
+    def _resolve_sequence_output_path(self, param_name: str) -> str:
+        """Resolve the frame pattern a sequence output renders into.
+
+        The frames go in a directory named after the file a single-file output of the same
+        parameter would get, e.g. ``{outputs}/images/Node/frames_v001/frame_####.png``.
+        """
+        stem, _ = os.path.splitext(self._resolve_node_output_path(param_name, ".png"))
+        return f"{stem}/{_SEQUENCE_OUTPUT_FRAME_PATTERN}"
 
     def _build_knob_overrides(self) -> list[KnobOverride]:
         """Collect the exposed-knob values the run should override."""
@@ -917,9 +927,6 @@ class NukeScriptNode(SuccessFailureNode):
                 continue
             # A bake only rewrites knobs, so unlike process() it resolves the destination
             # without pre-creating a placeholder file: nothing renders into it here.
-            # The two branches cannot share a destination: a sequence needs a frame
-            # pattern Nuke expands per frame, which only the macro resolver produces,
-            # while ProjectFileDestination names one concrete file.
             # ImageSequenceArtifact: backward-compat for sidecars annotated before engine 0.93
             if ann.gt_type in ("ImageSequenceArtifact", "Sequence"):
                 outputs[ann.gt_name] = ManifestOutput(
@@ -928,10 +935,8 @@ class NukeScriptNode(SuccessFailureNode):
                     type="Sequence",
                 )
             else:
-                suffix = _TEMP_SUFFIX.get(ann.gt_type or "", ".png")
-                dest = ProjectFileDestination.from_situation(f"{self.name}_{ann.gt_name}{suffix}", "save_node_output")
                 outputs[ann.gt_name] = ManifestOutput(
-                    path=str(dest.resolve()).replace("\\", "/"),
+                    path=self._resolve_node_output_path(ann.gt_name, _TEMP_SUFFIX.get(ann.gt_type or "", ".png")),
                     node=ann.node_name,
                     type=ann.gt_type or "ImageArtifact",
                 )
