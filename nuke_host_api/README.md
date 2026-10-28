@@ -433,6 +433,7 @@ GTImage    <- bare string, absolute path                   {path, format}
 GTText     <- bare string, prose                           "..."
 GTInt      <- list[int]                                    [42, 43]
 GTImage    <- GenericArtifact wrapping a jpg path          {path, format}
+GTImage    <- EXRPartArtifact (openexr library)            {path: its file_path, format}
 GTImage    <- macro, project outputs dir                   {path, format}
 GTImage    <- macro with sequence slot                     {path: ".../render.####.exr", ...}
 GTImage    <- unset ImageUrlArtifact                       null

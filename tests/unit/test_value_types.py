@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -22,6 +23,15 @@ from nuke_host_api.protocol import VALUE_TYPES, ValueType
 from nuke_host_api.value_types import UnrepresentableValueError
 
 URL = "https://cdn.example.com/render.png"
+
+
+@dataclass
+class EXRPartArtifact:
+    """Stands in for griptape-nodes-library-openexr's descriptor, which this library does not depend on."""
+
+    file_path: str
+    part_index: int = 0
+    name: str = ""
 
 
 @pytest.fixture(autouse=True)
@@ -76,6 +86,7 @@ def _sequence(
         ("ImageSequenceArtifact", ValueType.IMAGE),
         ("list[ImageUrlArtifact]", ValueType.IMAGE),
         ("list[VideoUrlArtifact]", ValueType.MOVIE),
+        ("EXRPartArtifact", ValueType.IMAGE),
         ("list[int]", ValueType.INT),
         ("list[str]", ValueType.TEXT),
         ("list[AudioUrlArtifact]", ValueType.FILE),
@@ -477,6 +488,10 @@ class TestSerializedArtifacts:
             ({"$type": "builtins:tuple", "$value": [1, {"$type": "pathlib:Path", "$value": "/a.png"}]}, [1, "/a.png"]),
             ({"$type": "builtins:dict", "$value": {"$type": "data"}}, {"$type": "data"}),
             ({"$type": "builtins:float", "$value": "inf"}, float("inf")),
+            (
+                {"$type": "exr_header_artifact:EXRPartArtifact", "file_path": "/a.exr", "part_index": 0},
+                {"type": "EXRPartArtifact", "value": "/a.exr"},
+            ),
         ],
     )
     def test_a_tagged_value_reads_as_its_state(self, tagged: Any, plain: Any) -> None:
@@ -510,6 +525,14 @@ class TestValueCodec:
     def test_a_value_the_codec_cannot_encode_is_unrepresentable(self) -> None:
         with pytest.raises(UnrepresentableValueError, match="no plain-data form"):
             value_types.normalize_value(object(), "any")
+
+    def test_an_exr_part_is_an_image_at_its_file_path(self) -> None:
+        descriptor = value_types.normalize_value(EXRPartArtifact("/show/beauty.exr"), "EXRPartArtifact")
+        assert descriptor == {
+            "value_type": ValueType.IMAGE,
+            "value": {"path": "/show/beauty.exr", "format": "exr", "first": None, "last": None},
+            "engine_type": "EXRPartArtifact",
+        }
 
 
 class TestEngineValue:
