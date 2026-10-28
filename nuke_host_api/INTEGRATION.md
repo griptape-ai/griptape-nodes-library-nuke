@@ -199,7 +199,7 @@ in one round trip without requiring this library. It is outside the [bound surfa
 and follows the engine's release cadence. Its `clients` list, and the same list on the cloud
 engine registry, carries the claim holder as
 `{"client_id": <trimmed client_name>, "client_type": "nuke", "connected_at": <ISO time>}`.
-Nothing expires an entry: it leaves when a `force` connect displaces it or the session ends,
+Nothing expires an entry: it leaves on a clean `NukeDisconnectRequest`, when a `force` connect displaces it, or when the session ends,
 so a host that crashed stays listed until one of those happens. The list and the claim can also
 drift the other way: the claim lasts until engine restart, but the engine clears its client list
 whenever the session ends or changes (an editor ending or replacing the session, for example),
