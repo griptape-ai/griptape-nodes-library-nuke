@@ -26,6 +26,30 @@ URL = "https://cdn.example.com/render.png"
 
 
 @dataclass
+class PlateDescriptor:
+    """A library value that is not a griptape artifact but follows the same ``value`` convention."""
+
+    value: str
+
+
+class LibraryModels:
+    @dataclass
+    class Sequence:
+        """A library's own edit sequence, sharing only its class name with the engine's ``Sequence``."""
+
+        name: str
+        shots: list[str]
+
+
+@dataclass
+class RenderStats:
+    """A library value with no field a host can read."""
+
+    width: int
+    height: int
+
+
+@dataclass
 class EXRPartArtifact:
     """Stands in for griptape-nodes-library-openexr's descriptor, which this library does not depend on."""
 
@@ -483,14 +507,18 @@ class TestSerializedArtifacts:
         [
             (
                 {"$type": "griptape.artifacts:ImageUrlArtifact", "type": "ImageUrlArtifact", "value": "/a.png"},
-                {"type": "ImageUrlArtifact", "value": "/a.png"},
+                value_types._EngineObject("ImageUrlArtifact", {"type": "ImageUrlArtifact", "value": "/a.png"}),
             ),
             ({"$type": "builtins:tuple", "$value": [1, {"$type": "pathlib:Path", "$value": "/a.png"}]}, [1, "/a.png"]),
             ({"$type": "builtins:dict", "$value": {"$type": "data"}}, {"$type": "data"}),
             ({"$type": "builtins:float", "$value": "inf"}, float("inf")),
             (
                 {"$type": "exr_header_artifact:EXRPartArtifact", "file_path": "/a.exr", "part_index": 0},
-                {"type": "EXRPartArtifact", "value": "/a.exr"},
+                value_types._EngineObject("EXRPartArtifact", {"file_path": "/a.exr", "part_index": 0}),
+            ),
+            (
+                {"$type": "some.module:Outer.Inner", "value": "/a.png"},
+                value_types._EngineObject("Inner", {"value": "/a.png"}),
             ),
         ],
     )
@@ -525,6 +553,28 @@ class TestValueCodec:
     def test_a_value_the_codec_cannot_encode_is_unrepresentable(self) -> None:
         with pytest.raises(UnrepresentableValueError, match="no plain-data form"):
             value_types.normalize_value(object(), "any")
+
+    def test_a_dataclass_is_read_like_an_artifact_of_the_same_shape(self) -> None:
+        descriptor = value_types.normalize_value(PlateDescriptor("/show/plate.exr"))
+        assert descriptor == {
+            "value_type": ValueType.IMAGE,
+            "value": {"path": "/show/plate.exr", "format": "exr", "first": None, "last": None},
+            "engine_type": "PlateDescriptor",
+        }
+
+    def test_a_dataclass_with_no_readable_field_names_its_class(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="RenderStats"):
+            value_types.normalize_value(RenderStats(1920, 1080), "RenderStats")
+
+    def test_a_library_class_named_sequence_is_not_read_as_a_frame_sequence(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="Sequence"):
+            value_types.normalize_value(LibraryModels.Sequence("edit_v3", ["sh010"]), "any")
+
+    def test_a_list_of_exr_parts_is_one_entry_each(self) -> None:
+        parts = [EXRPartArtifact("/show/a.exr"), EXRPartArtifact("/show/b.exr")]
+        descriptor = value_types.normalize_value(parts, "list[EXRPartArtifact]")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert [entry["path"] for entry in descriptor["value"]] == ["/show/a.exr", "/show/b.exr"]
 
     def test_an_exr_part_is_an_image_at_its_file_path(self) -> None:
         descriptor = value_types.normalize_value(EXRPartArtifact("/show/beauty.exr"), "EXRPartArtifact")

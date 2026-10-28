@@ -420,7 +420,10 @@ types the Nuke library already consumes are not in the SDK at all: `ThreeDUrlArt
 `GLTFUrlArtifact`, and `ImageSequenceArtifact`, the last being really
 `ListArtifact[ImageUrlArtifact]`. `ImageUrlArtifact`, `VideoUrlArtifact`,
 `BlobArtifact`, and `GenericArtifact` are structurally identical, all carrying a single
-`value`, so the class name is the only discriminator.
+`value`, so the class name is the only discriminator. It comes from the engine codec's `$type`
+tag, so a library's dataclass is identified the same way as a griptape artifact. One table maps
+each known class to its host type and the field that holds its path; an unknown class reads
+`value`.
 
 Representative shapes:
 
