@@ -11,6 +11,9 @@ from griptape_nodes.common.project_templates.directory import DirectoryDefinitio
 from griptape_nodes.common.project_templates.project import ProjectTemplate
 from griptape_nodes.common.project_templates.validation import ProjectValidationInfo, ProjectValidationStatus
 from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultFailure,
+    GetCurrentProjectResultSuccess,
     GetPathForMacroRequest,
     GetPathForMacroResultFailure,
     GetPathForMacroResultSuccess,
@@ -592,3 +595,128 @@ def _write_project_yml(bundle_dir: Path, outputs_path_macro: str) -> None:
         directories={"outputs": DirectoryDefinition(name="outputs", path_macro=outputs_path_macro)},
     )
     (bundle_dir / "project.yml").write_text(template.to_yaml(), encoding="utf-8")
+
+
+class TestSerializeOutputResolvesMacros:
+    """Nuke opens whatever path it is handed, so path macros are resolved here, at the boundary.
+
+    The End node keeps the portable macro form in its stored outputs, like every other node, so a
+    saved workflow or published bundle carries no absolute path from the author's machine. Only a
+    template rooted at one of the project's directories is a path; anything else is text, and text
+    never goes near the engine's resolver, whose last resort is this process's environment.
+    """
+
+    _RESOLVED = "/shots/sh010/griptape_outputs/gen.png"
+    _PROJECT_DIRS = frozenset({"outputs", "inputs", "project_dir", "workspace_dir"})
+
+    @pytest.fixture
+    def engine(self, handle_request: Mock) -> Mock:
+        """The bundle's project is current and every path macro resolves under its outputs directory."""
+
+        def _answer(request: object) -> object:
+            if isinstance(request, GetCurrentProjectRequest):
+                return GetCurrentProjectResultSuccess(
+                    project_info=Mock(computed_variable_names=self._PROJECT_DIRS), result_details="ok"
+                )
+            return _resolved(self._RESOLVED, self._RESOLVED)
+
+        handle_request.side_effect = _answer
+        return handle_request
+
+    @staticmethod
+    def _macro_requests(engine: Mock) -> list[GetPathForMacroRequest]:
+        return [c.args[0] for c in engine.call_args_list if isinstance(c.args[0], GetPathForMacroRequest)]
+
+    def test_a_macro_path_string_is_handed_to_nuke_resolved(self, engine: Mock) -> None:
+        assert serialize_output({"Nuke End Flow": {"image": "{outputs}/gen.png"}}) == {"image": self._RESOLVED}
+        (request,) = self._macro_requests(engine)
+        assert request.parsed_macro.template == "{outputs}/gen.png"
+
+    def test_a_macro_inside_a_url_artifact_is_handed_to_nuke_resolved(self, engine: Mock) -> None:
+        """The engine never substitutes inside an artifact, so this is the shape Save nodes hand back."""
+        output = {"Nuke End Flow": {"image": _FakeValueArtifact("{outputs}/gen.png")}}
+
+        assert serialize_output(output) == {"image": self._RESOLVED}
+
+    def test_a_template_rooted_anywhere_but_a_project_directory_is_text_and_never_resolved(
+        self, engine: Mock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The engine falls back to the shell environment, which here holds the bundled credentials."""
+        monkeypatch.setenv("GT_CLOUD_API_KEY", "sk-super-secret")
+
+        result = serialize_output({"Nuke End Flow": {"echo": "{GT_CLOUD_API_KEY}/gen.png"}})
+
+        assert result == {"echo": "{GT_CLOUD_API_KEY}/gen.png"}
+        assert self._macro_requests(engine) == []
+
+    def test_a_macro_that_does_not_lead_the_value_is_text(self, engine: Mock) -> None:
+        """A status line such as 'Saved to: {outputs}/a.mp4' is prose for the artist, not a path for Nuke."""
+        text = "Saved to: {outputs}/a.mp4"
+
+        assert serialize_output({"Nuke End Flow": {"result_details": text}}) == {"result_details": text}
+        engine.assert_not_called()
+
+    def test_with_no_current_project_a_path_macro_is_handed_over_as_written(self, handle_request: Mock) -> None:
+        handle_request.side_effect = None
+        handle_request.return_value = GetCurrentProjectResultFailure(result_details="no project")
+
+        assert serialize_output({"Nuke End Flow": {"image": "{outputs}/gen.png"}}) == {"image": "{outputs}/gen.png"}
+
+    def test_the_project_is_asked_about_once_per_serialization(self, engine: Mock) -> None:
+        serialize_output({"Nuke End Flow": {"a": "{outputs}/a.png", "b": "{outputs}/b.png", "c": "{inputs}/c.png"}})
+
+        project_requests = [c for c in engine.call_args_list if isinstance(c.args[0], GetCurrentProjectRequest)]
+        assert len(project_requests) == 1
+        assert len(self._macro_requests(engine)) == 3
+
+    def test_a_sequence_slot_is_rendered_as_a_pattern_for_nuke(self, engine: Mock) -> None:
+        """A Read node expands #### itself, so an unfilled frame slot must not refuse the path."""
+        serialize_output({"Nuke End Flow": {"plate": "{outputs}/plate.####.exr"}})
+
+        (request,) = self._macro_requests(engine)
+        assert request.unresolved_sequence_slot_behavior == UnresolvedSequenceSlotBehavior.RENDER_SEQUENCE_PATTERN
+
+    def test_the_resolved_path_uses_forward_slashes(self, engine: Mock) -> None:
+        def _windows(request: object) -> object:
+            if isinstance(request, GetCurrentProjectRequest):
+                return GetCurrentProjectResultSuccess(
+                    project_info=Mock(computed_variable_names=self._PROJECT_DIRS), result_details="ok"
+                )
+            return _resolved("C:\\shots\\gen.png", "C:\\shots\\gen.png")
+
+        engine.side_effect = _windows
+
+        assert serialize_output({"Nuke End Flow": {"image": "{outputs}/gen.png"}}) == {"image": "C:/shots/gen.png"}
+
+    def test_a_path_with_no_macro_never_reaches_the_engine(self, engine: Mock) -> None:
+        assert serialize_output({"Nuke End Flow": {"image": "/renders/gen.png"}}) == {"image": "/renders/gen.png"}
+        engine.assert_not_called()
+
+    def test_an_unresolvable_path_macro_is_handed_over_as_written_and_logged(
+        self, engine: Mock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A literal brace path in Nuke is visible and diagnosable; swallowing the value is neither."""
+
+        def _missing(request: object) -> object:
+            if isinstance(request, GetCurrentProjectRequest):
+                return GetCurrentProjectResultSuccess(
+                    project_info=Mock(computed_variable_names=self._PROJECT_DIRS), result_details="ok"
+                )
+            return GetPathForMacroResultFailure(
+                failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
+                missing_variables={"flibbidy"},
+                result_details="no such variable",
+            )
+
+        engine.side_effect = _missing
+
+        with caplog.at_level(logging.WARNING):
+            result = serialize_output({"Nuke End Flow": {"image": "{outputs}/{flibbidy}/gen.png"}})
+
+        assert result == {"image": "{outputs}/{flibbidy}/gen.png"}
+        assert "{outputs}/{flibbidy}/gen.png" in caplog.text
+        assert PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES in caplog.text
+
+    def test_a_malformed_macro_never_reaches_the_engine(self, engine: Mock) -> None:
+        assert serialize_output({"Nuke End Flow": {"image": "{unclosed/gen.png"}}) == {"image": "{unclosed/gen.png"}
+        engine.assert_not_called()
