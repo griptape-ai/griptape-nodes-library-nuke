@@ -1,64 +1,29 @@
-"""Unit tests for NukeEndFlow's output-value dict override."""
+"""NukeEndFlow stores outputs exactly as the engine hands them; the gizmo runner resolves paths for Nuke."""
 
 from __future__ import annotations
 
-from unittest.mock import Mock
-
-import pytest
-from griptape.artifacts import BlobArtifact, ImageArtifact, ImageUrlArtifact
+from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.node_types import TrackedParameterOutputValues
 
-from nuke_nodes.nuke_end_flow import NukeEndFlow, _NukeEndFlowTrackedParameterOutputValues
+from nuke_nodes.nuke_end_flow import NukeEndFlow
 
 
-@pytest.fixture
-def node() -> Mock:
-    return Mock(spec=NukeEndFlow)
+def test_an_artifact_output_keeps_its_macro_so_saved_workflows_carry_no_absolute_path() -> None:
+    """A Save node hands back {outputs}/... inside an artifact on purpose; the End node must not bake it."""
+    node = NukeEndFlow("Nuke End Flow")
+    artifact = ImageUrlArtifact(value="{outputs}/gen.png")
+
+    node.parameter_output_values["image"] = artifact
+
+    assert node.parameter_output_values["image"] is artifact
+    assert node.parameter_output_values["image"].value == "{outputs}/gen.png"
 
 
-class TestNukeEndFlowTrackedParameterOutputValuesSetItem:
-    @pytest.fixture
-    def mock_base_setitem(self, monkeypatch) -> Mock:
-        """Stand-in for the owning node; no parameter is registered, so no event is emitted."""
-        mock_setitem = Mock()
-        monkeypatch.setattr(TrackedParameterOutputValues, "__setitem__", mock_setitem)
-        return mock_setitem
+def test_the_output_values_are_the_engines_own_so_its_substitution_rules_apply_unchanged() -> None:
+    node = NukeEndFlow("Nuke End Flow")
 
-    def test_url_artifact_is_stored_as_its_plain_string(self, node: Mock, mock_base_setitem: Mock) -> None:
-        values = _NukeEndFlowTrackedParameterOutputValues(node)
+    assert type(node.parameter_output_values) is TrackedParameterOutputValues
 
-        values["value"] = ImageUrlArtifact(value="x.png")
 
-        mock_base_setitem.assert_called_once_with("value", "x.png")
-
-    def test_non_url_artifact_is_stored_unchanged(self, node: Mock, mock_base_setitem: Mock) -> None:
-        values = _NukeEndFlowTrackedParameterOutputValues(node)
-        artifact = ImageArtifact(value=b"\x89PNG\r\n", format="png", width=1, height=1)
-
-        values["value"] = artifact
-
-        mock_base_setitem.assert_called_once_with("value", artifact)
-
-    def test_binary_blob_artifact_is_stored_unchanged_without_decoding(
-        self, node: Mock, mock_base_setitem: Mock
-    ) -> None:
-        values = _NukeEndFlowTrackedParameterOutputValues(node)
-        artifact = BlobArtifact(value=b"\xff\xfe\x00\x01binary")
-
-        values["value"] = artifact
-
-        mock_base_setitem.assert_called_once_with("value", artifact)
-
-    def test_plain_string_is_stored_unchanged(self, node: Mock, mock_base_setitem: Mock) -> None:
-        values = _NukeEndFlowTrackedParameterOutputValues(node)
-
-        values["value"] = "x.png"
-
-        mock_base_setitem.assert_called_once_with("value", "x.png")
-
-    def test_none_is_stored_unchanged(self, node: Mock, mock_base_setitem: Mock) -> None:
-        values = _NukeEndFlowTrackedParameterOutputValues(node)
-
-        values["value"] = None
-
-        mock_base_setitem.assert_called_once_with("value", None)
+def test_default_parameters_are_the_status_and_control_set() -> None:
+    assert NukeEndFlow.get_default_node_parameter_names() == ["was_successful", "result_details", "exec_in", "failed"]
