@@ -8,13 +8,15 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import unquote, urlparse
 
-from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro
+from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro, ParsedVariable
 from griptape_nodes.files.path_utils import (
     parse_file_uri as engine_parse_file_uri,
 )
 from griptape_nodes.files.path_utils import parse_static_server_url
 from griptape_nodes.retained_mode.events.base_events import ResultPayload
 from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultSuccess,
     GetPathForMacroRequest,
     GetPathForMacroResultFailure,
     GetPathForMacroResultSuccess,
@@ -22,6 +24,7 @@ from griptape_nodes.retained_mode.events.project_events import (
     LoadProjectTemplateResultSuccess,
     SetCurrentProjectRequest,
     SetCurrentProjectResultSuccess,
+    UnresolvedSequenceSlotBehavior,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
@@ -166,9 +169,11 @@ def serialize_output(output: dict | None) -> dict[str, str]:
     if not output:
         return {}
 
-    # Macros are not resolved here: the engine substitutes an output parameter's macros only for
-    # str/dict/list values, and NukeEndFlow converts artifact-wrapped macros to str upstream so
-    # they qualify. Anything still in braces by here names a variable that could not be resolved.
+    # Path macros are resolved here, at the hand-off to Nuke, and nowhere earlier. The End node
+    # keeps the portable {outputs}/... form in its stored outputs like every other node, so a saved
+    # workflow or published bundle carries no path from the author's machine, and the engine's own
+    # rule of never substituting inside an artifact or a connected value stays untouched.
+    path_roots = _PathRoots()
     result: dict[str, str] = {}
     for _node_name, params in output.items():
         if not isinstance(params, dict):
@@ -178,17 +183,70 @@ def serialize_output(output: dict | None) -> dict[str, str]:
                 result[param_name] = ""
             elif isinstance(value, (str, bytes)):
                 result[param_name] = (
-                    f"<binary {len(value)} bytes>" if isinstance(value, bytes) else _resolve_location(value)
+                    f"<binary {len(value)} bytes>" if isinstance(value, bytes) else _path_for_nuke(value, path_roots)
                 )
             elif hasattr(value, "value") and isinstance(value.value, (str, bytes)):
                 raw = value.value
-                result[param_name] = f"<binary {len(raw)} bytes>" if isinstance(raw, bytes) else _resolve_location(raw)
+                result[param_name] = (
+                    f"<binary {len(raw)} bytes>" if isinstance(raw, bytes) else _path_for_nuke(raw, path_roots)
+                )
             elif hasattr(value, "url"):
-                result[param_name] = _resolve_location(str(value.url))
+                result[param_name] = _path_for_nuke(str(value.url), path_roots)
             else:
                 result[param_name] = str(value)
 
     return result
+
+
+class _PathRoots:
+    """The macro names that may begin a path: the current project's directories and builtins, read once."""
+
+    def __init__(self) -> None:
+        self._names: frozenset[str] | None = None
+
+    def __contains__(self, name: str) -> bool:
+        if self._names is None:
+            result = GriptapeNodes.handle_request(GetCurrentProjectRequest())
+            self._names = (
+                frozenset(result.project_info.computed_variable_names)
+                if isinstance(result, GetCurrentProjectResultSuccess)
+                else frozenset()
+            )
+        return name in self._names
+
+
+def _path_for_nuke(value: str, path_roots: _PathRoots) -> str:
+    """Turn a workflow output into something Nuke can open: a URL to a local path, then a path macro to an absolute path."""
+    # URL first: a file:// URL percent-encodes its braces, so a macro is only readable after decoding.
+    location = _resolve_location(value)
+    if not location.startswith("{"):
+        return location
+
+    try:
+        parsed = ParsedMacro(location)
+    except MacroSyntaxError:
+        return location
+
+    # Only a template rooted at a project directory is a path. Anything else is text and never
+    # reaches the engine's resolver: its last resort is this process's environment, which holds
+    # the bundled credentials, so an echoed {GT_CLOUD_API_KEY} would come back as the key.
+    root = parsed.segments[0]
+    if not (isinstance(root, ParsedVariable) and root.info.name in path_roots):
+        return location
+
+    # A Read node expands #### itself, so an unfilled frame slot is rendered rather than refused.
+    result = GriptapeNodes.handle_request(
+        GetPathForMacroRequest(
+            parsed_macro=parsed,
+            variables={},
+            project_id=None,
+            unresolved_sequence_slot_behavior=UnresolvedSequenceSlotBehavior.RENDER_SEQUENCE_PATTERN,
+        )
+    )
+    if not isinstance(result, GetPathForMacroResultSuccess):
+        logger.warning("Handing Nuke %r as written: %s", location, macro_failure_reason(result))
+        return location
+    return normalize_for_nuke(str(result.absolute_path))
 
 
 def _parse_file_uri(location: str) -> str | None:
