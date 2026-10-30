@@ -90,25 +90,13 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
         "is_list": is_list_type(parameter.get("type")),
-        "sequence_input": _accepts_sequences(parameter, ui_options),
+        "is_sequence": is_sequence_type(parameter.get("type")),
         "choices": list(choices) if isinstance(choices, list) else [],
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
         # `hide_property` leaves a connectable port, which a knob cannot represent.
         "hidden": bool(ui_options.get("hide", False)),
     }
-
-
-def _accepts_sequences(parameter: dict, ui_options: dict) -> bool:
-    engine_type = parameter.get("type")
-    if is_sequence_type(engine_type):
-        return True
-    # The editor cannot declare `Sequence` by hand, so a single text input whose file picker
-    # allows sequences counts too. It carries the bare `####` pattern as its value.
-    if engine_type not in {"str", "string"}:
-        return False
-    picker = ui_options.get("fileSystemPicker")
-    return isinstance(picker, dict) and picker.get("allowSequences") is True
 
 
 def input_parameter_types(entry: dict) -> dict[tuple[str, str], str | None]:
