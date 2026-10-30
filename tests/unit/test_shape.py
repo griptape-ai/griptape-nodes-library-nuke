@@ -105,6 +105,23 @@ class TestDeclaredParameters:
         section = {"Start Flow": {"p": {"type": engine_type}}}
         assert shape.declared_parameters(section)[0]["is_list"] is expected
 
+    @pytest.mark.parametrize(
+        ("engine_type", "expected"),
+        [("Sequence", True), ("list[Sequence]", True), ("ImageUrlArtifact", False), ("str", False), ("any", False)],
+    )
+    def test_a_declared_sequence_is_marked(self, engine_type: str, expected: bool) -> None:
+        section = {"Start Flow": {"p": {"type": engine_type}}}
+        assert shape.declared_parameters(section)[0]["is_sequence"] is expected
+
+    def test_a_sequence_is_still_an_image(self) -> None:
+        section = {"Start Flow": {"frames": {"type": "Sequence"}}}
+        assert shape.declared_parameters(section)[0]["type"] == ValueType.IMAGE
+
+    def test_a_text_input_with_a_sequence_picker_is_not_a_sequence(self) -> None:
+        picker = {"fileSystemPicker": {"allowSequences": True}}
+        section = {"Start Flow": {"frames": {"type": "str", "ui_options": picker}}}
+        assert shape.declared_parameters(section)[0]["is_sequence"] is False
+
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert types == {"topic": ValueType.TEXT, "plate": ValueType.IMAGE}

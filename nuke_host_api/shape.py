@@ -12,6 +12,7 @@ from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from nuke_host_api.value_types import (
     CONTROL_PARAM_TYPE,
     is_list_type,
+    is_sequence_type,
     value_type_for_engine_type,
 )
 
@@ -89,6 +90,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
         "is_list": is_list_type(parameter.get("type")),
+        "is_sequence": is_sequence_type(parameter.get("type")),
         "choices": list(choices) if isinstance(choices, list) else [],
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),

@@ -103,6 +103,7 @@ class TestLoadWorkflow:
             "name",
             "type",
             "is_list",
+            "is_sequence",
             "choices",
             "tooltip",
             "settable",

@@ -526,6 +526,7 @@ Parameter descriptor fields:
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
 | `type` | Always one of the seven value types. For a list parameter, the type of each item |
 | `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
+| `is_sequence` | `true` for a declared `Sequence` or `list[Sequence]`, whose `type` is `GTImage`. Its value is a `####` pattern with `first` and `last`. See [Setting a sequence](#setting-a-sequence) |
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
@@ -586,6 +587,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "Topic",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "What the shot is about.",
       "settable": true,
@@ -597,6 +599,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "Size",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
       "tooltip": "",
       "settable": true,
@@ -608,6 +611,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "Frame Rate",
       "type": "GTFloat",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -621,6 +625,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "was_successful",
       "type": "GTBool",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -632,6 +637,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "result_details",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -643,6 +649,7 @@ arrives. Never branch on the declared type at runtime.
       "name": "summary",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "",
       "settable": true,
@@ -705,6 +712,7 @@ from the author's defaults for any workflow whose inputs have been touched.
       "name": "Topic",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "What the shot is about.",
       "settable": true,
@@ -718,6 +726,7 @@ from the author's defaults for any workflow whose inputs have been touched.
       "name": "was_successful",
       "type": "GTBool",
       "is_list": false,
+      "is_sequence": false,
       "choices": [],
       "tooltip": "",
       "settable": true,
