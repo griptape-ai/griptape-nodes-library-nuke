@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+import pytest
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.node_types import TrackedParameterOutputValues
+from griptape_nodes.retained_mode import engine as engine_module
 
 from nuke_nodes.nuke_end_flow import NukeEndFlow
 
 
-def test_an_artifact_output_keeps_its_macro_so_saved_workflows_carry_no_absolute_path() -> None:
+@pytest.fixture
+def node(monkeypatch: pytest.MonkeyPatch) -> NukeEndFlow:
+    """A node whose ambient engine is a fake, so building it boots nothing and scaffolds no workspace."""
+    monkeypatch.setattr(engine_module, "current_engine", lambda: Mock(name="engine"))
+    return NukeEndFlow("Nuke End Flow")
+
+
+def test_an_artifact_output_keeps_its_macro_so_saved_workflows_carry_no_absolute_path(node: NukeEndFlow) -> None:
     """A Save node hands back {outputs}/... inside an artifact on purpose; the End node must not bake it."""
-    node = NukeEndFlow("Nuke End Flow")
     artifact = ImageUrlArtifact(value="{outputs}/gen.png")
 
     node.parameter_output_values["image"] = artifact
@@ -19,9 +29,7 @@ def test_an_artifact_output_keeps_its_macro_so_saved_workflows_carry_no_absolute
     assert node.parameter_output_values["image"].value == "{outputs}/gen.png"
 
 
-def test_the_output_values_are_the_engines_own_so_its_substitution_rules_apply_unchanged() -> None:
-    node = NukeEndFlow("Nuke End Flow")
-
+def test_the_output_values_are_the_engines_own_so_its_substitution_rules_apply_unchanged(node: NukeEndFlow) -> None:
     assert type(node.parameter_output_values) is TrackedParameterOutputValues
 
 

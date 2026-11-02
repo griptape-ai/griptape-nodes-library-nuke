@@ -649,6 +649,21 @@ class TestSerializeOutputResolvesMacros:
         assert result == {"echo": "{GT_CLOUD_API_KEY}/gen.png"}
         assert self._macro_requests(engine) == []
 
+    def test_a_credential_anywhere_in_a_path_template_makes_it_text(
+        self, engine: Mock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rooting the template at {outputs} must not smuggle a later {GT_CLOUD_API_KEY} past the guard."""
+        monkeypatch.setenv("GT_CLOUD_API_KEY", "sk-super-secret")
+        text = "{outputs}/{GT_CLOUD_API_KEY}/gen.png"
+
+        assert serialize_output({"Nuke End Flow": {"echo": text}}) == {"echo": text}
+        assert self._macro_requests(engine) == []
+
+    def test_a_template_of_project_directories_and_a_frame_slot_is_a_path(self, engine: Mock) -> None:
+        assert serialize_output({"Nuke End Flow": {"plate": "{outputs}/{inputs}/plate.{####}.exr"}}) == {
+            "plate": self._RESOLVED
+        }
+
     def test_a_macro_that_does_not_lead_the_value_is_text(self, engine: Mock) -> None:
         """A status line such as 'Saved to: {outputs}/a.mp4' is prose for the artist, not a path for Nuke."""
         text = "Saved to: {outputs}/a.mp4"
@@ -704,17 +719,17 @@ class TestSerializeOutputResolvesMacros:
                 )
             return GetPathForMacroResultFailure(
                 failure_reason=PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES,
-                missing_variables={"flibbidy"},
-                result_details="no such variable",
+                missing_variables={"GTN_NUKE_GIZMO_OUTPUTS_DIR"},
+                result_details="outputs directory variable is not set",
             )
 
         engine.side_effect = _missing
 
         with caplog.at_level(logging.WARNING):
-            result = serialize_output({"Nuke End Flow": {"image": "{outputs}/{flibbidy}/gen.png"}})
+            result = serialize_output({"Nuke End Flow": {"image": "{outputs}/gen.png"}})
 
-        assert result == {"image": "{outputs}/{flibbidy}/gen.png"}
-        assert "{outputs}/{flibbidy}/gen.png" in caplog.text
+        assert result == {"image": "{outputs}/gen.png"}
+        assert "{outputs}/gen.png" in caplog.text
         assert PathResolutionFailureReason.MISSING_REQUIRED_VARIABLES in caplog.text
 
     def test_a_malformed_macro_never_reaches_the_engine(self, engine: Mock) -> None:

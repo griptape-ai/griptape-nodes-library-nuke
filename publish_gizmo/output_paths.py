@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import unquote, urlparse
 
-from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro, ParsedVariable
+from griptape_nodes.common.macro_parser import SEQUENCE_VARIABLE_NAME, MacroSyntaxError, ParsedMacro, ParsedVariable
 from griptape_nodes.files.path_utils import (
     parse_file_uri as engine_parse_file_uri,
 )
@@ -227,11 +227,14 @@ def _path_for_nuke(value: str, path_roots: _PathRoots) -> str:
     except MacroSyntaxError:
         return location
 
-    # Only a template rooted at a project directory is a path. Anything else is text and never
-    # reaches the engine's resolver: its last resort is this process's environment, which holds
-    # the bundled credentials, so an echoed {GT_CLOUD_API_KEY} would come back as the key.
+    # Only a template rooted at a project directory, naming nothing but project directories and
+    # frame slots, is a path. Anything else is text and never reaches the engine's resolver: its
+    # last resort is this process's environment, which holds the bundled credentials, so an
+    # echoed {GT_CLOUD_API_KEY} anywhere in the template would come back as the key.
     root = parsed.segments[0]
     if not (isinstance(root, ParsedVariable) and root.info.name in path_roots):
+        return location
+    if any(v.name != SEQUENCE_VARIABLE_NAME and v.name not in path_roots for v in parsed.get_variables()):
         return location
 
     # A Read node expands #### itself, so an unfilled frame slot is rendered rather than refused.
