@@ -12,10 +12,11 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppJoinSessionRequest,
+    AppJoinSessionResultFailure,
+    AppJoinSessionResultSuccess,
     AppLeaveSessionRequest,
     AppLeaveSessionResultSuccess,
-    AppStartSessionRequest,
-    AppStartSessionResultSuccess,
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
@@ -119,14 +120,15 @@ class FakeEngine:
             await asyncio.sleep(0)
         self.requests.append(request)
         if type(request) not in self._responses:
-            # Session verbs mirror the engine unless a test overrides them: a start opens a
-            # session when none is active, else joins it, and lists a named client.
-            if isinstance(request, AppStartSessionRequest):
-                self._session_id = self._session_id or "session-opened"
+            # Session verbs mirror the engine unless a test overrides them: a join refuses when
+            # the named session is not the active one, else lists a named client.
+            if isinstance(request, AppJoinSessionRequest):
+                if not self._session_id or request.session_id != self._session_id:
+                    return AppJoinSessionResultFailure(result_details="not the active session")
                 if request.client_id:
                     self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
                     self.session_clients.append((request.client_id, request.client_type))
-                return AppStartSessionResultSuccess(session_id=self._session_id, result_details="ok")
+                return AppJoinSessionResultSuccess(session_id=self._session_id, result_details="ok")
             if isinstance(request, AppLeaveSessionRequest):
                 self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
                 return AppLeaveSessionResultSuccess(result_details="ok")

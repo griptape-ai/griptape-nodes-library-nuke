@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 from griptape_nodes.retained_mode.events.app_events import (
-    AppStartSessionRequest,
-    AppStartSessionResultFailure,
+    AppJoinSessionRequest,
+    AppJoinSessionResultFailure,
     GetEngineNameRequest,
     GetEngineNameResultFailure,
     GetEngineVersionRequest,
@@ -130,27 +130,29 @@ async def test_identity_is_read_from_the_handshake_not_the_envelope() -> None:
     assert result.engine_name == "Engine One"
 
 
-async def test_a_direct_engine_connection_with_no_session_opens_one(
+async def test_a_direct_engine_connection_with_no_session_connects_unlisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Discovery lists clients per session, so a host on a sessionless engine opens one to be seen."""
-    use_engine(
+    """Sessions belong to the editor, so a host on a sessionless engine drives it without opening one."""
+    fake = use_engine(
         monkeypatch,
         {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME},
         session_id="",
     )
     result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
-    assert result.session_id == "session-opened"
-    assert result.event_topic == "sessions/session-opened/response"
+    assert result.session_id == ""
+    assert result.event_topic == "engines/engine-xyz/response"
+    assert not any(isinstance(r, AppJoinSessionRequest) for r in fake.requests)
+    assert fake.session_clients == []
 
 
 async def test_a_connect_joins_the_session_under_its_claim_name(_fake_engine: FakeEngine) -> None:
-    """Engine discovery shows who holds an engine, so the start request must carry the trimmed name."""
+    """Engine discovery shows who holds an engine, so the join must name the active session and the trimmed name."""
     await handle_connect(NukeConnectRequest(client_name="  Nuke shot_040 "))
 
-    starts = [r for r in _fake_engine.requests if isinstance(r, AppStartSessionRequest)]
-    assert [(r.client_id, r.client_type) for r in starts] == [("Nuke shot_040", "nuke")]
+    joins = [r for r in _fake_engine.requests if isinstance(r, AppJoinSessionRequest)]
+    assert [(r.session_id, r.client_id, r.client_type) for r in joins] == [("session-abc", "Nuke shot_040", "nuke")]
     assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
 
 
@@ -175,20 +177,19 @@ async def test_the_same_host_reconnecting_is_listed_once(_fake_engine: FakeEngin
     assert _fake_engine.session_clients == [("Nuke shot_040", "nuke")]
 
 
-async def test_a_session_that_will_not_start_still_connects(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_session_that_refuses_the_join_still_connects(monkeypatch: pytest.MonkeyPatch) -> None:
     """Being listed in discovery is a courtesy; driving the engine never depended on a session."""
     fake = use_engine(
         monkeypatch,
         {
             GetEngineVersionRequest: ENGINE_VERSION,
             GetEngineNameRequest: ENGINE_NAME,
-            AppStartSessionRequest: AppStartSessionResultFailure(result_details="no sessions here"),
+            AppJoinSessionRequest: AppJoinSessionResultFailure(result_details="session changed underneath"),
         },
-        session_id="",
     )
     result = await handle_connect(NukeConnectRequest(client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
-    assert result.session_id == ""
+    assert result.session_id == "session-abc"
     assert fake.session_clients == []
 
 

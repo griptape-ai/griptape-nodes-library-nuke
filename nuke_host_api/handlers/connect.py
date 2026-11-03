@@ -99,9 +99,9 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
             )
         )
 
-    # Engine discovery lists the session's clients, so the host joins (or opens) the session
-    # under its claim name. Neither step can fail the handshake: a host that cannot be
-    # listed can still drive the engine, as it always could.
+    # Engine discovery lists the session's clients, so the host joins the active session under
+    # its claim name. Neither step can fail the handshake: a host that cannot be listed can
+    # still drive the engine, as it always could.
     if attempt.displaced:
         await leave_session_as_host(attempt.displaced)
     await join_session_as_host(client)

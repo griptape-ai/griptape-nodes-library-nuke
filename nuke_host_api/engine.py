@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppJoinSessionRequest,
+    AppJoinSessionResultSuccess,
     AppLeaveSessionRequest,
     AppLeaveSessionResultSuccess,
-    AppStartSessionRequest,
-    AppStartSessionResultSuccess,
     GetEngineNameRequest,
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
@@ -86,13 +86,19 @@ def session_id() -> str:
 
 
 async def join_session_as_host(client_id: str) -> None:
-    """Start or join the engine's session with the host listed on it, so discovery shows who holds the engine."""
+    """List the host on the active session so discovery shows who holds the engine; a host never opens one."""
+    active_session = session_id()
+    if not active_session:
+        logger.debug("Nuke host API: no active session to list %s on", client_id)
+        return
     attempt = await request(
-        AppStartSessionRequest(client_id=client_id, client_type=HOST_CLIENT_TYPE, client_label=client_id),
-        AppStartSessionResultSuccess,
+        AppJoinSessionRequest(
+            session_id=active_session, client_id=client_id, client_type=HOST_CLIENT_TYPE, client_label=client_id
+        ),
+        AppJoinSessionResultSuccess,
     )
     if attempt.value is None:
-        logger.warning("Nuke host API: could not join a session as %s: %s", client_id, attempt.details)
+        logger.warning("Nuke host API: could not join session %s as %s: %s", active_session, client_id, attempt.details)
 
 
 async def leave_session_as_host(client_id: str) -> None:

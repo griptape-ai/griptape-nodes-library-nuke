@@ -196,15 +196,12 @@ whose `payload_type` does not begin with `Nuke`.
 
 The engine's `EngineHeartbeatRequest` returns engine identity, session id, and active workflow
 in one round trip without requiring this library. It is outside the [bound surface](#bound-surface)
-and follows the engine's release cadence. Its `clients` list, and the same list on the cloud
-engine registry, carries the claim holder as
+and follows the engine's release cadence. Its `clients` list carries the claim holder as
 `{"client_id": <trimmed client_name>, "client_type": "nuke", "connected_at": <ISO time>}`.
-Nothing expires an entry: it leaves on a clean `NukeDisconnectRequest`, when a `force` connect displaces it, or when the session ends,
-so a host that crashed stays listed until one of those happens. The list and the claim can also
-drift the other way: the claim lasts until engine restart, but the engine clears its client list
-whenever the session ends or changes (an editor ending or replacing the session, for example),
-and nothing re-lists the holder. So a host may be absent from `clients` and still hold the claim.
-Treat the list as a hint and the connect reply or refusal as the answer.
+The list and the claim drift: a crashed host stays listed until a disconnect, a `force`
+takeover, or the session ending removes it, and a host on an engine with no session, or whose
+session the editor has since replaced, holds the claim without being listed. Treat the list as
+a hint and the connect reply or refusal as the answer.
 
 ## Frame formats
 
@@ -366,7 +363,7 @@ other verbs answer without it.
 | `event_topic` | `str` | The topic notifications are published on. Subscribe to it or receive none |
 | `value_types` | `list[str]` | Closed value type set for this version |
 | `engine_id` | `str` | The engine's own id. Empty when the engine has not set one |
-| `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Connect opens one when none is open, so this is empty only if the engine refused to start a session |
+| `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open; a host never opens one |
 | `engine_name` | `str` | Human-readable. Empty when the engine could not report one |
 | `host_client_name` | `str` | This host's trimmed `client_name` |
 | `host_connected_at` | `float` | Epoch seconds of this handshake |
@@ -388,10 +385,10 @@ The transport provides no disconnect signal, so a host releases its claim with
 library reloads and last until engine restart, even if the host crashes; use `force` to
 reclaim such an engine.
 
-A granted connect also joins the engine's session, opening one if none is active, and lists
-the host on it under its trimmed `client_name` so engine discovery can show the engine as
-held (see [step 5](#5-deciding-whether-this-is-the-engine-to-drive)). A `force` takeover
-delists the displaced host. Neither step can fail the handshake.
+A granted connect also joins the engine's active session, if there is one, and lists the host
+on it under its trimmed `client_name` so engine discovery can show the engine as held (see
+[step 5](#5-deciding-whether-this-is-the-engine-to-drive)). A host never opens a session. A
+`force` takeover delists the displaced host. Neither step can fail the handshake.
 
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
