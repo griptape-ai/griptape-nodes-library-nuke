@@ -1158,6 +1158,7 @@ No arguments.
 
 | `NukeGetCurrentProjectResultSuccess` field | Type | Notes |
 |---|---|---|
+| `project_id` | `str` | Same opaque id as `NukeListProjectsRequest`'s `id`, including the system defaults' id. Do not parse or display |
 | `name` | `str` | |
 | `workspace_dir` | `str` | The workspace directory the engine is actually using right now, read live. Never empty, including on the system defaults project |
 | `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING`. `GOOD` and `FLAWED` are usable; the other two are not |
@@ -1168,6 +1169,7 @@ engine treats as distinct from being on the system defaults project.
 
 ```json
 {
+  "project_id": "proj-1",
   "name": "Nuke Smoke Project",
   "workspace_dir": "/workspace/proj-1",
   "validation_status": "GOOD",

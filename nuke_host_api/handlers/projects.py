@@ -109,6 +109,7 @@ async def handle_get_current_project(
 
     info = current.value.project_info
     return NukeGetCurrentProjectResultSuccess(
+        project_id=str(info.project_id),
         name=info.template.name,
         workspace_dir=await _current_workspace_dir(),
         validation_status=str(info.validation.status),
