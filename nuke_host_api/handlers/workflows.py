@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-
 from nuke_host_api import shape
 from nuke_host_api.dispatch import failure, verb
-from nuke_host_api.engine import lookup_workflow, thumbnail_url, workflow_table
+from nuke_host_api.engine import lookup_workflow, workflow_table
 from nuke_host_api.events import (
     NukeDescribeWorkflowRequest,
     NukeDescribeWorkflowResultFailure,
@@ -28,7 +26,6 @@ async def handle_list_workflows(
         )
 
     workflows = []
-    images = []
     for workflow_id, entry in table.items():
         if not isinstance(entry, dict) or entry.get("is_internal"):
             continue
@@ -51,11 +48,6 @@ async def handle_list_workflows(
                 "library_provided": library_provided,
             }
         )
-        images.append(str(entry.get("image") or ""))
-
-    urls = await asyncio.gather(*(thumbnail_url(image) for image in images))
-    for workflow, url in zip(workflows, urls, strict=True):
-        workflow["thumbnail_url"] = url
 
     return NukeListWorkflowsResultSuccess(
         workflows=workflows,

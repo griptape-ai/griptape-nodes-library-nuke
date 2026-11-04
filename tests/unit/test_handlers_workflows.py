@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from griptape_nodes.retained_mode.events.static_file_events import (
-    CreateStaticFileDownloadUrlRequest,
-    CreateStaticFileDownloadUrlResultFailure,
-    CreateStaticFileDownloadUrlResultSuccess,
-)
 from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultFailure,
@@ -105,37 +100,6 @@ class TestListWorkflows:
 
         assert isinstance(result, NukeListWorkflowsResultSuccess)
         assert [workflow["id"] for workflow in result.workflows] == ["plain"]
-
-    async def test_thumbnail_urls_pass_through_and_file_names_resolve_through_the_engine(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(shape, "is_runnable", lambda _entry: (True, ""))
-        table = {
-            "remote": {"image": "https://example.com/thumb.webp"},
-            "saved": {"image": "saved.png"},
-            "missing": {"image": "gone.png"},
-            "none": {},
-        }
-
-        def serve(request: CreateStaticFileDownloadUrlRequest) -> object:
-            assert request.situation_name == "save_workflow_thumbnail"
-            if request.file_name == "saved.png":
-                return CreateStaticFileDownloadUrlResultSuccess(
-                    url="http://localhost:8124/saved.png", result_details="ok"
-                )
-            return CreateStaticFileDownloadUrlResultFailure(error="not found", result_details="not found")
-
-        use_engine(monkeypatch, {**_registry(table), CreateStaticFileDownloadUrlRequest: serve})
-
-        result = await handle_list_workflows(NukeListWorkflowsRequest())
-
-        assert isinstance(result, NukeListWorkflowsResultSuccess)
-        assert {w["id"]: w["thumbnail_url"] for w in result.workflows} == {
-            "remote": "https://example.com/thumb.webp",
-            "saved": "http://localhost:8124/saved.png",
-            "missing": "",
-            "none": "",
-        }
 
 
 class TestDescribeWorkflow:

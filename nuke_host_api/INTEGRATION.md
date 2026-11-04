@@ -493,7 +493,6 @@ Workflows the engine marks internal, such as a library's test workflows, are nev
 | `unavailable_reason` | `str` | Why an entry is greyed out. Empty when runnable |
 | `template` | `bool` | True when the engine opens the workflow as a copy, leaving the original untouched. Every `library_provided` workflow is a template, and a user can mark their own |
 | `library_provided` | `bool` | True when an installed library ships the workflow, from Griptape or anyone else. The user cannot edit it in place |
-| `thumbnail_url` | `str` | Fetchable preview image URL. Empty when the workflow has none or the engine could not serve it |
 
 ```json
 {
@@ -505,8 +504,7 @@ Workflows the engine marks internal, such as a library's test workflows, are nev
       "runnable": true,
       "unavailable_reason": "",
       "template": true,
-      "library_provided": true,
-      "thumbnail_url": "https://example.com/thumbnail_nuke_api_smoke.webp"
+      "library_provided": true
     }
   ]
 }
