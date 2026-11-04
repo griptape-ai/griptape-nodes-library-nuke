@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 import time
 
-from nuke_host_api import execution_bridge, host_claim, library_version, notify
+from nuke_host_api import execution_bridge, flow_run, host_claim, library_version, notify
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.engine import (
+    current_workflow_id,
     engine_id,
     engine_name,
     engine_version,
@@ -70,18 +71,23 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
     attempt = host_claim.claim(client, force=request.force)
 
     if not attempt.granted:
+        running = await flow_run.busy()
+        workflow_id = await current_workflow_id()
+        activity = f"A workflow{f' ({workflow_id})' if workflow_id else ''} is running now. " if running else ""
         return failure(
             NukeConnectResultFailure,
             attempted=f"to connect {client}",
             because=(
                 f"{attempt.holder.client_name} connected to this engine at "
-                f"{_local_time(attempt.holder.connected_at)} and is the host it reports. "
+                f"{_local_time(attempt.holder.connected_at)} and is the host it reports. {activity}"
                 f"Send force=true to become that host instead. The other host is not disconnected, "
                 f"keeps its own event subscription, and can still drive this engine."
             ),
             supported_protocol_versions=list(SUPPORTED_PROTOCOL_VERSIONS),
             host_client_name=attempt.holder.client_name,
             host_connected_at=attempt.holder.connected_at,
+            running=running,
+            workflow_id=workflow_id,
         )
 
     if attempt.displaced:

@@ -11,8 +11,20 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineNameResultFailure,
     GetEngineVersionRequest,
 )
+from griptape_nodes.retained_mode.events.context_events import (
+    GetWorkflowContextRequest,
+    GetWorkflowContextSuccess,
+)
+from griptape_nodes.retained_mode.events.execution_events import (
+    GetFlowStateRequest,
+    GetFlowStateResultSuccess,
+)
+from griptape_nodes.retained_mode.events.flow_events import (
+    GetTopLevelFlowRequest,
+    GetTopLevelFlowResultSuccess,
+)
 
-from nuke_host_api import execution_bridge, host_claim, notify
+from nuke_host_api import execution_bridge, flow_run, host_claim, notify
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
@@ -26,6 +38,11 @@ from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCaus
 from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, FakeEngine, use_engine
 
 HOST = "Nuke shot_040"
+
+NOTHING_LOADED = {
+    GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok"),
+    GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="", result_details="ok"),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +61,9 @@ def _published(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 @pytest.fixture(autouse=True)
 def _fake_engine(monkeypatch: pytest.MonkeyPatch) -> FakeEngine:
-    return use_engine(monkeypatch, {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME})
+    return use_engine(
+        monkeypatch, {GetEngineVersionRequest: ENGINE_VERSION, GetEngineNameRequest: ENGINE_NAME, **NOTHING_LOADED}
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -235,11 +254,48 @@ async def test_a_refused_second_host_still_learns_the_support_window() -> None:
     assert result.supported_protocol_versions
 
 
+async def test_a_refusal_reports_an_idle_engine_with_nothing_loaded() -> None:
+    await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert isinstance(result, NukeConnectResultFailure)
+    assert result.running is False
+    assert result.workflow_id == ""
+    assert "is running now" not in str(result.result_details)
+
+
+async def test_a_refusal_reports_the_workflow_the_engine_is_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_engine(
+        monkeypatch,
+        {
+            GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
+            GetFlowStateRequest: GetFlowStateResultSuccess(
+                control_nodes=[], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="ok"
+            ),
+            GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf1", result_details="ok"),
+        },
+    )
+    host_claim.claim("Nuke shot_040", force=False)
+    result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert isinstance(result, NukeConnectResultFailure)
+    assert result.running is True
+    assert result.workflow_id == "wf1"
+    assert "A workflow (wf1) is running now." in str(result.result_details)
+
+
+async def test_a_refusal_reports_a_run_the_engine_has_not_started_yet() -> None:
+    host_claim.claim("Nuke shot_040", force=False)
+    with flow_run.reserve():
+        result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))
+    assert isinstance(result, NukeConnectResultFailure)
+    assert result.running is True
+
+
 async def test_a_version_refusal_names_no_host() -> None:
     await handle_connect(NukeConnectRequest(client_name="Nuke shot_040"))
     result = await handle_connect(NukeConnectRequest(client_protocol_versions=[99], client_name="Nuke shot_112"))
     assert isinstance(result, NukeConnectResultFailure)
     assert result.host_client_name == ""
+    assert result.running is False
 
 
 async def test_an_unsupported_version_does_not_take_the_claim() -> None:
