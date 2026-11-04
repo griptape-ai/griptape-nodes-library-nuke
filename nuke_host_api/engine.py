@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from griptape_nodes.common.project_templates.situation import BuiltInSituation
 from griptape_nodes.retained_mode.events.app_events import (
     GetEngineNameRequest,
     GetEngineNameResultSuccess,
@@ -22,6 +23,10 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowRequest,
     GetTopLevelFlowResultSuccess,
+)
+from griptape_nodes.retained_mode.events.static_file_events import (
+    CreateStaticFileDownloadUrlRequest,
+    CreateStaticFileDownloadUrlResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
@@ -106,6 +111,23 @@ async def workflow_table() -> dict | None:
     if attempt.value is None:
         return None
     return attempt.value.workflows
+
+
+async def thumbnail_url(image: str) -> str:
+    """Return a fetchable URL for a workflow's ``image``, or empty when there is none.
+
+    Library templates store a URL; a user's saved workflow stores a file name under the
+    project's thumbnail directory, which only the engine's static file server can serve.
+    """
+    if not image or image.startswith(("http://", "https://")):
+        return image
+    attempt = await request(
+        CreateStaticFileDownloadUrlRequest(file_name=image, situation_name=BuiltInSituation.SAVE_WORKFLOW_THUMBNAIL),
+        CreateStaticFileDownloadUrlResultSuccess,
+    )
+    if attempt.value is None:
+        return ""
+    return attempt.value.url
 
 
 @dataclass(frozen=True)
