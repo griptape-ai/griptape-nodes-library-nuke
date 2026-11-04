@@ -192,7 +192,7 @@ whose `payload_type` does not begin with `Nuke`.
 |---|---|
 | Which engines exist | Configured URLs ([step 2](#2-open-the-connection)); a completed handshake checks liveness |
 | Which engine is this, and is it busy | `NukeConnectResultSuccess` for id, name, version, and session, then `NukeGetExecutionStateRequest` for what is running |
-| Is a Nuke session already driving it | The claim holder named in a connect success or refusal. Before connecting, the `clients` list in engine discovery is a hint only: an empty list does not mean the engine is unclaimed |
+| Is a Nuke session already driving it | The claim holder named in a connect success or refusal. A refusal also reports `running` and `workflow_id`. Before connecting, the `clients` list in engine discovery is a hint only: an empty list does not mean the engine is unclaimed |
 
 The engine's `EngineHeartbeatRequest` returns engine identity, session id, and active workflow
 in one round trip without requiring this library. It is outside the [bound surface](#bound-surface)
@@ -414,14 +414,25 @@ yet.
 }
 ```
 
-`NukeConnectResultFailure` names the claim holder on a claim refusal. A blank-name or version
+`NukeConnectResultFailure` names the claim holder on a claim refusal, and reports what the
+engine is doing so the artist can decide whether to take it over. A blank-name or version
 refusal names no host; a version refusal reports the support window:
+
+| `NukeConnectResultFailure` field | Type | Notes |
+|---|---|---|
+| `supported_protocol_versions` | `list[int]` | Full support window |
+| `host_client_name` | `str` | The claim holder on a claim refusal, otherwise empty |
+| `host_connected_at` | `float` | Epoch seconds the holder connected, otherwise `0.0` |
+| `running` | `bool` | On a claim refusal, whether anything is executing, as `NukeGetExecutionStateRequest` reports it. Otherwise `false` |
+| `workflow_id` | `str` | On a claim refusal, the loaded workflow. Empty when none is loaded, and on other refusals |
 
 ```json
 {
   "supported_protocol_versions": [1],
   "host_client_name": "",
   "host_connected_at": 0.0,
+  "running": false,
+  "workflow_id": "",
   "result_details": {
     "result_details": [
       {
@@ -433,18 +444,21 @@ refusal names no host; a version refusal reports the support window:
 }
 ```
 
-Show a claim refusal to the artist. A "connect anyway" action re-sends with `force: true`:
+Show a claim refusal to the artist, and warn when `running` is true, since forcing asks the host
+driving that run to disconnect. A "connect anyway" action re-sends with `force: true`:
 
 ```json
 {
   "supported_protocol_versions": [1],
   "host_client_name": "Nuke 16.0v7 shot_040 dan",
   "host_connected_at": 1763596991.183,
+  "running": true,
+  "workflow_id": "wf1",
   "result_details": {
     "result_details": [
       {
         "level": 40,
-        "message": "Attempted to connect Nuke 16.0v7 shot_112 amy. Failed because Nuke 16.0v7 shot_040 dan connected to this engine at 2025-11-19 15:03:11 and is the host it reports. Send force=true to become that host instead. The other host is not disconnected, keeps its own event subscription, and can still drive this engine."
+        "message": "Attempted to connect Nuke 16.0v7 shot_112 amy. Failed because Nuke 16.0v7 shot_040 dan connected to this engine at 2025-11-19 15:03:11 and is the host it reports. A workflow (wf1) is running now. Send force=true to become that host instead. The other host is not disconnected, keeps its own event subscription, and can still drive this engine."
       }
     ]
   }

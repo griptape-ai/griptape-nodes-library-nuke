@@ -44,11 +44,13 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
 @dataclass
 @PayloadRegistry.register
 class NukeConnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """Host fields name the claim that refused this connect, empty on a version refusal."""
+    """Host and run fields are set only on a claim refusal."""
 
     supported_protocol_versions: list[int]
     host_client_name: str = ""
     host_connected_at: float = 0.0
+    running: bool = False
+    workflow_id: str = ""
 
 
 @dataclass
