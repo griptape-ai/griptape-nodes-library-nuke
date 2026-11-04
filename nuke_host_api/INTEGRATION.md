@@ -503,6 +503,9 @@ Treat that as nothing to release and close anyway.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `runnable_only` | `bool` | `true` | `false` returns unavailable workflows too, for diagnostic lists |
+| `templates_only` | `bool` | `false` | `true` returns only entries whose `template` is true |
+
+Workflows the engine marks internal, such as a library's test workflows, are never listed.
 
 `NukeListWorkflowsResultSuccess.workflows` entries:
 
@@ -513,6 +516,8 @@ Treat that as nothing to release and close anyway.
 | `description` | `str` | |
 | `runnable` | `bool` | True when the workflow declares an input/output shape and its file is still on disk |
 | `unavailable_reason` | `str` | Why an entry is greyed out. Empty when runnable |
+| `template` | `bool` | True when the engine opens the workflow as a copy, leaving the original untouched. Every `library_provided` workflow is a template, and a user can mark their own |
+| `library_provided` | `bool` | True when an installed library ships the workflow, from Griptape or anyone else. The user cannot edit it in place |
 
 ```json
 {
@@ -522,7 +527,9 @@ Treat that as nothing to release and close anyway.
       "name": "Nuke API Smoke",
       "description": "",
       "runnable": true,
-      "unavailable_reason": ""
+      "unavailable_reason": "",
+      "template": true,
+      "library_provided": true
     }
   ]
 }

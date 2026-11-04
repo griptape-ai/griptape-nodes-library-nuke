@@ -58,9 +58,6 @@
             }
         }
     ],
-    "workflows": [
-        "workflows/templates/image_edit_nano_banana.py"
-    ],
     "settings": [
         {
             "category": "nuke",

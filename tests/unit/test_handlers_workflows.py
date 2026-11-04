@@ -59,6 +59,48 @@ class TestListWorkflows:
 
         assert isinstance(result, NukeListWorkflowsResultFailure)
 
+    async def test_library_workflows_are_templates_whatever_their_template_flag_says(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shape, "is_runnable", lambda _entry: (True, ""))
+        table = {
+            "shipped": {"is_griptape_provided": True, "is_template": True},
+            "behind_a_node": {"is_griptape_provided": True, "is_template": False},
+            "users_template": {"is_griptape_provided": False, "is_template": True},
+            "users_workflow": {},
+        }
+        use_engine(monkeypatch, _registry(table))
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest())
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        flags = {w["id"]: (w["template"], w["library_provided"]) for w in result.workflows}
+        assert flags == {
+            "shipped": (True, True),
+            "behind_a_node": (True, True),
+            "users_template": (True, False),
+            "users_workflow": (False, False),
+        }
+
+    async def test_templates_only_filters_out_ordinary_workflows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shape, "is_runnable", lambda _entry: (True, ""))
+        table = {"shipped": {"is_griptape_provided": True}, "users_template": {"is_template": True}, "plain": {}}
+        use_engine(monkeypatch, _registry(table))
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest(templates_only=True))
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        assert {workflow["id"] for workflow in result.workflows} == {"shipped", "users_template"}
+
+    async def test_internal_workflows_are_never_listed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shape, "is_runnable", lambda _entry: (True, ""))
+        use_engine(monkeypatch, _registry({"canary": {"is_internal": True}, "plain": {}}))
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest(runnable_only=False))
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        assert [workflow["id"] for workflow in result.workflows] == ["plain"]
+
 
 class TestDescribeWorkflow:
     async def test_describes_inputs_and_outputs_from_the_workflow_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:

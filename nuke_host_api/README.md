@@ -150,7 +150,7 @@ sees it.
 
 ### 3. Execute workflows
 
-`NukeListWorkflowsRequest` (with `runnable_only`) and `NukeDescribeWorkflowRequest` for
+`NukeListWorkflowsRequest` (with `runnable_only` and `templates_only`) and `NukeDescribeWorkflowRequest` for
 discovery, `NukeLoadWorkflowRequest` to put one in the engine, then
 `NukeExecuteWorkflowRequest`, with `NukeGetExecutionStateRequest` and
 `NukeCancelExecutionRequest` against the engine.
@@ -600,6 +600,9 @@ Without that guard, a rename propagated through the tests can leave the suite gr
 - **Registry entries can be stale.** `NukeListWorkflowsRequest` checks that a workflow's
   file still exists, because the registry keeps entries for deleted files and its own
   `is_saved` flag stays true for them.
+- **`library_provided` is only as honest as the workflow file.** The engine reads
+  `is_griptape_provided` from a library template's own header and records no providing
+  library, so a file can claim it and a host cannot group templates by library.
 - **Parameter metadata exposes only `choices`, `tooltip`, `settable`, and `hidden`.**
   The engine also carries slider ranges (`range_slider`, `step`), multi-select dropdowns
   (`multi_options`), `multiline`, and `hide_property` in `ui_options`. Passing that dict through raw

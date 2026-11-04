@@ -78,6 +78,7 @@ class NukeDisconnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure)
 @PayloadRegistry.register
 class NukeListWorkflowsRequest(RequestPayload):
     runnable_only: bool = True
+    templates_only: bool = False
 
 
 @dataclass

@@ -27,10 +27,15 @@ async def handle_list_workflows(
 
     workflows = []
     for workflow_id, entry in table.items():
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or entry.get("is_internal"):
             continue
         runnable, reason = shape.is_runnable(entry)
         if request.runnable_only and not runnable:
+            continue
+        library_provided = bool(entry.get("is_griptape_provided"))
+        # The engine opens a library's workflow as a copy whatever its is_template says.
+        template = library_provided or bool(entry.get("is_template"))
+        if request.templates_only and not template:
             continue
         workflows.append(
             {
@@ -39,6 +44,8 @@ async def handle_list_workflows(
                 "description": str(entry.get("description") or ""),
                 "runnable": runnable,
                 "unavailable_reason": reason,
+                "template": template,
+                "library_provided": library_provided,
             }
         )
 
