@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppJoinSessionRequest,
+    AppJoinSessionResultSuccess,
+    AppLeaveSessionRequest,
+    AppLeaveSessionResultSuccess,
     GetEngineNameRequest,
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
@@ -28,6 +33,10 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsResultSuccess,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+
+logger = logging.getLogger("griptape_nodes")
+
+HOST_CLIENT_TYPE = "nuke"
 
 
 @dataclass(frozen=True)
@@ -74,6 +83,29 @@ def engine_id() -> str:
 def session_id() -> str:
     """Return the current session's id, or empty when no session is open."""
     return GriptapeNodes.get_session_id() or ""
+
+
+async def join_session_as_host(client_id: str) -> None:
+    """List the host on the active session so discovery shows who holds the engine; a host never opens one."""
+    active_session = session_id()
+    if not active_session:
+        logger.debug("Nuke host API: no active session to list %s on", client_id)
+        return
+    attempt = await request(
+        AppJoinSessionRequest(
+            session_id=active_session, client_id=client_id, client_type=HOST_CLIENT_TYPE, client_label=client_id
+        ),
+        AppJoinSessionResultSuccess,
+    )
+    if attempt.value is None:
+        logger.warning("Nuke host API: could not join session %s as %s: %s", active_session, client_id, attempt.details)
+
+
+async def leave_session_as_host(client_id: str) -> None:
+    """Delist a displaced host; nothing to do when no session was ever opened."""
+    attempt = await request(AppLeaveSessionRequest(client_id=client_id), AppLeaveSessionResultSuccess)
+    if attempt.value is None:
+        logger.debug("Nuke host API: could not delist %s: %s", client_id, attempt.details)
 
 
 async def engine_name() -> str:

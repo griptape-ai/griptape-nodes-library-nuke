@@ -12,6 +12,11 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
+    AppJoinSessionRequest,
+    AppJoinSessionResultFailure,
+    AppJoinSessionResultSuccess,
+    AppLeaveSessionRequest,
+    AppLeaveSessionResultSuccess,
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
@@ -107,11 +112,26 @@ class FakeEngine:
         self._engine_id = engine_id
         self._suspends = suspends
         self.requests: list[Any] = []
+        # What the engine's session would list, kept in attach order like the real manager.
+        self.session_clients: list[tuple[str, str]] = []
 
     async def ahandle_request(self, request: Any) -> Any:
         if self._suspends:
             await asyncio.sleep(0)
         self.requests.append(request)
+        if type(request) not in self._responses:
+            # Session verbs mirror the engine unless a test overrides them: a join refuses when
+            # the named session is not the active one, else lists a named client.
+            if isinstance(request, AppJoinSessionRequest):
+                if not self._session_id or request.session_id != self._session_id:
+                    return AppJoinSessionResultFailure(result_details="not the active session")
+                if request.client_id:
+                    self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
+                    self.session_clients.append((request.client_id, request.client_type))
+                return AppJoinSessionResultSuccess(session_id=self._session_id, result_details="ok")
+            if isinstance(request, AppLeaveSessionRequest):
+                self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
+                return AppLeaveSessionResultSuccess(result_details="ok")
         response = self._responses.get(type(request))
         if response is None:
             msg = f"FakeEngine has no response configured for {type(request).__name__}"
