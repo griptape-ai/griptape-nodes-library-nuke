@@ -289,6 +289,7 @@ class NukeGetCurrentProjectRequest(RequestPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeGetCurrentProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    project_id: str
     name: str
     workspace_dir: str
     validation_status: str

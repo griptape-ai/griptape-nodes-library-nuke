@@ -243,6 +243,7 @@ class TestGetCurrentProject:
         result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
+        assert result.project_id == "proj-1"
         assert result.name == "Proj One"
         assert result.workspace_dir == "/workspace/proj-1"
         assert result.validation_status == "FLAWED"
@@ -266,6 +267,7 @@ class TestGetCurrentProject:
         result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
+        assert result.project_id == "<system-defaults>"
         assert result.workspace_dir == "/workspace/global"
 
 
