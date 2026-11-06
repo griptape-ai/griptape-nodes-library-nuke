@@ -92,11 +92,23 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "is_list": is_list_type(parameter.get("type")),
         "is_sequence": is_sequence_type(parameter.get("type")),
         "choices": list(choices) if isinstance(choices, list) else [],
+        # Rendered by the engine's `FileFormat` trait; the editor copies it onto a Start Flow parameter.
+        "file_format": _file_format(ui_options.get("file_format")),
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
         # `hide_property` leaves a connectable port, which a knob cannot represent.
         "hidden": bool(ui_options.get("hide", False)),
     }
+
+
+FILE_FORMAT_KINDS = frozenset({"image", "video", "audio", "threed"})
+
+
+def _file_format(value: object) -> str | None:
+    """Narrow to the documented kinds, so a kind a newer engine adds reads as unmarked."""
+    if value not in FILE_FORMAT_KINDS:
+        return None
+    return str(value)
 
 
 def input_parameter_types(entry: dict) -> dict[tuple[str, str], str | None]:

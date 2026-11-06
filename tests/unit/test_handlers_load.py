@@ -105,6 +105,7 @@ class TestLoadWorkflow:
             "is_list",
             "is_sequence",
             "choices",
+            "file_format",
             "tooltip",
             "settable",
             "hidden",
