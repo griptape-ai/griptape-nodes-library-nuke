@@ -560,6 +560,7 @@ Parameter descriptor fields:
 | `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
 | `is_sequence` | `true` for a declared `Sequence` or `list[Sequence]`, whose `type` is `GTImage`. Its value is a `####` pattern with `first` and `last`. See [Setting a sequence](#setting-a-sequence) |
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
+| `file_format` | `image`, `video`, `audio`, or `three_d` when the parameter's value names a file format of that kind, so `choices` are format names. `null` otherwise. See [File format choices](#file-format-choices) |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 | `hidden` | True when the author hid the parameter in the editor. Still declared, still settable |
@@ -570,6 +571,19 @@ repopulate a dropdown while the graph holds an older value, so a value outside `
 read back, and setting one the engine rejects is reported in `rejected_inputs`. Multi-select
 parameters report no choices.
 
+### File format choices
+
+A parameter whose node marks it with the engine's `FileFormat` trait reports its kind in
+`file_format`. A Start Flow parameter reports the kind of the parameters it connects to directly,
+when every one that declares a kind agrees. One that reaches its target through a node group or a
+pass-through node reports `null`. Use it to drop choices the host cannot open; leave `choices` alone when
+`file_format` is `null`, since an ordinary dropdown can hold anything. A marked parameter can still
+offer a choice that is not an extension, such as `auto`, so decide whether to keep unrecognized
+choices rather than dropping everything that is not a known extension. Compare case-insensitively
+and treat `jpeg` and `jpg` as one format: some nodes offer `PNG`, others `png`.
+
+A workflow saved before its nodes declared the trait reports `null` until it is saved again.
+
 A hidden parameter is still declared, readable, and settable. Build it as a hidden or advanced
 knob, or leave it off the panel and set it programmatically.
 
@@ -579,7 +593,7 @@ workflow shape does not describe at all. Either reports `hidden: false`, so read
 author hid this parameter" rather than "the editor shows nothing here".
 
 Every field is always present. A parameter the engine gave no metadata for reports
-`is_list: null`, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
+`is_list: null`, no choices, `file_format: null`, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
 keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
@@ -621,6 +635,7 @@ arrives. Never branch on the declared type at runtime.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "What the shot is about.",
       "settable": true,
       "hidden": false
@@ -633,6 +648,7 @@ arrives. Never branch on the declared type at runtime.
       "is_list": false,
       "is_sequence": false,
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -645,6 +661,7 @@ arrives. Never branch on the declared type at runtime.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -659,6 +676,7 @@ arrives. Never branch on the declared type at runtime.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -671,6 +689,7 @@ arrives. Never branch on the declared type at runtime.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -683,6 +702,7 @@ arrives. Never branch on the declared type at runtime.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -746,6 +766,7 @@ from the author's defaults for any workflow whose inputs have been touched.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "What the shot is about.",
       "settable": true,
       "hidden": false
@@ -760,6 +781,7 @@ from the author's defaults for any workflow whose inputs have been touched.
       "is_list": false,
       "is_sequence": false,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false

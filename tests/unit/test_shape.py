@@ -122,6 +122,19 @@ class TestDeclaredParameters:
         section = {"Start Flow": {"frames": {"type": "str", "ui_options": picker}}}
         assert shape.declared_parameters(section)[0]["is_sequence"] is False
 
+    def test_a_file_format_parameter_reports_its_kind(self) -> None:
+        options = {"simple_dropdown": ["png", "exr"]}
+        section = {"Start Flow": {"fmt": {"type": "str", "ui_options": options, "file_format": "image"}}}
+        assert shape.declared_parameters(section)[0]["file_format"] == "image"
+
+    def test_an_unknown_file_format_kind_reports_none(self) -> None:
+        section = {"Start Flow": {"fmt": {"type": "str", "file_format": "hologram"}}}
+        assert shape.declared_parameters(section)[0]["file_format"] is None
+
+    def test_an_ordinary_dropdown_reports_no_file_format(self) -> None:
+        section = {"Start Flow": {"size": {"type": "str", "ui_options": {"simple_dropdown": ["1024x1024"]}}}}
+        assert shape.declared_parameters(section)[0]["file_format"] is None
+
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}
         assert types == {"topic": ValueType.TEXT, "plate": ValueType.IMAGE}
