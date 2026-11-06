@@ -92,8 +92,8 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "is_list": is_list_type(parameter.get("type")),
         "is_sequence": is_sequence_type(parameter.get("type")),
         "choices": list(choices) if isinstance(choices, list) else [],
-        # Set by the engine's `FileFormat` trait, which a Start Flow parameter takes from what it feeds.
-        "file_format": _file_format(parameter.get("file_format")),
+        # Rendered by the engine's `FileFormat` trait; the editor copies it onto a Start Flow parameter.
+        "file_format": _file_format(ui_options.get("file_format")),
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
         # `hide_property` leaves a connectable port, which a knob cannot represent.
@@ -101,7 +101,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
     }
 
 
-FILE_FORMAT_KINDS = frozenset({"image", "video", "audio", "three_d"})
+FILE_FORMAT_KINDS = frozenset({"image", "video", "audio", "threed"})
 
 
 def _file_format(value: object) -> str | None:

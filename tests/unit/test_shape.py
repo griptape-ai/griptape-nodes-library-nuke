@@ -123,12 +123,12 @@ class TestDeclaredParameters:
         assert shape.declared_parameters(section)[0]["is_sequence"] is False
 
     def test_a_file_format_parameter_reports_its_kind(self) -> None:
-        options = {"simple_dropdown": ["png", "exr"]}
-        section = {"Start Flow": {"fmt": {"type": "str", "ui_options": options, "file_format": "image"}}}
-        assert shape.declared_parameters(section)[0]["file_format"] == "image"
+        options = {"simple_dropdown": ["glb", "fbx"], "file_format": "threed"}
+        section = {"Start Flow": {"fmt": {"type": "str", "ui_options": options}}}
+        assert shape.declared_parameters(section)[0]["file_format"] == "threed"
 
     def test_an_unknown_file_format_kind_reports_none(self) -> None:
-        section = {"Start Flow": {"fmt": {"type": "str", "file_format": "hologram"}}}
+        section = {"Start Flow": {"fmt": {"type": "str", "ui_options": {"file_format": "hologram"}}}}
         assert shape.declared_parameters(section)[0]["file_format"] is None
 
     def test_an_ordinary_dropdown_reports_no_file_format(self) -> None:
