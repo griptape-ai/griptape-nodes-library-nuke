@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from griptape_nodes.node_library.advanced_node_library import AdvancedNodeLibrary
+from griptape_nodes.node_library.advanced_node_library import AdvancedNodeLibrary, MCPTool
 from griptape_nodes.node_library.library_registry import Library, LibrarySchema
 from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
 from griptape_nodes.retained_mode.events.workflow_events import (
@@ -16,6 +16,8 @@ from nuke_host_api import library_version
 from nuke_host_api.execution_bridge import uninstall as uninstall_host_api_bridge
 from nuke_host_api.handlers import ROUTES
 from nuke_host_api.protocol import PROTOCOL_VERSION
+from nuke_mock_session.handlers import MCP_TOOLS
+from nuke_mock_session.handlers import ROUTES as MOCK_SESSION_ROUTES
 from publish_gizmo.nuke_gizmo_publisher import NukeGizmoPublisher
 from publish_gizmo.nuke_publish_options import get_nuke_publish_options
 
@@ -78,4 +80,7 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
             Callable[[RequestPayload], ResultPayload] | Callable[[RequestPayload], Awaitable[ResultPayload]],
         ]
     ]:
-        return list(ROUTES)
+        return [*ROUTES, *MOCK_SESSION_ROUTES]
+
+    def get_mcp_tools(self) -> list[MCPTool]:
+        return list(MCP_TOOLS)
