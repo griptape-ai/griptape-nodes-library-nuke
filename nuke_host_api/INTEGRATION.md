@@ -508,6 +508,10 @@ the engine is alive and processing requests, and no reply within the host's own 
 it is not. It works before `NukeConnectRequest`, needs no loaded workflow, sends no engine
 request, and changes nothing, so a host can send it at any cadence.
 
+Probe with this rather than another verb's reply. `NukeGetExecutionStateRequest` costs up to
+three engine requests and fails when no workflow is loaded, so a host would have to read a
+failure as healthy. `EngineHeartbeatRequest` is outside the [bound surface](#bound-surface).
+
 No request fields. `NukePingResultSuccess` has no fields either. Correlate it by `request_id`.
 `NukePingResultFailure` exists because every verb declares one, and this library never returns
 it.
