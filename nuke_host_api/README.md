@@ -96,10 +96,7 @@ a host holds the `websocket_direct` URL as its own setting, defaulted to
 `engines.json` is app-layer internal and deliberately not part of what a host reads. See
 `INTEGRATION.md`.
 
-`NukePingRequest` is the engine-level heartbeat. The transport's own `ping`
-frame is answered by whatever holds the socket, which for a relay like `websocket_api` is not
-the engine, so a pong there says nothing about whether the engine is alive. A verb is answered
-by this library inside the engine, so its reply does.
+`NukePingRequest` checks that the engine is alive.
 
 The host claim is advisory and checked only at connect. For claim keys, refusals, takeover
 notifications, and lifetime rules, see [NukeConnectRequest](INTEGRATION.md#nukeconnectrequest).
