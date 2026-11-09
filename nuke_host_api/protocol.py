@@ -13,6 +13,7 @@ class Verb:
 
     CONNECT = "NukeConnectRequest"
     DISCONNECT = "NukeDisconnectRequest"
+    PING = "NukePingRequest"
     LIST_WORKFLOWS = "NukeListWorkflowsRequest"
     DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
     LOAD_WORKFLOW = "NukeLoadWorkflowRequest"

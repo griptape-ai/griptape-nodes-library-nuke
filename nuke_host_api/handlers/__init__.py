@@ -17,10 +17,11 @@ from nuke_host_api.events import (
     NukeListProjectsRequest,
     NukeListWorkflowsRequest,
     NukeLoadWorkflowRequest,
+    NukePingRequest,
     NukeSetCurrentProjectRequest,
     NukeSetParameterValuesRequest,
 )
-from nuke_host_api.handlers.connect import handle_connect, handle_disconnect
+from nuke_host_api.handlers.connect import handle_connect, handle_disconnect, handle_ping
 from nuke_host_api.handlers.execution import (
     handle_cancel_execution,
     handle_execute_workflow,
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
 ROUTES: tuple[tuple[type[RequestPayload], Callable[[RequestPayload], Awaitable[ResultPayload]]], ...] = (
     (NukeConnectRequest, handle_connect),
     (NukeDisconnectRequest, handle_disconnect),
+    (NukePingRequest, handle_ping),
     (NukeListWorkflowsRequest, handle_list_workflows),
     (NukeDescribeWorkflowRequest, handle_describe_workflow),
     (NukeLoadWorkflowRequest, handle_load_workflow),
@@ -72,6 +74,7 @@ __all__ = [
     "handle_list_projects",
     "handle_list_workflows",
     "handle_load_workflow",
+    "handle_ping",
     "handle_set_current_project",
     "handle_set_parameter_values",
 ]

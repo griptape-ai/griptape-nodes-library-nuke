@@ -27,7 +27,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeDisconnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
+| Verbs | `NukeConnectRequest`, `NukeDisconnectRequest`, `NukePingRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent`, `NukeHostDisconnectEvent` |
 | Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
 | Parameter sections | `inputs`, `outputs` |
@@ -55,6 +55,7 @@ project verbs read and change engine-wide project state and need no loaded workf
 |---|---|---|
 | `NukeConnectRequest` | no | no |
 | `NukeDisconnectRequest` | no | no |
+| `NukePingRequest` | no | no |
 | `NukeListWorkflowsRequest` | no | no |
 | `NukeDescribeWorkflowRequest` | no | yes, required |
 | `NukeListProjectsRequest` | no | no |
@@ -219,11 +220,13 @@ Frames are discriminated by the top-level `type` field, absent on outbound reque
 | `app_event` | engine to host | `payload.payload_type` |
 | `pong` | engine to host | answer to `ping`, echoes `id` |
 
-Heartbeat: send `{ "type": "ping", "id": "..." }` and the engine answers
+Transport heartbeat: send `{ "type": "ping", "id": "..." }` and the transport answers
 `{ "type": "pong", "id": "..." }` on the same connection, without the frame reaching the
-engine's event dispatch. Nothing pings the host, and WebSocket protocol-level ping frames
-are not part of what this driver answers. A dead engine otherwise shows up as a closed
-connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest`.
+engine's event dispatch. A pong proves the connection is up, not the engine. Over
+`websocket_direct` the two die together, but a relay such as `websocket_api` keeps answering
+after the engine behind it has stopped. Nothing pings the host, and WebSocket protocol-level
+ping frames are not part of what this driver answers. To check the engine itself, send
+[`NukePingRequest`](#nukepingrequest).
 
 ### Requests
 
@@ -497,6 +500,20 @@ unchanged.
 
 A library older than this verb answers with the engine's failure for an unknown request type.
 Treat that as nothing to release and close anyway.
+
+### NukePingRequest
+
+Engine-level heartbeat. This library's handler answers it inside the engine, so a reply means
+the engine is alive and processing requests, and no reply within the host's own timeout means
+it is not. It works before `NukeConnectRequest`, needs no loaded workflow, sends no engine
+request, and changes nothing, so a host can send it at any cadence.
+
+No request fields. `NukePingResultSuccess` has no fields either. Correlate it by `request_id`.
+`NukePingResultFailure` exists because every verb declares one, and this library never returns
+it.
+
+A library older than this verb answers with the engine's failure for an unknown request type.
+That reply still proves the engine is alive.
 
 ### NukeListWorkflowsRequest
 

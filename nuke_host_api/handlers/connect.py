@@ -23,6 +23,8 @@ from nuke_host_api.events import (
     NukeDisconnectResultFailure,
     NukeDisconnectResultSuccess,
     NukeHostDisconnectEvent,
+    NukePingRequest,
+    NukePingResultSuccess,
 )
 from nuke_host_api.protocol import (
     PROTOCOL_VERSION,
@@ -161,3 +163,8 @@ async def handle_disconnect(
         host_client_name=holder.client_name if holder else "",
         result_details=details,
     )
+
+
+@verb(NukePingRequest)
+async def handle_ping(_request: NukePingRequest) -> NukePingResultSuccess:
+    return NukePingResultSuccess(result_details="Engine is alive.")
