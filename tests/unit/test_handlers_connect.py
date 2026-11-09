@@ -32,8 +32,10 @@ from nuke_host_api.events import (
     NukeDisconnectRequest,
     NukeDisconnectResultFailure,
     NukeDisconnectResultSuccess,
+    NukePingRequest,
+    NukePingResultSuccess,
 )
-from nuke_host_api.handlers import handle_connect, handle_disconnect
+from nuke_host_api.handlers import handle_connect, handle_disconnect, handle_ping
 from nuke_host_api.protocol import PROTOCOL_VERSION, VALUE_TYPES, DisconnectCause
 from tests.unit.host_api_fakes import ENGINE_NAME, ENGINE_VERSION, FakeEngine, use_engine
 
@@ -415,3 +417,16 @@ async def test_a_disconnect_with_no_name_is_refused_and_keeps_the_claim(client_n
     assert isinstance(result, NukeDisconnectResultFailure)
     assert "client_name" in str(result.result_details)
     assert host_claim.held() is not None
+
+
+async def test_ping_answers_before_any_host_connects_and_leaves_the_claim_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A heartbeat must cost the engine nothing and work before connect, so it asks the engine nothing."""
+    fake = use_engine(monkeypatch)
+
+    result = await handle_ping(NukePingRequest())
+
+    assert isinstance(result, NukePingResultSuccess)
+    assert fake.requests == []
+    assert host_claim.held() is None

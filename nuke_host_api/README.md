@@ -96,6 +96,8 @@ a host holds the `websocket_direct` URL as its own setting, defaulted to
 `engines.json` is app-layer internal and deliberately not part of what a host reads. See
 `INTEGRATION.md`.
 
+`NukePingRequest` checks that the engine is alive.
+
 The host claim is advisory and checked only at connect. For claim keys, refusals, takeover
 notifications, and lifetime rules, see [NukeConnectRequest](INTEGRATION.md#nukeconnectrequest).
 Three choices are deliberate:

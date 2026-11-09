@@ -76,6 +76,24 @@ class NukeDisconnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure)
 
 @dataclass
 @PayloadRegistry.register
+class NukePingRequest(RequestPayload):
+    """A reply proves the engine is alive, unlike a transport ``ping`` frame, which only proves the connection is."""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukePingResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """The engine answered."""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukePingResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """Never returned by this library; every verb declares a failure result."""
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeListWorkflowsRequest(RequestPayload):
     runnable_only: bool = True
     templates_only: bool = False
