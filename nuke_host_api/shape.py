@@ -11,8 +11,10 @@ from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 
 from nuke_host_api.value_types import (
     CONTROL_PARAM_TYPE,
+    UnrepresentableValueError,
     is_list_type,
     is_sequence_type,
+    normalize_value,
     value_type_for_engine_type,
 )
 
@@ -91,6 +93,7 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "type": value_type_for_engine_type(parameter.get("type")),
         "is_list": is_list_type(parameter.get("type")),
         "is_sequence": is_sequence_type(parameter.get("type")),
+        "default_value": _default_value(parameter),
         "choices": list(choices) if isinstance(choices, list) else [],
         # Rendered by the engine's `FileFormat` trait; the editor copies it onto a Start Flow parameter.
         "file_format": _file_format(ui_options.get("file_format")),
@@ -111,8 +114,16 @@ def _file_format(value: object) -> str | None:
     return str(value)
 
 
+def _default_value(parameter: dict) -> Any:
+    """Same shape as a value descriptor's ``value``, so one host parser reads both."""
+    try:
+        return normalize_value(parameter.get("default_value"), parameter.get("type"))["value"]
+    except UnrepresentableValueError:
+        return [] if is_list_type(parameter.get("type")) else None
+
+
 def input_parameter_types(entry: dict) -> dict[tuple[str, str], str | None]:
-    """Declared engine type by (node, parameter)."""
+    """Declared engine type by (node, parameter). Avoids normalizing defaults, which issues engine requests."""
     return {
         (node_name, parameter_name): parameter.get("type")
         for node_name, parameter_name, parameter in data_parameters(workflow_shape(entry).get("inputs"))
