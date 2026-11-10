@@ -451,6 +451,29 @@ class TestExecuteWorkflow:
         assert published[0].state == ExecutionState.FAILED
         assert "validation failed" in published[0].detail
 
+    async def test_a_run_that_never_reaches_end_flow_is_reported_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The engine reports success when a control chain just stops (griptape-nodes-engine#6210)."""
+        published: list[Any] = []
+        monkeypatch.setattr(notify, "publish", published.append)
+        use_engine(monkeypatch, execute_responses())
+
+        await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        await settled()
+
+        assert [payload.state for payload in published] == [ExecutionState.FAILED]
+        assert "'End Flow'" in published[0].detail
+
+    async def test_a_run_that_resolves_end_flow_is_reported_succeeded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        published: list[Any] = []
+        monkeypatch.setattr(notify, "publish", published.append)
+        use_engine(monkeypatch, execute_responses())
+
+        await handle_execute_workflow(NukeExecuteWorkflowRequest(workflow_id="wf1"))
+        run_outcome.note_node_resolved("End Flow")
+        await settled()
+
+        assert [payload.state for payload in published] == [ExecutionState.SUCCEEDED]
+
 
 class TestUnresolveFirst:
     """A resolved graph resolves nothing when it runs, so an unchanged re-run produces nothing.

@@ -172,7 +172,9 @@ before execute's first await and holds it until the run's verdict is published.
 The engine's `StartFlowRequest` resolves only when the flow ends, so execute detaches it and
 replies at kickoff. Progress uses the notification stream.
 `run_outcome` collapses the engine's terminal events into one `NukeExecutionStateEvent`
-(`succeeded`, `failed`, or `cancelled`), published once the start answers. The engine answers the
+(`succeeded`, `failed`, or `cancelled`), published once the start answers. A host run that
+resolved none of the workflow's declared output nodes is `failed`, since the engine reports a
+control chain that stops early as a clean finish. The engine answers the
 start mid-cancel, before it reports the cancel, so the run also waits on any cancel this API
 sent.
 

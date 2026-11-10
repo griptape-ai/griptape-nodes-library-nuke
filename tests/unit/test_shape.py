@@ -161,6 +161,14 @@ class TestInputParameterTypes:
         assert shape.input_parameter_types({}) == {}
 
 
+class TestEndNodeNames:
+    def test_every_node_in_the_output_section_is_an_end_node(self) -> None:
+        assert shape.end_node_names({"workflow_shape": SHAPE}) == {"End Flow"}
+
+    def test_a_workflow_with_no_shape_has_no_end_node(self) -> None:
+        assert shape.end_node_names({}) == frozenset()
+
+
 class TestIsRunnable:
     def test_a_workflow_with_no_shape_is_not_runnable(self) -> None:
         runnable, reason = shape.is_runnable({"workflow_shape": None})

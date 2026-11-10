@@ -1355,7 +1355,7 @@ editor cancels it (see below).
 |---|---|---|
 | `state` | `str` | `succeeded`, `failed`, or `cancelled`. A successful execute reply is what reports a run as begun |
 | `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node. Empty when the flow never resolved |
-| `detail` | `str` | Human-readable reason. For `failed`, the engine's error |
+| `detail` | `str` | Human-readable reason. For `failed`, the engine's error, or which node the run stopped at before reaching a declared output node |
 
 ```json
 {
@@ -1370,9 +1370,15 @@ then carries it as `last_outcome`, so a host that reconnects or misses the notif
 still read it. Declared outputs are readable with `NukeGetParameterValuesRequest` once the
 verdict is `succeeded`.
 
+A run started with `NukeExecuteWorkflowRequest` is `failed` when none of the nodes in the
+workflow's declared outputs ran, even though the engine reported no error. The engine treats a
+control chain that stops early as a finished run, which would otherwise leave a `succeeded` run
+with no outputs. A workflow that declares no outputs is not held to this.
+
 A run started from the editor also gets a verdict, but a best-effort one. The engine's
 completion event carries no outcome, so the verdict is `failed` when a node errored since the
-last verdict and `succeeded` otherwise. A node run on its own from the editor emits no
+last verdict and `succeeded` otherwise. It is not checked against the declared outputs, because
+an editor run may stop short on purpose. A node run on its own from the editor emits no
 verdict, so its error makes the next editor run report `failed`. The engine fires completion
 before cancellation on its cancel path, so an editor run cancelled mid-node can report
 `succeeded` followed by `cancelled`; let `cancelled` replace it. A run started with `NukeExecuteWorkflowRequest` and

@@ -109,6 +109,7 @@ class ExecutionBridge:
         self._emit_node_state(event.node_name, NodeState.RESOLVED)
 
     def _on_node_resolved(self, event: NodeResolvedEvent) -> None:
+        run_outcome.note_node_resolved(event.node_name)
         self._emit_node_state(event.node_name, NodeState.RESOLVED)
 
     def _on_node_unresolved(self, event: NodeUnresolvedEvent) -> None:
