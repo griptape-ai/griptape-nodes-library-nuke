@@ -70,7 +70,8 @@ async def _start_loaded_workflow(
             workflow_id=request.workflow_id,
         )
 
-    declared = shape.input_parameter_types(await loaded_workflow.declared_shape())
+    declared_shape = await loaded_workflow.declared_shape()
+    declared = shape.input_parameter_types(declared_shape)
 
     # Shapeless graphs remain executable when no inputs need validation.
     # Hosts may group by node and send {"Start Flow": {}}, which carries nothing to validate.
@@ -115,7 +116,7 @@ async def _start_loaded_workflow(
                 rejected_inputs=rejected,
             )
 
-    flow_run.start(flow_name, loaded_id)
+    flow_run.start(flow_name, loaded_id, shape.end_node_names(declared_shape))
 
     return NukeExecuteWorkflowResultSuccess(
         workflow_id=loaded_id,

@@ -143,6 +143,14 @@ def with_saved_defaults(live_shape: dict, saved_shape: dict) -> dict:
     return {**live_shape, "inputs": inputs}
 
 
+def end_node_names(declared_shape: dict) -> frozenset[str]:
+    """Nodes whose outputs the workflow declares; a run that resolves none of them delivered nothing."""
+    outputs = declared_shape.get("outputs")
+    if not isinstance(outputs, dict):
+        return frozenset()
+    return frozenset(str(node_name) for node_name in outputs)
+
+
 def input_parameter_types(declared_shape: dict) -> dict[tuple[str, str], str | None]:
     """Declared engine type by (node, parameter). Avoids normalizing defaults, which issues engine requests."""
     return {

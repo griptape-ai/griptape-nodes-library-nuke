@@ -39,9 +39,9 @@ def reserve() -> Iterator[bool]:
         _RESERVED = False
 
 
-def start(flow_name: str, workflow_id: str) -> None:
+def start(flow_name: str, workflow_id: str, end_nodes: frozenset[str]) -> None:
     global _RUN  # noqa: PLW0603
-    run_outcome.begin_host_run()
+    run_outcome.begin_host_run(end_nodes)
     _RUN = asyncio.create_task(_run(flow_name, workflow_id))
 
 
