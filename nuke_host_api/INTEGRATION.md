@@ -565,11 +565,16 @@ Parameter descriptor fields:
 | `type` | Always one of the seven value types. For a list parameter, the type of each item |
 | `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
 | `is_sequence` | `true` for a declared `Sequence` or `list[Sequence]`, whose `type` is `GTImage`. Its value is a `####` pattern with `first` and `last`. See [Setting a sequence](#setting-a-sequence) |
+| `default_value` | The workflow author's default, in the same shape as a value descriptor's `value`, macros resolved. What a reset-to-default button sends |
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
 | `file_format` | `image`, `video`, `audio`, or `threed` when the parameter's value names a file format of that kind, so `choices` are format names. `null` otherwise. See [File format choices](#file-format-choices) |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 | `hidden` | True when the author hid the parameter in the editor. Still declared, still settable |
+
+`default_value` has the same shape as a value descriptor's `value`, so one parser reads both,
+and sending it back through `NukeSetParameterValuesRequest` resets the knob. It is `null`, or
+`[]` for a list parameter, when the author set no default or the default has no host form.
 
 Non-empty `choices` is the set of values the workflow author offers, so build an
 `Enumeration_Knob` from them. Treat the list as what to offer, not as a guarantee: the engine can
@@ -600,8 +605,8 @@ widget but leaves the port connectable, and it excludes a hidden parameter group
 workflow shape does not describe at all. Either reports `hidden: false`, so read the field as "the
 author hid this parameter" rather than "the editor shows nothing here".
 
-Every field is always present. A parameter the engine gave no metadata for reports
-`is_list: null`, no choices, `file_format: null`, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
+Every field is always present. A parameter the engine gave no metadata for reports a `null`
+default, `is_list: null`, no choices, `file_format: null`, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
 keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
@@ -642,6 +647,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "is_list": false,
       "is_sequence": false,
+      "default_value": "a quiet harbour at dusk",
       "choices": [],
       "file_format": null,
       "tooltip": "What the shot is about.",
@@ -655,6 +661,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "is_list": false,
       "is_sequence": false,
+      "default_value": "1024x1024",
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
       "file_format": null,
       "tooltip": "",
@@ -668,6 +675,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTFloat",
       "is_list": false,
       "is_sequence": false,
+      "default_value": 23.976,
       "choices": [],
       "file_format": null,
       "tooltip": "",
@@ -683,6 +691,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTBool",
       "is_list": false,
       "is_sequence": false,
+      "default_value": null,
       "choices": [],
       "file_format": null,
       "tooltip": "",
@@ -696,6 +705,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "is_list": false,
       "is_sequence": false,
+      "default_value": null,
       "choices": [],
       "file_format": null,
       "tooltip": "",
@@ -709,6 +719,7 @@ arrives. Never branch on the declared type at runtime.
       "type": "GTText",
       "is_list": false,
       "is_sequence": false,
+      "default_value": null,
       "choices": [],
       "file_format": null,
       "tooltip": "",
@@ -754,8 +765,9 @@ workflows; neither is refused too.
 
 Four fields separate declarations, which are fixed for the workflow, from values, which change on every run. Their shapes match the describe and bulk-read verbs.
 
-**Initialize knobs from `input_values`.** It is what the graph currently holds, which differs
-from the author's defaults for any workflow whose inputs have been touched.
+**Initialize knobs from `input_values`, not from `default_value`.** `default_value` is the
+workflow author's value; `input_values` is what the graph currently holds. They differ for any
+workflow whose inputs have been touched.
 
 ```json
 { "workflow_id": "nuke_api_smoke" }
@@ -773,6 +785,7 @@ from the author's defaults for any workflow whose inputs have been touched.
       "type": "GTText",
       "is_list": false,
       "is_sequence": false,
+      "default_value": "a quiet harbour at dusk",
       "choices": [],
       "file_format": null,
       "tooltip": "What the shot is about.",
@@ -788,6 +801,7 @@ from the author's defaults for any workflow whose inputs have been touched.
       "type": "GTBool",
       "is_list": false,
       "is_sequence": false,
+      "default_value": null,
       "choices": [],
       "file_format": null,
       "tooltip": "",
