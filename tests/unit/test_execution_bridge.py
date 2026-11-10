@@ -19,6 +19,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowResolvedEvent,
     InvolvedNodesEvent,
     NodeErrorEvent,
+    NodeResolvedEvent,
     NodeStartProcessEvent,
     ParameterValueUpdateEvent,
 )
@@ -322,11 +323,22 @@ class TestTranslation:
         """The engine's cancel path fires resolved then cancelled; only the start's answer ends a host run."""
         bridge = ExecutionBridge()
         bridge.install()
-        run_outcome.begin_host_run()
+        run_outcome.begin_host_run(frozenset())
         bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
         bridge._on_flow_cancelled(ControlFlowCancelledEvent())
         assert not any(isinstance(p, NukeExecutionStateEvent) for p in event_manager.payloads())
         assert run_outcome.conclude(None, "").state == ExecutionState.CANCELLED
+
+    def test_a_host_run_succeeds_when_the_bridge_sees_its_end_node_resolve(
+        self, event_manager: FakeEventManager
+    ) -> None:
+        bridge = ExecutionBridge()
+        bridge.install()
+        run_outcome.begin_host_run(frozenset({"End Flow"}))
+        bridge._on_node_resolved(
+            NodeResolvedEvent(node_name="End Flow", parameter_output_values={}, node_type="NukeEndFlow")
+        )
+        assert run_outcome.conclude(None, "").state == ExecutionState.SUCCEEDED
 
     def test_involved_nodes_are_forwarded_as_the_progress_denominator(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()

@@ -111,6 +111,14 @@ def _file_format(value: object) -> str | None:
     return str(value)
 
 
+def end_node_names(entry: dict) -> frozenset[str]:
+    """Nodes whose outputs the workflow declares; a run that resolves none of them delivered nothing."""
+    outputs = workflow_shape(entry).get("outputs")
+    if not isinstance(outputs, dict):
+        return frozenset()
+    return frozenset(str(node_name) for node_name in outputs)
+
+
 def input_parameter_types(entry: dict) -> dict[tuple[str, str], str | None]:
     """Declared engine type by (node, parameter)."""
     return {

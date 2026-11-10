@@ -116,7 +116,8 @@ async def _start_loaded_workflow(
                 rejected_inputs=rejected,
             )
 
-    flow_run.start(flow_name, loaded_id)
+    end_nodes = shape.end_node_names(found.entry) if found.entry is not None else frozenset()
+    flow_run.start(flow_name, loaded_id, end_nodes)
 
     return NukeExecuteWorkflowResultSuccess(
         workflow_id=loaded_id,
