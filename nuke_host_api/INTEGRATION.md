@@ -29,7 +29,7 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 |---|---|
 | Verbs | `NukeConnectRequest`, `NukeDisconnectRequest`, `NukePingRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent`, `NukeHostDisconnectEvent` |
-| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
+| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool`, `GTUnknown` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `succeeded`, `failed`, `cancelled` |
@@ -403,7 +403,7 @@ yet.
   "engine_version": "0.99.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
-  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool"],
+  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool", "GTUnknown"],
   "engine_id": "a69c283e-...",
   "session_id": "50c24f47-...",
   "engine_name": "Dan's workstation",
@@ -617,7 +617,8 @@ direction only, by narrowing:
 |---|---|---|
 | A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
-| `str` / `string`, or a wildcard (`any`, `all`) | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
+| `str` / `string`, a wildcard (`any`, `all`), a bare `list`, or no type | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
+| A class that is not an artifact and that this version does not map (`dict`, `PromptDriver`) | `GTUnknown` | `GTUnknown` while unset, or whatever type the value itself classifies as |
 | `float` | `GTFloat` | `GTFloat`, whatever the value holds: a float parameter the engine happens to hold `4` in is still a float parameter |
 | `int` | `GTInt` | `GTInt`, or `GTFloat` when the engine hands over a float, because reporting `GTInt` would invite a host to truncate it |
 
@@ -1491,6 +1492,7 @@ wildcard (`is_list: null`) decides per value, so check whether it is an array.
 | `GTInt` | A whole number. An Int_Knob on the host side |
 | `GTFloat` | A real number. A Double_Knob on the host side. JSON writes `4.0` as `4`, so read the type rather than the literal |
 | `GTBool` | A bool |
+| `GTUnknown` | Only ever unset (`null`, or `[]` for a list). Describe reports it for a declared type this protocol has no knob for, so show the parameter as unsupported |
 
 ### Media entries
 

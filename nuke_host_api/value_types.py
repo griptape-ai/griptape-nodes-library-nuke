@@ -61,7 +61,7 @@ class _ClassReading:
 
 # Keyed by class name, so a library's class needs no import, and a griptape artifact is no more
 # special than a library's dataclass. Unknown classes read their "value" field, and their declared
-# host type is GTFile for an artifact name and GTText otherwise.
+# host type is GTFile for an artifact name and GTUnknown otherwise.
 _CLASS_READINGS = {
     "ImageArtifact": _ClassReading(ValueType.IMAGE, holds_bytes=True),
     "ImageUrlArtifact": _ClassReading(ValueType.IMAGE),
@@ -113,7 +113,8 @@ class UnrepresentableValueError(ValueError):
 
 def value_type_for_engine_type(engine_type: str | None) -> str:
     """Map a declared type, or a list's element type, before a runtime value is available."""
-    if engine_type is None:
+    # A silent or wildcard declaration accepts text, so it is not unsupported.
+    if engine_type is None or engine_type == "list" or engine_type.lower() in _WILDCARD_ENGINE_TYPES:
         return ValueType.TEXT
 
     list_match = _LIST_TYPE.match(engine_type)
@@ -128,7 +129,7 @@ def value_type_for_engine_type(engine_type: str | None) -> str:
         return reading.value_type
     if engine_type.endswith("Artifact"):
         return ValueType.FILE
-    return ValueType.TEXT
+    return ValueType.UNKNOWN
 
 
 def is_list_type(engine_type: str | None) -> bool | None:

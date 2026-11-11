@@ -410,8 +410,8 @@ engine's instruction that execution event listeners stay cheap and non-blocking.
 
 ## Value contract
 
-Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
-`GTBool`.
+Closed set, eight members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
+`GTBool`, and `GTUnknown` for a declared type with no knob.
 
 ```json
 {"value_type": "GTImage",

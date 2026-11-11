@@ -119,7 +119,12 @@ def _sequence(
         ("all", ValueType.TEXT),
         # Unknown artifact classes degrade to a file rather than leaking the engine name.
         ("AudioUrlArtifact", ValueType.FILE),
-        ("SomethingInventedNextRelease", ValueType.TEXT),
+        ("Any", ValueType.TEXT),
+        ("list[any]", ValueType.TEXT),
+        # Unknown non-artifact classes have no knob, so a host can flag them as unsupported.
+        ("SomethingInventedNextRelease", ValueType.UNKNOWN),
+        ("dict", ValueType.UNKNOWN),
+        ("list[PromptDriver]", ValueType.UNKNOWN),
         (None, ValueType.TEXT),
     ],
 )
@@ -447,6 +452,14 @@ class TestLocators:
     def test_prose_declared_as_media_is_text(self) -> None:
         descriptor = value_types.normalize_value("not a path at all", "ImageUrlArtifact")
         assert descriptor == {"value_type": ValueType.TEXT, "value": "not a path at all", "engine_type": "str"}
+
+    def test_an_unset_parameter_of_an_unmapped_class_is_unknown(self) -> None:
+        descriptor = value_types.normalize_value(None, "PromptDriver")
+        assert descriptor == {"value_type": ValueType.UNKNOWN, "value": None, "engine_type": "NoneType"}
+
+    def test_text_on_a_parameter_of_an_unmapped_class_narrows_to_text(self) -> None:
+        descriptor = value_types.normalize_value("a prompt", "PromptDriver")
+        assert descriptor["value_type"] == ValueType.TEXT
 
 
 class TestUnrepresentable:
