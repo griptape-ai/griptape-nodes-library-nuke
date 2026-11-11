@@ -483,6 +483,9 @@ Rules:
 
 `PROTOCOL_VERSION` is one integer, bumped only by a breaking change.
 
+These rules take effect with the [contract snapshot](#contract-snapshot). Before it is
+recorded, version 1 changes in place.
+
 Free: adding a field, mapping a new engine artifact class onto an existing host type,
 adding a verb or notification type. **Verified**: an unknown request field is ignored, so
 additive change safety is real rather than aspirational.

@@ -562,7 +562,7 @@ Parameter descriptor fields:
 | `node` | Node name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
-| `type` | Always one of the seven value types. For a list parameter, the type of each item |
+| `type` | Always one of the value types in `value_types`. For a list parameter, the type of each item |
 | `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
 | `is_sequence` | `true` for a declared `Sequence` or `list[Sequence]`, whose `type` is `GTImage`. Its value is a `####` pattern with `first` and `last`. See [Setting a sequence](#setting-a-sequence) |
 | `default_value` | The workflow author's default, in the same shape as a value descriptor's `value`, macros resolved. What a reset-to-default button sends |
@@ -1580,7 +1580,8 @@ Read from the engine's `websocket_direct` implementation, as noted under
 
 ## Version compatibility
 
-`PROTOCOL_VERSION` is a single integer, not semver.
+`PROTOCOL_VERSION` is a single integer, not semver. The bump rules below take effect once a
+plugin ships and the contract snapshot is recorded. Until then, version 1 may still change.
 
 | Change | Version bump | Effect on a host |
 |---|---|---|
