@@ -410,8 +410,8 @@ engine's instruction that execution event listeners stay cheap and non-blocking.
 
 ## Value contract
 
-Closed set, seven members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
-`GTBool`.
+Closed set, eight members: `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`,
+`GTBool`, and `GTUnknown` for a declared type with no knob.
 
 ```json
 {"value_type": "GTImage",
@@ -482,6 +482,9 @@ Rules:
 ## Versioning
 
 `PROTOCOL_VERSION` is one integer, bumped only by a breaking change.
+
+These rules take effect with the [contract snapshot](#contract-snapshot). Before it is
+recorded, version 1 changes in place.
 
 Free: adding a field, mapping a new engine artifact class onto an existing host type,
 adding a verb or notification type. **Verified**: an unknown request field is ignored, so

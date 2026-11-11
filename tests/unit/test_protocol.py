@@ -85,6 +85,7 @@ def test_value_type_wire_strings_are_exactly_these() -> None:
     assert protocol.ValueType.INT == "GTInt"
     assert protocol.ValueType.FLOAT == "GTFloat"
     assert protocol.ValueType.BOOL == "GTBool"
+    assert protocol.ValueType.UNKNOWN == "GTUnknown"
 
 
 def test_parameter_section_wire_strings_are_exactly_these() -> None:
