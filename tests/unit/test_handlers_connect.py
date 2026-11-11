@@ -24,7 +24,7 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 
-from nuke_host_api import execution_bridge, flow_run, host_claim, notify
+from nuke_host_api import execution_bridge, flow_run, host_claim, library_version, notify
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
@@ -117,12 +117,13 @@ async def test_the_event_topic_is_handed_over() -> None:
     assert result.event_topic == "sessions/session-abc/response"
 
 
-async def test_both_versions_are_reported() -> None:
+async def test_both_versions_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     """A support ticket names an engine and a library; a host cannot look either one up."""
+    monkeypatch.setattr(library_version, "version", lambda: "9.8.7")
     result = await handle_connect(NukeConnectRequest(client_protocol_versions=[PROTOCOL_VERSION], client_name=HOST))
     assert isinstance(result, NukeConnectResultSuccess)
     assert result.engine_version == "0.97.0"
-    assert result.library_version == "0.3.0"
+    assert result.library_version == "9.8.7"
 
 
 async def test_an_empty_offer_assumes_the_current_version() -> None:
