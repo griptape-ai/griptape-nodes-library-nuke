@@ -617,7 +617,7 @@ direction only, by narrowing:
 |---|---|---|
 | A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
-| `str` / `string`, a wildcard (`any`, `all`), a bare `list`, or no type | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
+| `str` / `string`, `python`, `yaml`, `json`, a wildcard (`any`, `all`), a bare `list`, or no type | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
 | A class that is not an artifact and that this version does not map (`dict`, `PromptDriver`) | `GTUnknown` | `GTUnknown` while unset, or whatever type the value itself classifies as |
 | `float` | `GTFloat` | `GTFloat`, whatever the value holds: a float parameter the engine happens to hold `4` in is still a float parameter |
 | `int` | `GTInt` | `GTInt`, or `GTFloat` when the engine hands over a float, because reporting `GTInt` would invite a host to truncate it |

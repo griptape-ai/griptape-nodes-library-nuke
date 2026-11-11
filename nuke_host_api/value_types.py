@@ -44,6 +44,10 @@ _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 _SCALAR_TYPE_TO_VALUE_TYPE = {
     "str": ValueType.TEXT,
     "string": ValueType.TEXT,
+    # The engine's code and markup parameter types, each of which also accepts `str`.
+    "python": ValueType.TEXT,
+    "yaml": ValueType.TEXT,
+    "json": ValueType.TEXT,
     "int": ValueType.INT,
     "float": ValueType.FLOAT,
     "bool": ValueType.BOOL,

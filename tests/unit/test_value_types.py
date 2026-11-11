@@ -124,6 +124,9 @@ def _sequence(
         # Unknown non-artifact classes have no knob, so a host can flag them as unsupported.
         ("SomethingInventedNextRelease", ValueType.UNKNOWN),
         ("dict", ValueType.UNKNOWN),
+        ("python", ValueType.TEXT),
+        ("yaml", ValueType.TEXT),
+        ("json", ValueType.TEXT),
         ("list[PromptDriver]", ValueType.UNKNOWN),
         (None, ValueType.TEXT),
     ],
