@@ -15,7 +15,8 @@ because the gizmo node type must exist on Nuke's plugin path before this script 
 create an instance of it, and publishing a gizmo needs griptape_nodes -- unavailable
 inside Nuke's bundled Python:
 
-    1. uv run python -m tests.integration.fixtures.canary.publish_canary_gizmo --install-dir /tmp/canary_gizmo_fixture
+    1. UV_PROJECT_ENVIRONMENT=.venv-dev \
+           uv run python -m tests.integration.fixtures.canary.publish_canary_gizmo --install-dir /tmp/canary_gizmo_fixture
        (from the repository root, so -m puts it on sys.path and the imports resolve)
     2. CANARY_GIZMO_INSTALL_DIR=/tmp/canary_gizmo_fixture/install/griptape \
            /path/to/Nuke -t scripts/generate_test_fixtures.py
