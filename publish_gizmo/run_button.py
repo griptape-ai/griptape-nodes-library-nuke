@@ -8,7 +8,7 @@ readable and testable.
 
 ``_config`` keys (all injected by the bootstrap at publish time):
     workflow_filename (str): basename of the workflow .json/.py file
-    start_node_name (str): name of the NukeStartFlow node
+    start_node_name (str): name of the Start Flow node
     param_names (list[str]): ordered list of input knob names
     media_input_names (list[str]): input param names that are media types
     media_output_names (list[str]): output param names that are media types

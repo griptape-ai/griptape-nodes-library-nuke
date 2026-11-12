@@ -1,7 +1,7 @@
 """Nuke installation and gizmo path discovery utilities.
 
 These functions are used both by the publish options provider (at publish time)
-and by NukeStartFlow (for interactive node parameters).
+and by Start Flow (for interactive node parameters).
 """
 
 from __future__ import annotations

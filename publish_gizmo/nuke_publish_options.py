@@ -1,8 +1,8 @@
 """Publish-time options provider for the Nuke publisher.
 
 Called by the engine when the frontend opens the publish dialog for the Nuke publisher.
-Returns the fields to display and pre-populates them from saved publish_config metadata
-on the NukeStartFlow node (if available).
+Returns the fields to display and pre-populates them from the settings the last publish
+remembered (see ``publish_config.saved_publish_config``).
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.workflow_events import (
     GetPublishOptionsRequest,
     GetPublishOptionsResultSuccess,
@@ -26,34 +25,15 @@ from publish_gizmo.nuke_discovery import (
     normalize_path_str,
 )
 from publish_gizmo.output_paths import absolutize
+from publish_gizmo.publish_config import saved_publish_config
 
 logger = logging.getLogger(__name__)
 
 
-def _find_nuke_start_flow_node(workflow_name: str):  # noqa: ANN202
-    """Return the NukeStartFlow node from the top-level flow, or None."""
-    result = GriptapeNodes.handle_request(GetTopLevelFlowRequest())
-    if not isinstance(result, GetTopLevelFlowResultSuccess) or result.flow_name is None:
-        return None
-    control_flow = GriptapeNodes.FlowManager().get_flow_by_name(result.flow_name)
-    for node in control_flow.nodes.values():
-        if node.__class__.__name__ == "NukeStartFlow":
-            return node
-    return None
-
-
 def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOptionsResultSuccess:
     """Build the list of fields for the Nuke publish dialog."""
-    current: dict = request.current_selections or {}
-
-    # If the caller sent no selections, try to restore the last saved publish_config
-    # from the NukeStartFlow node so the dialog is pre-populated.
-    if not current:
-        start_flow = _find_nuke_start_flow_node(request.workflow_name)
-        if start_flow is not None:
-            saved = start_flow.metadata.get("publish_config")
-            if saved and isinstance(saved, dict):
-                current = saved
+    # With no selections yet, the dialog opens on what the last publish remembered.
+    current: dict = request.current_selections or saved_publish_config(request.configuration)
 
     gizmo_candidates = compute_gizmo_install_path_choices()
     gizmo_choices = gizmo_candidates + [GIZMO_INSTALL_CUSTOM]
