@@ -58,6 +58,7 @@ Makefile                 All dev workflows (check, fix, version, deps)
 
 **Dependencies**
 - Use `uv` only — never `pip install` directly.
+- Dev tooling lives in `.venv-dev`; `.venv` beside the manifest belongs to the engine. Run tools through `make` targets, or set `UV_PROJECT_ENVIRONMENT=.venv-dev` for a direct `uv sync` or `uv run`. Installing the dev group into `.venv` makes the library load FLAWED. See CONTRIBUTING.md.
 - Adding a new dependency: edit `pyproject.toml`, then run `make deps/sync` to sync `pip_dependencies` into the library JSON.
 
 **Style**
@@ -120,7 +121,7 @@ import pytest, os
 nuke_exe = os.environ.get("NUKE_EXECUTABLE")
 pytestmark = pytest.mark.skipif(not nuke_exe, reason="NUKE_EXECUTABLE not set")
 ```
-Run integration tests locally with `NUKE_EXECUTABLE=/path/to/nuke uv run pytest tests/integration/`.
+Run integration tests locally with `NUKE_EXECUTABLE=/path/to/nuke make test/integration`.
 
 **Test the manifest schema end-to-end.** Write a test that round-trips a JobManifest through `manifest.py` and asserts every field is preserved.
 
@@ -150,8 +151,8 @@ Run integration tests locally with `NUKE_EXECUTABLE=/path/to/nuke uv run pytest 
 make check                                        # format + lint + types + JSON validation
 make fix                                          # auto-fix format and lint
 make deps/sync                                    # sync deps after pyproject.toml changes
-uv run pytest tests/unit/                         # run unit tests (no Nuke needed)
-NUKE_EXECUTABLE=/path/to/nuke uv run pytest tests/integration/   # integration tests
+make test/unit                                    # run unit tests (no Nuke needed)
+NUKE_EXECUTABLE=/path/to/nuke make test/integration   # integration tests
 make version/patch                                # bump patch version
 ```
 

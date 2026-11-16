@@ -184,7 +184,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and the re
 make install        # install all dependencies via uv
 make check          # format, lint, types, JSON validation
 make fix            # auto-fix formatting and lint issues
+make test/unit      # run unit tests
 ```
+
+Use the `make` targets rather than `uv sync --group dev` or `uv run` directly. Dev tooling belongs
+in `.venv-dev`, and plain `uv` would install it into the `.venv` the engine builds beside the
+manifest, which makes the library load as FLAWED. A direct `uv` command needs
+`UV_PROJECT_ENVIRONMENT=.venv-dev`. See [CONTRIBUTING.md](CONTRIBUTING.md#two-virtual-environments) for why.
 
 ## Additional Resources
 
