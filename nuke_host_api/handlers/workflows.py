@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from nuke_host_api import shape
 from nuke_host_api.dispatch import failure, verb
-from nuke_host_api.engine import lookup_workflow, workflow_table
+from nuke_host_api.engine import library_workflow_owners, lookup_workflow, workflow_file, workflow_table
 from nuke_host_api.events import (
     NukeDescribeWorkflowRequest,
     NukeDescribeWorkflowResultFailure,
@@ -25,6 +27,7 @@ async def handle_list_workflows(
             because="the engine could not read the workflow registry.",
         )
 
+    owners: dict[Path, str] | None = None
     workflows = []
     for workflow_id, entry in table.items():
         if not isinstance(entry, dict) or entry.get("is_internal"):
@@ -37,6 +40,12 @@ async def handle_list_workflows(
         template = library_provided or bool(entry.get("is_template"))
         if request.templates_only and not template:
             continue
+        library_name = ""
+        file_path = entry.get("file_path")
+        if library_provided and file_path:
+            if owners is None:
+                owners = library_workflow_owners()
+            library_name = owners.get(workflow_file(str(file_path)), "")
         workflows.append(
             {
                 "id": workflow_id,
@@ -46,6 +55,7 @@ async def handle_list_workflows(
                 "unavailable_reason": reason,
                 "template": template,
                 "library_provided": library_provided,
+                "library_name": library_name,
             }
         )
 

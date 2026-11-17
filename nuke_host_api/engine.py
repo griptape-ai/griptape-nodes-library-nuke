@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from griptape_nodes.node_library.library_registry import LibraryRegistry
+from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.app_events import (
     AppJoinSessionRequest,
     AppJoinSessionResultSuccess,
@@ -153,6 +156,34 @@ async def workflow_table() -> dict | None:
     if attempt.value is None:
         return None
     return attempt.value.workflows
+
+
+def library_workflow_owners() -> dict[Path, str]:
+    """Map each library-provided workflow file to the library that provides it."""
+    # The registry does not record the providing library, so rebuild the two lists the engine
+    # registers library workflows from: each library's `workflows` and its workflow nodes' files.
+    owners: dict[Path, str] = {}
+    library_manager = GriptapeNodes.LibraryManager()
+    for library_name in LibraryRegistry.list_libraries():
+        library_info = library_manager.get_library_info_by_library_name(library_name)
+        if library_info is None:
+            continue
+        try:
+            declared = LibraryRegistry.get_library(name=library_name).get_library_data().workflows or []
+        except KeyError:
+            declared = []
+        base_dir = Path(library_info.library_path).parent
+        files = [base_dir / workflow for workflow in declared]
+        files.extend(Path(node_class.workflow_file_path) for node_class in library_info.workflow_node_classes)
+        for file in files:
+            # Two libraries listing one file is ambiguous; the first one listed keeps it.
+            owners.setdefault(file.resolve(), library_name)
+    return owners
+
+
+def workflow_file(file_path: str) -> Path:
+    """Resolve a registry file path, which is workspace-relative, to compare with a library's files."""
+    return Path(WorkflowRegistry.get_complete_file_path(file_path)).resolve()
 
 
 @dataclass(frozen=True)
