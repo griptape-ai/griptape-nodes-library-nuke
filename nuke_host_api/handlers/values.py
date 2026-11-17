@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nuke_host_api import engine, flow_run, parameter_values, shape
+from nuke_host_api import engine, flow_run, loaded_workflow, parameter_values, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeGetParameterValuesRequest,
@@ -32,7 +32,7 @@ async def handle_get_parameter_values(
             error=ValueError,
         )
 
-    workflow_id = await engine.current_workflow_id()
+    workflow_id = await loaded_workflow.workflow_id()
     if not workflow_id:
         return failure(
             NukeGetParameterValuesResultFailure,
@@ -66,7 +66,7 @@ async def handle_set_parameter_values(
 ) -> NukeSetParameterValuesResultSuccess | NukeSetParameterValuesResultFailure:
     """Refuse writes during execution because parameter-read timing is unavailable."""
     attempted = "to set parameter values on the loaded workflow"
-    loaded_id = await engine.current_workflow_id()
+    loaded_id = await loaded_workflow.workflow_id()
 
     if parameter_values.carries_no_values(request.inputs):
         return failure(

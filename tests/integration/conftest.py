@@ -19,7 +19,7 @@ import pytest
 from griptape_nodes.node_library.library_registry import LibraryRegistry
 from griptape_nodes.retained_mode.engine import reset_root_engine
 
-from nuke_host_api import run_outcome
+from nuke_host_api import loaded_workflow, run_outcome
 
 from .fixtures.canary.canary_workflow_builder import PublishedBundle, publish_canary_bundle
 
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 def _reset_engine() -> None:
     """Drop the root ``Engine`` and clear its process-global registries."""
     reset_root_engine()
+    loaded_workflow.forget()
     LibraryRegistry._clear()
     run_outcome.clear()
 

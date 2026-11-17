@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from griptape_nodes.retained_mode.events.app_events import (
     AppJoinSessionRequest,
@@ -33,6 +34,11 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsResultSuccess,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+    from griptape_nodes.retained_mode.runtime.workflow_runtime import WorkflowRuntime
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -130,6 +136,15 @@ async def current_workflow_id() -> str:
     if attempt.value is None or not attempt.value.workflow_name:
         return ""
     return attempt.value.workflow_name
+
+
+def open_workflow(open_id: str) -> WorkflowRuntime | None:
+    return GriptapeNodes.get_instance().open_workflows.find(open_id)
+
+
+def bind_workflow(workflow: WorkflowRuntime) -> AbstractContextManager[None]:
+    """Name the workflow for every request in the block, which the engine needs once several are open."""
+    return GriptapeNodes.get_instance().bind_workflow(workflow)
 
 
 async def workflow_table() -> dict | None:

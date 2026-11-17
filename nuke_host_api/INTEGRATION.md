@@ -741,10 +741,10 @@ the declared parameters and their current values, for both sides, in one reply. 
 before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
 `NukeGetExecutionStateRequest` can answer for the workflow a host means.
 
-**Destructive.** The engine clears all object state to load a graph, so this discards whatever
-was loaded before, including a graph an editor user has open on the same engine. Confirm with
-the artist before sending it. It clears before it knows the load will succeed, so a failed load
-can leave nothing loaded at all.
+**Destructive.** Loading closes the workflow this host loaded before, and closes the requested
+workflow first if an editor user has it open. Other open workflows stay open. Confirm with the
+artist before sending it. It closes before it knows the load will succeed, so a failed load can
+leave nothing loaded at all.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -854,9 +854,9 @@ Every row but the last leaves the loaded graph exactly as it was, so the knobs a
 showing still match what the engine holds. A `file_path` request is the one that touches
 anything else: the file is imported and registered before the rows below it are checked, so a
 refusal there can leave a new registry entry behind. The last row cannot leave the graph alone:
-`run_with_clean_slate` makes the engine clear all object state before it builds the graph, so a
-workflow that fails inside its own file, on a missing library or an exception, leaves nothing
-loaded. That failure alone carries `engine_state_cleared: true`.
+the previous workflow is closed before the engine builds the graph, so a workflow that fails
+inside its own file, on a missing library or an exception, leaves nothing loaded. That failure
+alone carries `engine_state_cleared: true`.
 
 Branch on `engine_state_cleared`, not on the reason text. When it is `false`, the knobs a host
 is showing still match what the engine holds and a retry is free. When it is `true`, the graph
@@ -866,7 +866,7 @@ comp they had open went with it.
 | `NukeLoadWorkflowResultFailure` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The id asked for, or the one resolved from `file_path`. Empty when the request never got far enough to name one |
-| `engine_state_cleared` | `bool` | `true` only when the engine had already discarded the previous graph before it failed |
+| `engine_state_cleared` | `bool` | `true` only when the previous workflow was already closed before the load failed |
 
 ### NukeExecuteWorkflowRequest
 

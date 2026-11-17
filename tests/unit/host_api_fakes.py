@@ -9,6 +9,8 @@ resolves macros through its own ``GriptapeNodes`` import instead, patched separa
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.retained_mode.events.app_events import (
@@ -22,6 +24,8 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionResultSuccess,
 )
 from griptape_nodes.retained_mode.events.context_events import (
+    CloseWorkflowRequest,
+    CloseWorkflowResultSuccess,
     GetWorkflowContextRequest,
     GetWorkflowContextSuccess,
 )
@@ -51,10 +55,13 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryRequest,
     RunWorkflowFromRegistryResultSuccess,
 )
+from griptape_nodes.retained_mode.runtime.binding import bound_workflow
 
 from nuke_host_api import engine
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     import pytest
 
 SHAPE = {
@@ -89,8 +96,30 @@ ENGINE_VERSION = GetEngineVersionResultSuccess(major=0, minor=97, patch=0, resul
 ENGINE_NAME = GetEngineNameResultSuccess(engine_name="Engine One", result_details="ok")
 
 
+@dataclass
+class FakeWorkflow:
+    """Stands in for a ``WorkflowRuntime``, which the library reads only for its id."""
+
+    workflow_id: str
+
+
+class FakeOpenWorkflows:
+    def __init__(self) -> None:
+        self.by_id: dict[str, FakeWorkflow] = {}
+
+    def open(self, workflow_id: str) -> FakeWorkflow:
+        self.by_id[workflow_id] = FakeWorkflow(workflow_id)
+        return self.by_id[workflow_id]
+
+    def close(self, workflow_id: str) -> None:
+        self.by_id.pop(workflow_id, None)
+
+    def find(self, workflow_id: str) -> FakeWorkflow | None:
+        return self.by_id.get(workflow_id)
+
+
 class FakeEngine:
-    """Dispatches ahandle_request by request type, recording call order.
+    """Dispatches ahandle_request by request type, recording call order and the workflow each named.
 
     A response may be a real result instance, reused for every call of that type, or a
     callable that receives the request and computes one, needed when the same request
@@ -112,6 +141,9 @@ class FakeEngine:
         self._engine_id = engine_id
         self._suspends = suspends
         self.requests: list[Any] = []
+        # The id of the workflow each request in ``requests`` was bound to, None when unbound.
+        self.named: list[str | None] = []
+        self.open_workflows = FakeOpenWorkflows()
         # What the engine's session would list, kept in attach order like the real manager.
         self.session_clients: list[tuple[str, str]] = []
 
@@ -119,6 +151,7 @@ class FakeEngine:
         if self._suspends:
             await asyncio.sleep(0)
         self.requests.append(request)
+        self.named.append(getattr(bound_workflow.get(), "workflow_id", None))
         if type(request) not in self._responses:
             # Session verbs mirror the engine unless a test overrides them: a join refuses when
             # the named session is not the active one, else lists a named client.
@@ -132,11 +165,35 @@ class FakeEngine:
             if isinstance(request, AppLeaveSessionRequest):
                 self.session_clients = [c for c in self.session_clients if c[0] != request.client_id]
                 return AppLeaveSessionResultSuccess(result_details="ok")
+            # Opening and closing mirror the engine: a load opens the workflow under `<name>-open`.
+            if isinstance(request, RunWorkflowFromRegistryRequest):
+                opened = self.open_workflows.open(f"{request.workflow_name}-open")
+                return RunWorkflowFromRegistryResultSuccess(workflow_id=opened.workflow_id, result_details="loaded")
+            if isinstance(request, CloseWorkflowRequest):
+                self.open_workflows.close(request.workflow_id)
+                return CloseWorkflowResultSuccess(
+                    workflow_id=request.workflow_id, already_closed=False, result_details="closed"
+                )
         response = self._responses.get(type(request))
         if response is None:
             msg = f"FakeEngine has no response configured for {type(request).__name__}"
             raise AssertionError(msg)
         return response(request) if callable(response) else response
+
+    def get_instance(self) -> FakeEngine:
+        return self
+
+    @contextmanager
+    def bind_workflow(self, workflow: Any) -> Iterator[None]:
+        token = bound_workflow.set(workflow)
+        try:
+            yield
+        finally:
+            bound_workflow.reset(token)
+
+    def named_for(self, request_type: type) -> list[str | None]:
+        """The workflow each request of this type named, in call order."""
+        return [name for request, name in zip(self.requests, self.named, strict=True) if type(request) is request_type]
 
     def get_session_id(self) -> str:
         return self._session_id
@@ -210,7 +267,6 @@ def load_responses(overrides: dict[type, Any] | None = None) -> dict[type, Any]:
         GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
         ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok"),
         ImportWorkflowRequest: ImportWorkflowResultSuccess(workflow_name="wf1", result_details="imported"),
-        RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultSuccess(result_details="loaded"),
         GetParameterValueRequest: respond_to_get_value,
     }
     responses.update(overrides or {})

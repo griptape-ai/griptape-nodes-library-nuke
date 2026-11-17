@@ -9,6 +9,7 @@ from griptape_nodes.retained_mode.events.base_events import RequestPayload, Resu
 from griptape_nodes.retained_mode.events.workflow_events import (
     PublishWorkflowRegisteredEventData,
     PublishWorkflowRequest,
+    PublishWorkflowResultFailure,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
@@ -31,6 +32,10 @@ def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
     if not isinstance(request, PublishWorkflowRequest):
         msg = f"Expected PublishWorkflowRequest, got {type(request).__name__}"
         raise TypeError(msg)
+    # The engine resolves a request named by id to its registry name before calling a publisher.
+    if request.workflow_name is None:
+        details = "Attempted to publish a workflow as a gizmo. Failed because the request names no workflow."
+        return PublishWorkflowResultFailure(result_details=details)
 
     publisher = NukeGizmoPublisher(
         workflow_name=request.workflow_name,

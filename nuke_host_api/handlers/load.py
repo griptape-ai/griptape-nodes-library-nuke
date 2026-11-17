@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from griptape_nodes.retained_mode.events.context_events import (
+    CloseWorkflowRequest,
+    CloseWorkflowResultSuccess,
+)
 from griptape_nodes.retained_mode.events.workflow_events import (
     ImportWorkflowRequest,
     ImportWorkflowResultSuccess,
@@ -9,7 +13,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultSuccess,
 )
 
-from nuke_host_api import engine, flow_run, parameter_values, run_outcome, shape
+from nuke_host_api import engine, flow_run, loaded_workflow, parameter_values, run_outcome, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
@@ -19,11 +23,11 @@ from nuke_host_api.events import (
 from nuke_host_api.protocol import PARAMETER_SECTIONS
 
 
-@verb(NukeLoadWorkflowRequest)
+@verb(NukeLoadWorkflowRequest, bind_loaded_workflow=False)
 async def handle_load_workflow(
     request: NukeLoadWorkflowRequest,
 ) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
-    """Validate before loading because the engine clears object state before building the graph."""
+    """Validate before loading because loading closes the host's previous workflow before building the graph."""
     if request.workflow_id and request.file_path:
         return failure(
             NukeLoadWorkflowResultFailure,
@@ -44,7 +48,7 @@ async def handle_load_workflow(
 
     # Held for the whole load so an execute cannot start on the graph being torn down.
     with flow_run.reserve() as reserved:
-        if reserved and not await engine.is_running():
+        if reserved and not await _host_workflow_running():
             return await _load(request)
 
     return failure(
@@ -56,6 +60,11 @@ async def handle_load_workflow(
         ),
         workflow_id=request.workflow_id,
     )
+
+
+async def _host_workflow_running() -> bool:
+    with loaded_workflow.bound():
+        return await engine.is_running()
 
 
 async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
@@ -92,29 +101,48 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
             workflow_id=workflow_id,
         )
 
-    # A clean-slate load discards the graph a previous verdict described, even when it fails.
+    # Clean slate closes only the workflow being loaded, so the host's previous one would stay open.
+    previous = loaded_workflow.current()
+    if previous is not None:
+        closed = await engine.request(CloseWorkflowRequest(workflow_id=previous.open_id), CloseWorkflowResultSuccess)
+        if closed.value is None:
+            return failure(
+                NukeLoadWorkflowResultFailure,
+                attempted=attempted,
+                because=(
+                    f"the engine could not close the previously loaded workflow '{previous.name}', which stays "
+                    f"loaded. {closed.details}"
+                ),
+                workflow_id=workflow_id,
+            )
+    loaded_workflow.forget()
+    # A load discards the graph a previous verdict described, even when it fails.
     run_outcome.clear()
+
     loaded = await engine.request(
         RunWorkflowFromRegistryRequest(workflow_name=workflow_id, run_with_clean_slate=True),
         RunWorkflowFromRegistryResultSuccess,
     )
     if loaded.value is None:
-        # Clean-slate loading clears the previous graph before building the replacement.
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,
             because=(
-                f"the engine could not load it, and the engine's object state was cleared before it tried, "
+                f"the engine could not load it, and the previously loaded workflow was closed before it tried, "
                 f"so nothing is loaded now. {loaded.details}"
             ),
             workflow_id=workflow_id,
             engine_state_cleared=True,
         )
 
+    if loaded.value.workflow_id:
+        loaded_workflow.record(loaded.value.workflow_id, workflow_id)
+
     declared_shape = shape.workflow_shape(entry)
-    input_values, output_values, unavailable = await parameter_values.read_sections(
-        declared_shape, list(PARAMETER_SECTIONS)
-    )
+    with loaded_workflow.bound():
+        input_values, output_values, unavailable = await parameter_values.read_sections(
+            declared_shape, list(PARAMETER_SECTIONS)
+        )
 
     return NukeLoadWorkflowResultSuccess(
         workflow_id=workflow_id,
