@@ -5,7 +5,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     UnresolveFlowResultSuccess,
 )
 
-from nuke_host_api import engine, flow_run, parameter_values, run_outcome, shape
+from nuke_host_api import engine, flow_run, loaded_workflow, parameter_values, run_outcome, shape
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
@@ -49,7 +49,7 @@ async def _start_loaded_workflow(
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
     attempted = _attempted(request)
 
-    loaded_id = await engine.current_workflow_id()
+    loaded_id = await loaded_workflow.workflow_id()
     if not loaded_id:
         return failure(
             NukeExecuteWorkflowResultFailure,
@@ -154,7 +154,7 @@ async def handle_get_execution_state(
     # A reserved or detached start is running before the engine reports a node.
     running = flow_run.pending() or engine.flow_is_running(state.value)
 
-    workflow_id = await engine.current_workflow_id()
+    workflow_id = await loaded_workflow.workflow_id()
     last = run_outcome.last(workflow_id)
 
     return NukeGetExecutionStateResultSuccess(

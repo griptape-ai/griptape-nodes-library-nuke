@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nuke_host_api import execution_bridge, flow_run, notify, run_outcome
+from nuke_host_api import execution_bridge, flow_run, loaded_workflow, notify, run_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -30,6 +30,7 @@ def _no_detached_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(flow_run, "_RUN", None)
     monkeypatch.setattr(flow_run, "_RESERVED", False)
     monkeypatch.setattr(flow_run, "_CANCELS", set())
+    monkeypatch.setattr(loaded_workflow, "_LOADED", None)
     run_outcome.clear()
 
 

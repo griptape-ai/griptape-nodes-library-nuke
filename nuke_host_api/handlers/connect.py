@@ -3,10 +3,9 @@ from __future__ import annotations
 import logging
 import time
 
-from nuke_host_api import execution_bridge, flow_run, host_claim, library_version, notify
+from nuke_host_api import execution_bridge, flow_run, host_claim, library_version, loaded_workflow, notify
 from nuke_host_api.dispatch import failure, verb
 from nuke_host_api.engine import (
-    current_workflow_id,
     engine_id,
     engine_name,
     engine_version,
@@ -74,7 +73,7 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
 
     if not attempt.granted:
         running = await flow_run.busy()
-        workflow_id = await current_workflow_id()
+        workflow_id = await loaded_workflow.workflow_id()
         activity = f"A workflow{f' ({workflow_id})' if workflow_id else ''} is running now. " if running else ""
         return failure(
             NukeConnectResultFailure,

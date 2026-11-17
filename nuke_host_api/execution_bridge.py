@@ -18,8 +18,9 @@ from griptape_nodes.retained_mode.events.execution_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.managers.context_manager import ContextManager
+from griptape_nodes.retained_mode.runtime.binding import WorkflowNotNamedError, WorkflowNotOpenError
 
-from nuke_host_api import notify, run_outcome
+from nuke_host_api import loaded_workflow, notify, run_outcome
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
@@ -39,22 +40,36 @@ logger = logging.getLogger("griptape_nodes")
 
 def current_workflow_id() -> str:
     """Read synchronously because bridge callbacks cannot await an engine request."""
+    loaded = loaded_workflow.current()
+    if loaded is not None:
+        return loaded.name
     try:
         return GriptapeNodes.ContextManager().get_current_workflow_name()
-    except ContextManager.NoActiveWorkflowError:
+    except (ContextManager.NoActiveWorkflowError, WorkflowNotNamedError, WorkflowNotOpenError):
         return ""
+
+
+def _for_host(callback: Callable[[Any], None]) -> Callable[[Any], None]:
+    """Drop events from other open workflows, such as an editor tab's run, which the host never loaded."""
+
+    def filtered(event: Any) -> None:
+        if not loaded_workflow.emitted_elsewhere():
+            callback(event)
+
+    return filtered
 
 
 class ExecutionBridge:
     def __init__(self) -> None:
         self._installed = False
+        self._listeners: tuple[tuple[type[ExecutionPayload], Callable[[Any], None]], ...] = ()
 
     @property
     def installed(self) -> bool:
         return self._installed
 
     def _subscriptions(self) -> tuple[tuple[type[ExecutionPayload], Callable[[Any], None]], ...]:
-        """Use one subscription list for installation and teardown."""
+        """The events the bridge forwards, each with its handler."""
         return (
             (NodeStartProcessEvent, self._on_node_start),
             (NodeFinishProcessEvent, self._on_node_finish),
@@ -73,12 +88,13 @@ class ExecutionBridge:
             return
 
         event_manager = GriptapeNodes.EventManager()
-        subscriptions = self._subscriptions()
-        for event_type, callback in subscriptions:
-            event_manager.add_listener_to_execution_event(event_type, callback)
+        # Kept so teardown removes the same wrapper objects it added.
+        self._listeners = tuple((event_type, _for_host(callback)) for event_type, callback in self._subscriptions())
+        for event_type, listener in self._listeners:
+            event_manager.add_listener_to_execution_event(event_type, listener)
 
         self._installed = True
-        logger.info("Nuke host API: subscribed to %d execution event types", len(subscriptions))
+        logger.info("Nuke host API: subscribed to %d execution event types", len(self._listeners))
 
     def uninstall(self) -> None:
         """Listeners outlive libraries and must be removed explicitly on reload."""
@@ -86,9 +102,10 @@ class ExecutionBridge:
             return
 
         event_manager = GriptapeNodes.EventManager()
-        for event_type, callback in self._subscriptions():
-            event_manager.remove_listener_for_execution_event(event_type, callback)
+        for event_type, listener in self._listeners:
+            event_manager.remove_listener_for_execution_event(event_type, listener)
 
+        self._listeners = ()
         self._installed = False
         logger.info("Nuke host API: unsubscribed from the execution event feed")
 

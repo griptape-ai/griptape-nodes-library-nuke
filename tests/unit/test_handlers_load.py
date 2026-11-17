@@ -1,9 +1,8 @@
 """Tests for the load verb.
 
-Loading clears all object state, so most of these assert what the handler does *not* do: a
-request that cannot succeed must not reach ``RunWorkflowFromRegistryRequest``, because
-whatever the engine had loaded before, including a graph an editor user has open, is gone the
-moment it does.
+Loading closes the host's previous workflow, so most of these assert what the handler does
+*not* do: a request that cannot succeed must not reach ``RunWorkflowFromRegistryRequest``,
+because the graph the host had loaded is gone the moment it does.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     RunWorkflowFromRegistryResultFailure,
 )
 
-from nuke_host_api import engine, flow_run, run_outcome
+from nuke_host_api import engine, flow_run, loaded_workflow, run_outcome
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
     NukeLoadWorkflowResultFailure,
@@ -263,23 +262,27 @@ class TestLoadWorkflow:
     async def test_a_load_the_engine_refuses_reports_that_the_previous_graph_is_already_gone(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The engine clears all object state before it builds the graph, so this failure costs.
+        """The previous workflow is closed before the engine builds the graph, so this failure costs.
 
         A host that read the refusal as "nothing changed" would keep showing knobs for a graph
         the engine no longer holds, and the artist whose comp was discarded gets no signal.
         """
-        use_engine(
+        loaded_workflow.record("wf0-open", "wf0")
+        engine = use_engine(
             monkeypatch,
             load_responses(
                 {RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(result_details="library missing")}
             ),
         )
+        engine.open_workflows.open("wf0-open")
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultFailure)
         assert result.engine_state_cleared is True
-        assert "cleared" in str(result.result_details)
+        assert "closed" in str(result.result_details)
+        assert engine.open_workflows.find("wf0-open") is None
+        assert loaded_workflow.current() is None
 
     @pytest.mark.parametrize(
         ("request_payload", "overrides"),

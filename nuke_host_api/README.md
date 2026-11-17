@@ -126,9 +126,18 @@ second, and the only one that changes what is loaded.
 
 A parameter's live value exists on a loaded node, so a verb reading one cannot take a
 `workflow_id` and mean it: for an unloaded workflow there is nothing
-to read, and the only way to make one readable is to load it, which clears all object state.
-A read verb that quietly did that would discard a graph an editor user had open. So loading is
+to read, and the only way to make one readable is to load it, which closes the graph the host
+had loaded. A read verb that quietly did that would discard the artist's work. So loading is
 its own verb, called deliberately, and a host is expected to confirm it with the artist.
+
+The engine can hold several workflows open, such as editor tabs alongside the host's, and
+rejects a request that names none once two are open. `loaded_workflow` records the one the
+host loaded, and every verb but load runs bound to it, so its engine requests name it. Load
+closes the host's previous workflow itself, because `run_with_clean_slate` closes only the
+workflow being loaded. With nothing recorded, or after the workflow is closed elsewhere, verbs
+fall back to the engine's only open workflow, which is how a host drives a graph an editor user
+opened. The execution bridge drops events emitted by any other open workflow, so an editor run
+in another tab never reaches the host as a verdict on its own graph.
 
 The engine has no load-and-describe entry point. Loading uses four engine requests plus one per declared parameter: `ImportWorkflowRequest` registers an unseen file, `RunWorkflowFromRegistryRequest` builds the graph, and values require one `GetParameterValueRequest` each.
 
@@ -146,8 +155,8 @@ Every check this verb makes itself happens before the engine is touched, includi
 registry to reject an unknown id, so a request refused on its own arguments leaves the loaded
 graph intact. A `file_path` is imported and registered before those checks run, so a refusal
 there can leave a registry entry behind, never a different graph. The engine's own load is not
-atomic and cannot offer even that much: `run_with_clean_slate` clears all object state before
-the graph is built, so a workflow that fails inside its own file leaves nothing loaded. That
+atomic and cannot offer even that much: the previous workflow is closed before the graph is
+built, so a workflow that fails inside its own file leaves nothing loaded. That
 failure reports `engine_state_cleared`, and a host must drop the knobs it was showing when it
 sees it.
 
@@ -628,10 +637,10 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   refused. The escape is `NukeCancelExecutionRequest`, and whether cancel actually clears a node
   wedged inside `process()` is unverified. If it does not, only an engine restart recovers.
 - **Loading is destructive and nothing but a host's own UI guards it.**
-  `NukeLoadWorkflowRequest` clears all object state, which discards whatever the engine held,
-  including a graph an editor user has open on the same engine. The engine offers no
-  load-into-a-side-context entry point, so this layer cannot make it non-destructive. A host
-  should confirm with the artist before sending it.
+  `NukeLoadWorkflowRequest` closes the host's previous workflow, and the requested workflow if
+  an editor user has it open. A host should confirm with the artist before sending it.
+- **One workflow per host.** The engine can hold several open, but this layer tracks only the
+  one the host loaded last, so a second Nuke node's load replaces the first's.
 - **`websocket_direct` ships disabled.** Every machine needs a config edit before a plugin can
   reach an engine. Worth an engine-side default.
 - **`NukeGetParameterValuesRequest` and `NukeLoadWorkflowRequest` cost one engine request per
