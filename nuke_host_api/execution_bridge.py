@@ -69,7 +69,6 @@ class ExecutionBridge:
         return self._installed
 
     def _subscriptions(self) -> tuple[tuple[type[ExecutionPayload], Callable[[Any], None]], ...]:
-        """The events the bridge forwards, each with its handler."""
         return (
             (NodeStartProcessEvent, self._on_node_start),
             (NodeFinishProcessEvent, self._on_node_finish),
