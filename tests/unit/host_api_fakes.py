@@ -117,6 +117,9 @@ class FakeOpenWorkflows:
     def find(self, workflow_id: str) -> FakeWorkflow | None:
         return self.by_id.get(workflow_id)
 
+    def all_open(self) -> list[FakeWorkflow]:
+        return list(self.by_id.values())
+
 
 class FakeEngine:
     """Dispatches ahandle_request by request type, recording call order and the workflow each named.

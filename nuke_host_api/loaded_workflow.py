@@ -13,6 +13,8 @@ from nuke_host_api import engine
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from griptape_nodes.retained_mode.runtime.workflow_runtime import WorkflowRuntime
+
 
 @dataclass(frozen=True)
 class LoadedWorkflow:
@@ -42,18 +44,31 @@ def current() -> LoadedWorkflow | None:
     return _LOADED
 
 
+def acted_on() -> WorkflowRuntime | None:
+    """What host verbs act on: the host's workflow, else the engine's only open workflow, else none.
+
+    The only open workflow is how a host drives a graph an editor user opened.
+    """
+    if _LOADED is not None:
+        runtime = engine.open_workflow(_LOADED.open_id)
+        if runtime is not None:
+            return runtime
+    return engine.only_open_workflow()
+
+
 async def workflow_id() -> str:
     """The host's workflow by registry name, else the engine's only open workflow, else empty."""
     loaded = current()
     if loaded is not None:
         return loaded.name
-    return await engine.current_workflow_id()
+    with bound():
+        return await engine.current_workflow_id()
 
 
 @contextmanager
 def bound() -> Iterator[None]:
-    """Act on the host's workflow; with none, the engine falls back to its only open workflow."""
-    runtime = engine.open_workflow(_LOADED.open_id) if _LOADED is not None else None
+    """Name `acted_on()` on every request in the block. The engine doesn't pick one for a request that names none."""
+    runtime = acted_on()
     if runtime is None:
         yield
         return

@@ -141,12 +141,29 @@ class TestVerbs:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         engine = use_engine(monkeypatch, execute_responses({GetParameterValueRequest: respond_to_get_value}))
+        engine.open_workflows.open("editor-tab")
         loaded_workflow.record("closed-in-editor", "wf0")
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest())
 
         assert isinstance(result, NukeGetParameterValuesResultSuccess)
         assert result.workflow_id == "wf1"
+        assert set(engine.named) == {"editor-tab"}
+
+    async def test_with_nothing_loaded_verbs_name_the_workflow_an_editor_opened(self, engine: FakeEngine) -> None:
+        """The engine doesn't pick the only open workflow for a request that names none, so the host names it."""
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {"topic": "x"}}))
+        await flow_run._RUN  # type: ignore[misc]
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert set(engine.named) == {"editor-tab"}
+        assert engine.named_for(GetWorkflowContextRequest) == ["editor-tab"]
+
+    async def test_with_nothing_loaded_and_several_open_verbs_name_none(self, engine: FakeEngine) -> None:
+        engine.open_workflows.open("second-tab")
+
+        await handle_get_parameter_values(NukeGetParameterValuesRequest())
+
         assert set(engine.named) == {None}
 
 

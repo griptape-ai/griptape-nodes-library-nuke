@@ -135,8 +135,9 @@ rejects a request that names none once two are open. `loaded_workflow` records t
 host loaded, and every verb but load runs bound to it, so its engine requests name it. Load
 closes the host's previous workflow itself, because `run_with_clean_slate` closes only the
 workflow being loaded. With nothing recorded, or after the workflow is closed elsewhere, verbs
-fall back to the engine's only open workflow, which is how a host drives a graph an editor user
-opened. The execution bridge drops events emitted by any other open workflow, so an editor run
+run bound to the engine's only open workflow, which is how a host drives a graph an editor user
+opened. The engine doesn't pick that workflow for a request that names none, so the library
+names it. The execution bridge drops events emitted by any other open workflow, so an editor run
 in another tab never reaches the host as a verdict on its own graph.
 
 The engine has no load-and-describe entry point. Loading uses four engine requests plus one per declared parameter: `ImportWorkflowRequest` registers an unseen file, `RunWorkflowFromRegistryRequest` builds the graph, and values require one `GetParameterValueRequest` each.

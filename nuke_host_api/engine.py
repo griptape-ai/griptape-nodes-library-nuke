@@ -142,6 +142,14 @@ def open_workflow(open_id: str) -> WorkflowRuntime | None:
     return GriptapeNodes.get_instance().open_workflows.find(open_id)
 
 
+def only_open_workflow() -> WorkflowRuntime | None:
+    """The engine's one open workflow, or None while none or several are open."""
+    open_workflows = GriptapeNodes.get_instance().open_workflows.all_open()
+    if len(open_workflows) != 1:
+        return None
+    return open_workflows[0]
+
+
 def bind_workflow(workflow: WorkflowRuntime) -> AbstractContextManager[None]:
     """Name the workflow for every request in the block, which the engine needs once several are open."""
     return GriptapeNodes.get_instance().bind_workflow(workflow)
