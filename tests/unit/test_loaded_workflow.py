@@ -151,23 +151,32 @@ class TestVerbs:
 
 
 class TestEmittedElsewhere:
-    def test_nothing_is_elsewhere_before_the_host_loads(self) -> None:
-        engine = FakeEngine()
+    def test_nothing_is_elsewhere_before_the_host_loads(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch)
         with engine.bind_workflow(engine.open_workflows.open("editor-tab")):
             assert loaded_workflow.emitted_elsewhere() is False
 
-    def test_another_workflows_work_is_elsewhere(self) -> None:
-        engine = FakeEngine()
+    def test_another_workflows_work_is_elsewhere(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch)
+        engine.open_workflows.open("wf1-open")
         loaded_workflow.record("wf1-open", "wf1")
         with engine.bind_workflow(engine.open_workflows.open("editor-tab")):
             assert loaded_workflow.emitted_elsewhere() is True
 
-    def test_the_hosts_own_work_is_not_elsewhere(self) -> None:
-        engine = FakeEngine()
+    def test_the_hosts_own_work_is_not_elsewhere(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = use_engine(monkeypatch)
         loaded_workflow.record("wf1-open", "wf1")
         with engine.bind_workflow(engine.open_workflows.open("wf1-open")):
             assert loaded_workflow.emitted_elsewhere() is False
 
-    def test_unbound_work_is_not_elsewhere(self) -> None:
+    def test_unbound_work_is_not_elsewhere(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        use_engine(monkeypatch).open_workflows.open("wf1-open")
         loaded_workflow.record("wf1-open", "wf1")
         assert loaded_workflow.emitted_elsewhere() is False
+
+    def test_nothing_is_elsewhere_once_the_hosts_workflow_closes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verbs fall back to the only open workflow then, so its events are the host's to see."""
+        engine = use_engine(monkeypatch)
+        loaded_workflow.record("closed-in-editor", "wf0")
+        with engine.bind_workflow(engine.open_workflows.open("editor-tab")):
+            assert loaded_workflow.emitted_elsewhere() is False

@@ -63,7 +63,8 @@ def bound() -> Iterator[None]:
 
 def emitted_elsewhere() -> bool:
     """True when the emitting work is bound to an open workflow other than the host's."""
-    if _LOADED is None:
+    loaded = current()
+    if loaded is None:
         return False
     emitter = getattr(bound_workflow.get(), "workflow_id", None)
-    return emitter is not None and emitter != _LOADED.open_id
+    return emitter is not None and emitter != loaded.open_id
