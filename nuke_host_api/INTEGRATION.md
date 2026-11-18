@@ -746,6 +746,11 @@ unsaved edits included, when an editor user already has it open. It then closes 
 this host loaded before, if this host opened it. Other open workflows stay open. Confirm with
 the artist before sending it. A failed load leaves the previous workflow loaded.
 
+One case still loses work. If an editor user opens the workflow this host loaded after the host
+opened it, both act on the same open workflow, and the host's next load closes it, with any edits
+made in the editor. The engine doesn't yet report who has a workflow open or whether it has
+unsaved changes (griptape-ai/griptape-nodes-engine#6378), so the host can't tell.
+
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `workflow_id` | `str` | `""` | From `NukeListWorkflowsRequest`. Mutually exclusive with `file_path` |
