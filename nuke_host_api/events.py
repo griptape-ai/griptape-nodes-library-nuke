@@ -159,7 +159,7 @@ class NukeLoadWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSucces
 @dataclass
 @PayloadRegistry.register
 class NukeLoadWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """``engine_state_cleared`` indicates that the previous graph did not survive."""
+    """``engine_state_cleared`` is always False: a failed load leaves the previous workflow loaded."""
 
     workflow_id: str = ""
     engine_state_cleared: bool = False

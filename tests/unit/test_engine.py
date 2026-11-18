@@ -15,8 +15,6 @@ from griptape_nodes.retained_mode.events.app_events import (
 )
 from griptape_nodes.retained_mode.events.context_events import (
     GetWorkflowContextFailure,
-    GetWorkflowContextRequest,
-    GetWorkflowContextSuccess,
 )
 from griptape_nodes.retained_mode.events.execution_events import GetFlowStateRequest, GetFlowStateResultSuccess
 from griptape_nodes.retained_mode.events.flow_events import (
@@ -143,19 +141,6 @@ class TestTopLevelFlowName:
         """
         use_engine(monkeypatch, {GetTopLevelFlowRequest: GetWorkflowContextFailure(result_details="unexpected")})
         assert await engine.top_level_flow_name() is None
-
-
-class TestCurrentWorkflowId:
-    async def test_the_loaded_workflow_is_returned(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(
-            monkeypatch,
-            {GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf1", result_details="ok")},
-        )
-        assert await engine.current_workflow_id() == "wf1"
-
-    async def test_no_context_is_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(monkeypatch, {GetWorkflowContextRequest: GetWorkflowContextFailure(result_details="none")})
-        assert await engine.current_workflow_id() == ""
 
 
 class TestWorkflowEntry:

@@ -22,12 +22,13 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
+    OpenWorkflowInfo,
 )
 from griptape_nodes.retained_mode.events.context_events import (
     CloseWorkflowRequest,
     CloseWorkflowResultSuccess,
-    GetWorkflowContextRequest,
-    GetWorkflowContextSuccess,
+    OpenWorkflowRequest,
+    OpenWorkflowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
@@ -57,7 +58,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 from griptape_nodes.retained_mode.runtime.binding import bound_workflow
 
-from nuke_host_api import engine
+from nuke_host_api import engine, loaded_workflow
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -172,6 +173,19 @@ class FakeEngine:
             if isinstance(request, RunWorkflowFromRegistryRequest):
                 opened = self.open_workflows.open(f"{request.workflow_name}-open")
                 return RunWorkflowFromRegistryResultSuccess(workflow_id=opened.workflow_id, result_details="loaded")
+            if isinstance(request, OpenWorkflowRequest):
+                open_id = f"{request.workflow_name}-open"
+                already_open = self.open_workflows.find(open_id) is not None
+                self.open_workflows.open(open_id)
+                info = OpenWorkflowInfo(
+                    workflow_id=open_id,
+                    name=str(request.workflow_name),
+                    display_name=str(request.workflow_name),
+                    workflow_file_path=None,
+                    is_saved=True,
+                    has_active_flow=True,
+                )
+                return OpenWorkflowResultSuccess(open_workflow=info, already_open=already_open, result_details="opened")
             if isinstance(request, CloseWorkflowRequest):
                 self.open_workflows.close(request.workflow_id)
                 return CloseWorkflowResultSuccess(
@@ -205,10 +219,22 @@ class FakeEngine:
         return self._engine_id
 
 
-def use_engine(monkeypatch: pytest.MonkeyPatch, responses: dict[type, Any] | None = None, **kwargs: Any) -> FakeEngine:
-    """Install a fake as the one engine the library can reach, and hand it back for assertions."""
+def use_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    responses: dict[type, Any] | None = None,
+    *,
+    loaded: str | None = None,
+    **kwargs: Any,
+) -> FakeEngine:
+    """Install a fake as the one engine the library can reach, and hand it back for assertions.
+
+    `loaded` names a workflow the host loaded before the test, which the fake opens as `<name>-open`.
+    """
     fake = FakeEngine(responses, **kwargs)
     monkeypatch.setattr(engine, "GriptapeNodes", fake)
+    if loaded is not None:
+        fake.open_workflows.open(f"{loaded}-open")
+        loaded_workflow.record(f"{loaded}-open", loaded, opened_by_host=True)
     return fake
 
 
@@ -240,13 +266,12 @@ def respond_to_get_value(request: GetParameterValueRequest) -> Any:
 def execute_responses(overrides: dict[type, Any] | None = None) -> dict[type, Any]:
     """Engine responses for a clean execute, so each test overrides only what it is about.
 
-    Execute preflights twice before it touches an input: once to refuse starting over a run in
-    progress, once to learn which workflow is loaded and which parameters it may set.
+    Execute preflights before it touches an input: it refuses to start over a run in progress, and
+    reads which parameters the loaded workflow may set.
     """
     responses: dict[type, Any] = {
         ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok"),
         GetFlowStateRequest: IDLE_FLOW,
-        GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf1", result_details="ok"),
         SetParameterValueRequest: lambda req: SetParameterValueResultSuccess(
             finalized_value=req.value, data_type="str", result_details="set"
         ),

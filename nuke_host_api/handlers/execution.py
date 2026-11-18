@@ -26,7 +26,7 @@ async def handle_execute_workflow(
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
     """Refuse concurrent runs because engine events carry no execution ID."""
     with flow_run.reserve() as reserved:
-        if reserved and not await engine.is_running():
+        if reserved and not await loaded_workflow.running():
             return await _start_loaded_workflow(request)
 
     return failure(
@@ -49,7 +49,7 @@ async def _start_loaded_workflow(
 ) -> NukeExecuteWorkflowResultSuccess | NukeExecuteWorkflowResultFailure:
     attempted = _attempted(request)
 
-    loaded_id = await loaded_workflow.workflow_id()
+    loaded_id = loaded_workflow.workflow_id()
     if not loaded_id:
         return failure(
             NukeExecuteWorkflowResultFailure,
@@ -88,7 +88,7 @@ async def _start_loaded_workflow(
                 workflow_id=loaded_id,
             )
 
-    flow_name = await engine.top_level_flow_name()
+    flow_name = await loaded_workflow.flow_name()
     if flow_name is None:
         return failure(
             NukeExecuteWorkflowResultFailure,
@@ -133,7 +133,7 @@ async def handle_get_execution_state(
     """Read live flow state so reconnects do not depend on missed notifications."""
     attempted = "to read the engine's execution state"
 
-    flow_name = await engine.top_level_flow_name()
+    flow_name = await loaded_workflow.flow_name()
     if flow_name is None:
         return failure(
             NukeGetExecutionStateResultFailure,
@@ -154,7 +154,7 @@ async def handle_get_execution_state(
     # A reserved or detached start is running before the engine reports a node.
     running = flow_run.pending() or engine.flow_is_running(state.value)
 
-    workflow_id = await loaded_workflow.workflow_id()
+    workflow_id = loaded_workflow.workflow_id()
     last = run_outcome.last(workflow_id)
 
     return NukeGetExecutionStateResultSuccess(
@@ -175,7 +175,7 @@ async def handle_cancel_execution(
     """Cancel the only running execution because the engine exposes no execution ID."""
     attempted = "to cancel the running workflow"
 
-    flow_name = await engine.top_level_flow_name()
+    flow_name = await loaded_workflow.flow_name()
     if flow_name is None:
         return failure(
             NukeCancelExecutionResultFailure,

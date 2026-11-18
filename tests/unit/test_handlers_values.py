@@ -49,7 +49,7 @@ WORKFLOW_LOADED: dict[type, Any] = {
 
 class TestGetParameterValues:
     async def test_no_sections_requested_reads_both_sides(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value})
+        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value}, loaded="wf1")
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest())
 
@@ -69,7 +69,9 @@ class TestGetParameterValues:
         assert result.unavailable == []
 
     async def test_a_single_section_reads_only_that_side(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        engine = use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value})
+        engine = use_engine(
+            monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value}, loaded="wf1"
+        )
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest(sections=[ParameterSection.INPUTS]))
 
@@ -83,7 +85,9 @@ class TestGetParameterValues:
     async def test_an_unknown_section_is_refused_without_reaching_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        engine = use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value})
+        engine = use_engine(
+            monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value}, loaded="wf1"
+        )
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest(sections=["sideways"]))
 
@@ -107,7 +111,7 @@ class TestGetParameterValues:
                 return GetParameterValueResultFailure(result_details="node was deleted mid-read")
             return respond_to_get_value(request)
 
-        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond})
+        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond}, loaded="wf1")
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest(sections=[ParameterSection.INPUTS]))
 
@@ -123,7 +127,7 @@ class TestGetParameterValues:
         ]
 
     async def test_control_parameters_are_excluded(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value})
+        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value}, loaded="wf1")
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest())
 
@@ -134,7 +138,7 @@ class TestGetParameterValues:
     async def test_values_are_normalized_the_same_shape_as_a_describe_default(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value})
+        use_engine(monkeypatch, {**WORKFLOW_LOADED, GetParameterValueRequest: respond_to_get_value}, loaded="wf1")
 
         result = await handle_get_parameter_values(NukeGetParameterValuesRequest())
 
@@ -158,7 +162,7 @@ UNSAVED_GRAPH_LOADED: dict[type, Any] = {
 
 class TestSetParameterValues:
     async def test_a_declared_input_is_applied_without_starting_a_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        engine = use_engine(monkeypatch, execute_responses())
+        engine = use_engine(monkeypatch, execute_responses(), loaded="wf1")
 
         result = await handle_set_parameter_values(
             NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}})
@@ -173,7 +177,7 @@ class TestSetParameterValues:
     async def test_an_empty_request_is_refused_rather_than_answered_as_a_trivial_success(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        engine = use_engine(monkeypatch, execute_responses())
+        engine = use_engine(monkeypatch, execute_responses(), loaded="wf1")
 
         result = await handle_set_parameter_values(NukeSetParameterValuesRequest())
 
@@ -186,7 +190,7 @@ class TestSetParameterValues:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """{"Start Flow": {}} has no pair to act on and none to reject: a trivial success too."""
-        engine = use_engine(monkeypatch, execute_responses())
+        engine = use_engine(monkeypatch, execute_responses(), loaded="wf1")
 
         result = await handle_set_parameter_values(NukeSetParameterValuesRequest(inputs={"Start Flow": {}}))
 
@@ -205,6 +209,7 @@ class TestSetParameterValues:
                     )
                 }
             ),
+            loaded="wf1",
         )
 
         result = await handle_set_parameter_values(
@@ -229,7 +234,7 @@ class TestSetParameterValues:
     async def test_a_pair_outside_the_allow_list_is_rejected_not_forwarded(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        engine = use_engine(monkeypatch, execute_responses())
+        engine = use_engine(monkeypatch, execute_responses(), loaded="wf1")
 
         result = await handle_set_parameter_values(
             NukeSetParameterValuesRequest(
@@ -252,7 +257,7 @@ class TestSetParameterValues:
     async def test_values_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED))
+        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED), loaded="unsaved:9f0c")
 
         result = await handle_set_parameter_values(
             NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}})
@@ -271,6 +276,7 @@ class TestSetParameterValues:
         engine = use_engine(
             monkeypatch,
             execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
+            loaded="wf1",
         )
 
         result = await handle_set_parameter_values(

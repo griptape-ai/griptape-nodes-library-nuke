@@ -17,10 +17,6 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionResultSuccess,
 )
 from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
-from griptape_nodes.retained_mode.events.context_events import (
-    GetWorkflowContextRequest,
-    GetWorkflowContextSuccess,
-)
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -130,24 +126,8 @@ async def top_level_flow_name() -> str | None:
     return attempt.value.flow_name
 
 
-async def current_workflow_id() -> str:
-    """Return the loaded workflow's id, or empty when none is loaded."""
-    attempt = await request(GetWorkflowContextRequest(), GetWorkflowContextSuccess)
-    if attempt.value is None or not attempt.value.workflow_name:
-        return ""
-    return attempt.value.workflow_name
-
-
 def open_workflow(open_id: str) -> WorkflowRuntime | None:
     return GriptapeNodes.get_instance().open_workflows.find(open_id)
-
-
-def only_open_workflow() -> WorkflowRuntime | None:
-    """The engine's one open workflow, or None while none or several are open."""
-    open_workflows = GriptapeNodes.get_instance().open_workflows.all_open()
-    if len(open_workflows) != 1:
-        return None
-    return open_workflows[0]
 
 
 def bind_workflow(workflow: WorkflowRuntime) -> AbstractContextManager[None]:

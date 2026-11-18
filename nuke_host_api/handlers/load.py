@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
 from griptape_nodes.retained_mode.events.context_events import (
     CloseWorkflowRequest,
     CloseWorkflowResultSuccess,
+    OpenWorkflowRequest,
+    OpenWorkflowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
     ImportWorkflowRequest,
     ImportWorkflowResultSuccess,
-    RunWorkflowFromRegistryRequest,
-    RunWorkflowFromRegistryResultSuccess,
 )
 
 from nuke_host_api import engine, flow_run, loaded_workflow, parameter_values, run_outcome, shape
@@ -22,12 +24,14 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.protocol import PARAMETER_SECTIONS
 
+logger = logging.getLogger("griptape_nodes")
+
 
 @verb(NukeLoadWorkflowRequest, bind_loaded_workflow=False)
 async def handle_load_workflow(
     request: NukeLoadWorkflowRequest,
 ) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
-    """Validate before loading because loading closes the host's previous workflow before building the graph."""
+    """Validate before loading because loading replaces the workflow the host's verbs act on."""
     if request.workflow_id and request.file_path:
         return failure(
             NukeLoadWorkflowResultFailure,
@@ -55,7 +59,7 @@ async def handle_load_workflow(
         NukeLoadWorkflowResultFailure,
         attempted=f"to load '{request.workflow_id or request.file_path}'",
         because=(
-            "the engine is already executing or loading a workflow, and loading discards the graph in use. "
+            "the engine is already executing or loading a workflow, and loading replaces the one in use. "
             "Wait for it to finish, or cancel a run with NukeCancelExecutionRequest, then retry."
         ),
         workflow_id=request.workflow_id,
@@ -63,8 +67,7 @@ async def handle_load_workflow(
 
 
 async def _host_workflow_running() -> bool:
-    with loaded_workflow.bound():
-        return await engine.is_running()
+    return await loaded_workflow.running()
 
 
 async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSuccess | NukeLoadWorkflowResultFailure:
@@ -82,7 +85,7 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
 
     attempted = f"to load workflow '{workflow_id}'"
 
-    # Validate registry state before the destructive load.
+    # Checked first, so an unknown name never reaches the engine as an open.
     found = await engine.lookup_workflow(workflow_id)
     if not found.registry_readable:
         return failure(
@@ -101,42 +104,29 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
             workflow_id=workflow_id,
         )
 
-    # Clean slate closes only the workflow being loaded, so the host's previous one would stay open.
-    previous = loaded_workflow.current()
-    if previous is not None:
-        closed = await engine.request(CloseWorkflowRequest(workflow_id=previous.open_id), CloseWorkflowResultSuccess)
-        if closed.value is None:
-            return failure(
-                NukeLoadWorkflowResultFailure,
-                attempted=attempted,
-                because=(
-                    f"the engine could not close the previously loaded workflow '{previous.name}', which stays "
-                    f"loaded. {closed.details}"
-                ),
-                workflow_id=workflow_id,
-            )
-    loaded_workflow.forget()
-    # A load discards the graph a previous verdict described, even when it fails.
-    run_outcome.clear()
-
-    loaded = await engine.request(
-        RunWorkflowFromRegistryRequest(workflow_name=workflow_id, run_with_clean_slate=True),
-        RunWorkflowFromRegistryResultSuccess,
-    )
-    if loaded.value is None:
+    # Opened first, so a failed open leaves the host's previous workflow loaded. A workflow already
+    # open, such as an editor tab, comes back as it is, unsaved edits included.
+    opened = await engine.request(OpenWorkflowRequest(workflow_name=workflow_id), OpenWorkflowResultSuccess)
+    if opened.value is None:
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,
-            because=(
-                f"the engine could not load it, and the previously loaded workflow was closed before it tried, "
-                f"so nothing is loaded now. {loaded.details}"
-            ),
+            because=f"the engine could not open it. {opened.details}",
             workflow_id=workflow_id,
-            engine_state_cleared=True,
         )
+    open_id = opened.value.open_workflow.workflow_id
+    opened_by_host = not opened.value.already_open
 
-    if loaded.value.workflow_id:
-        loaded_workflow.record(loaded.value.workflow_id, workflow_id)
+    previous = loaded_workflow.current()
+    if previous is not None and previous.open_id == open_id:
+        # Loading the host's workflow again keeps it, so whether the host opened it doesn't change.
+        opened_by_host = previous.opened_by_host
+    elif previous is not None and previous.opened_by_host:
+        await _close_previous(previous)
+
+    loaded_workflow.record(open_id, workflow_id, opened_by_host=opened_by_host)
+    # A load replaces the graph a previous verdict described.
+    run_outcome.clear()
 
     declared_shape = shape.workflow_shape(entry)
     with loaded_workflow.bound():
@@ -154,3 +144,14 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
         unavailable=unavailable,
         result_details=f"Loaded workflow '{workflow_id}' for a host client.",
     )
+
+
+async def _close_previous(previous: loaded_workflow.LoadedWorkflow) -> None:
+    """Close the workflow the host opened for its previous load. One it found open stays open."""
+    closed = await engine.request(CloseWorkflowRequest(workflow_id=previous.open_id), CloseWorkflowResultSuccess)
+    if closed.value is None:
+        logger.warning(
+            "Nuke host API: loading another workflow left '%s', which Nuke opened before, open: %s",
+            previous.name,
+            closed.details,
+        )

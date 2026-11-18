@@ -350,6 +350,7 @@ class TestSetCurrentProject:
                     control_nodes=["a"], resolving_nodes=[], involved_nodes=["a"], result_details="running"
                 ),
             },
+            loaded="wf1",
         )
 
         result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))

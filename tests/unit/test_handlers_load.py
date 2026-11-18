@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from griptape_nodes.retained_mode.events.context_events import OpenWorkflowRequest, OpenWorkflowResultFailure
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -25,8 +26,6 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultFailure,
     ListAllWorkflowsResultSuccess,
-    RunWorkflowFromRegistryRequest,
-    RunWorkflowFromRegistryResultFailure,
 )
 
 from nuke_host_api import engine, flow_run, loaded_workflow, run_outcome
@@ -45,11 +44,11 @@ BUSY_FLOW = GetFlowStateResultSuccess(
 
 
 def _loaded(engine: Any) -> bool:
-    return any(isinstance(request, RunWorkflowFromRegistryRequest) for request in engine.requests)
+    return any(isinstance(request, OpenWorkflowRequest) for request in engine.requests)
 
 
 class TestLoadWorkflow:
-    async def test_a_workflow_id_is_loaded_with_a_clean_slate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_workflow_id_is_opened(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, load_responses())
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
@@ -57,9 +56,8 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         assert result.workflow_id == "wf1"
         assert result.name == "WF One"
-        load = next(r for r in engine.requests if isinstance(r, RunWorkflowFromRegistryRequest))
-        assert load.workflow_name == "wf1"
-        assert load.run_with_clean_slate is True
+        opened = next(r for r in engine.requests if isinstance(r, OpenWorkflowRequest))
+        assert opened.workflow_name == "wf1"
 
     async def test_a_load_forgets_the_previous_graphs_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Reloading the same id still discards the graph the verdict described."""
@@ -200,18 +198,26 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultFailure)
         assert engine.requests == []
 
-    async def test_refuses_while_the_engine_is_executing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Loading discards the running graph, and the host would still be told it succeeded."""
-        engine = use_engine(monkeypatch, load_responses({GetFlowStateRequest: BUSY_FLOW}))
+    async def test_refuses_while_the_hosts_workflow_is_executing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Loading replaces the workflow the host's run belongs to, and the host would lose track of it."""
+        engine = use_engine(monkeypatch, load_responses({GetFlowStateRequest: BUSY_FLOW}), loaded="wf0")
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultFailure)
+        assert result.engine_state_cleared is False
         assert not _loaded(engine)
 
-    async def test_an_unknown_id_is_refused_before_the_engine_state_is_cleared(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_another_workflows_run_does_not_block_a_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With nothing loaded there is no host run to wait for, whatever an editor tab is running."""
+        engine = use_engine(monkeypatch, load_responses({GetFlowStateRequest: BUSY_FLOW}))
+        engine.open_workflows.open("editor-tab")
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+
+    async def test_an_unknown_id_is_refused_before_anything_is_opened(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The registry is read first for exactly this reason."""
         engine = use_engine(monkeypatch, load_responses())
 
@@ -242,11 +248,7 @@ class TestLoadWorkflow:
         engine = use_engine(
             monkeypatch,
             load_responses(
-                {
-                    RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(
-                        result_details="the workflow file is missing"
-                    )
-                }
+                {OpenWorkflowRequest: OpenWorkflowResultFailure(result_details="the workflow file is missing")}
             ),
         )
 
@@ -259,30 +261,25 @@ class TestLoadWorkflow:
             "must not read values off a graph it never loaded"
         )
 
-    async def test_a_load_the_engine_refuses_reports_that_the_previous_graph_is_already_gone(
+    async def test_a_load_the_engine_refuses_keeps_the_previous_workflow_loaded(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The previous workflow is closed before the engine builds the graph, so this failure costs.
-
-        A host that read the refusal as "nothing changed" would keep showing knobs for a graph
-        the engine no longer holds, and the artist whose comp was discarded gets no signal.
-        """
-        loaded_workflow.record("wf0-open", "wf0")
+        """The new workflow is opened before the previous one is closed, so a failed open costs nothing."""
         engine = use_engine(
             monkeypatch,
-            load_responses(
-                {RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(result_details="library missing")}
-            ),
+            load_responses({OpenWorkflowRequest: OpenWorkflowResultFailure(result_details="library missing")}),
+            loaded="wf0",
         )
-        engine.open_workflows.open("wf0-open")
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultFailure)
-        assert result.engine_state_cleared is True
-        assert "closed" in str(result.result_details)
-        assert engine.open_workflows.find("wf0-open") is None
-        assert loaded_workflow.current() is None
+        assert result.engine_state_cleared is False
+        assert "library missing" in str(result.result_details)
+        assert engine.open_workflows.find("wf0-open") is not None
+        loaded = loaded_workflow.current()
+        assert loaded is not None
+        assert loaded.name == "wf0"
 
     @pytest.mark.parametrize(
         ("request_payload", "overrides"),
@@ -290,7 +287,6 @@ class TestLoadWorkflow:
             (NukeLoadWorkflowRequest(workflow_id="ghost"), {}),
             (NukeLoadWorkflowRequest(), {}),
             (NukeLoadWorkflowRequest(workflow_id="wf1", file_path="/shots/other.py"), {}),
-            (NukeLoadWorkflowRequest(workflow_id="wf1"), {GetFlowStateRequest: BUSY_FLOW}),
             (
                 NukeLoadWorkflowRequest(file_path="/tmp/notes.txt"),
                 {ImportWorkflowRequest: ImportWorkflowResultFailure(result_details="not a workflow file")},
@@ -315,7 +311,7 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultFailure)
         assert result.engine_state_cleared is False
 
-    async def test_a_clean_load_costs_four_engine_requests_plus_one_per_declared_parameter(
+    async def test_a_clean_load_costs_two_engine_requests_plus_one_per_declared_parameter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The cost scales with the workflow, which is why no fixed number is documented."""
@@ -325,7 +321,7 @@ class TestLoadWorkflow:
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         declared = len(result.inputs) + len(result.outputs)
-        assert len(engine.requests) == 4 + declared
+        assert len(engine.requests) == 2 + declared
         assert sum(isinstance(r, GetParameterValueRequest) for r in engine.requests) == declared
 
     async def test_a_file_path_load_costs_one_engine_request_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -334,7 +330,7 @@ class TestLoadWorkflow:
         result = await handle_load_workflow(NukeLoadWorkflowRequest(file_path="/shots/sq010/comp.py"))
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
-        assert len(engine.requests) == 5 + len(result.inputs) + len(result.outputs)
+        assert len(engine.requests) == 3 + len(result.inputs) + len(result.outputs)
 
     async def test_a_parameter_the_engine_will_not_answer_for_is_reported_not_omitted(
         self, monkeypatch: pytest.MonkeyPatch

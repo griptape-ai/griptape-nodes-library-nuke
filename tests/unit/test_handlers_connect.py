@@ -274,8 +274,8 @@ async def test_a_refusal_reports_the_workflow_the_engine_is_running(monkeypatch:
             GetFlowStateRequest: GetFlowStateResultSuccess(
                 control_nodes=[], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="ok"
             ),
-            GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="wf1", result_details="ok"),
         },
+        loaded="wf1",
     )
     host_claim.claim("Nuke shot_040", force=False)
     result = await handle_connect(NukeConnectRequest(client_name="Nuke shot_112"))

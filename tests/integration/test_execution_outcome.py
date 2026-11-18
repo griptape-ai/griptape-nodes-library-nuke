@@ -18,8 +18,10 @@ from nuke_host_api.events import (
     NukeExecuteWorkflowRequest,
     NukeExecuteWorkflowResultSuccess,
     NukeExecutionStateEvent,
+    NukeLoadWorkflowRequest,
+    NukeLoadWorkflowResultSuccess,
 )
-from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow
+from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow, handle_load_workflow
 from nuke_host_api.protocol import ExecutionState
 from tests.detached_run import settled
 
@@ -35,6 +37,12 @@ def _data_node() -> BaseNode:
     node = GriptapeNodes.ObjectManager().attempt_get_object_by_name_as_type(DATA_NODE, BaseNode)
     assert node is not None
     return node
+
+
+async def _load(workflow_id: str) -> None:
+    """Load the workflow the builder saved, which the host's verbs then act on."""
+    result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id=workflow_id))
+    assert isinstance(result, NukeLoadWorkflowResultSuccess), result.result_details
 
 
 @pytest.fixture
@@ -55,6 +63,7 @@ async def test_a_clean_run_is_published_as_succeeded(
     tmp_path: Any, monkeypatch: Any, verdicts: list[NukeExecutionStateEvent]
 ) -> None:
     build_start_canary_end_flow(tmp_path, monkeypatch, file_name="outcome_clean", data_node_name=DATA_NODE)
+    await _load("outcome_clean")
 
     result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
     assert isinstance(result, NukeExecuteWorkflowResultSuccess), result
@@ -67,6 +76,7 @@ async def test_a_node_error_is_published_as_failed(
     tmp_path: Any, monkeypatch: Any, verdicts: list[NukeExecutionStateEvent]
 ) -> None:
     build_start_canary_end_flow(tmp_path, monkeypatch, file_name="outcome_error", data_node_name=DATA_NODE)
+    await _load("outcome_error")
     node = _data_node()
 
     def raise_boom(*args: Any, **kwargs: Any) -> Any:
@@ -87,6 +97,7 @@ async def test_a_mid_run_cancel_is_published_as_cancelled(
     tmp_path: Any, monkeypatch: Any, verdicts: list[NukeExecutionStateEvent]
 ) -> None:
     build_start_canary_end_flow(tmp_path, monkeypatch, file_name="outcome_cancel", data_node_name=DATA_NODE)
+    await _load("outcome_cancel")
     node = _data_node()
 
     started = threading.Event()
