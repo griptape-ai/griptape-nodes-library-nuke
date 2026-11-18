@@ -42,11 +42,6 @@ def record(open_id: str, name: str, *, opened_by_host: bool) -> None:
     _LOADED = LoadedWorkflow(open_id=open_id, name=name, opened_by_host=opened_by_host)
 
 
-def forget() -> None:
-    global _LOADED  # noqa: PLW0603
-    _LOADED = None
-
-
 def current() -> LoadedWorkflow | None:
     """The host's workflow, or None when it loaded none or the workflow was closed elsewhere."""
     if _LOADED is None or engine.open_workflow(_LOADED.open_id) is None:
