@@ -143,37 +143,6 @@ class TestTopLevelFlowName:
         assert await engine.top_level_flow_name() is None
 
 
-class TestWorkflowEntry:
-    async def test_a_known_id_returns_its_entry(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(
-            monkeypatch,
-            {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok")},
-        )
-        assert await engine.workflow_entry("wf1") == WORKFLOW_TABLE["wf1"]
-
-    async def test_an_unknown_id_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(
-            monkeypatch,
-            {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=WORKFLOW_TABLE, result_details="ok")},
-        )
-        assert await engine.workflow_entry("ghost") is None
-
-    async def test_an_unreadable_registry_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(monkeypatch, {ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="gone")})
-        assert await engine.workflow_entry("wf1") is None
-
-    async def test_a_malformed_entry_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_engine(
-            monkeypatch,
-            {
-                ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
-                    workflows={"wf1": "not a dict"}, result_details="ok"
-                )
-            },
-        )
-        assert await engine.workflow_entry("wf1") is None
-
-
 class TestLookupWorkflow:
     """An unreadable registry is worth retrying and an unknown id never is.
 

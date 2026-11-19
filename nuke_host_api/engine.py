@@ -26,6 +26,8 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultSuccess,
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultSuccess,
 )
@@ -160,8 +162,9 @@ async def lookup_workflow(workflow_id: str) -> WorkflowLookup:
     return WorkflowLookup(entry=entry if isinstance(entry, dict) else None, registry_readable=True)
 
 
-async def workflow_entry(workflow_id: str) -> dict | None:
-    return (await lookup_workflow(workflow_id)).entry
+async def workflow_shape(workflow_name: str) -> Attempt[GetWorkflowShapeResultSuccess]:
+    """The bound workflow's inputs and outputs as its graph stands now; the name only labels messages."""
+    return await request(GetWorkflowShapeRequest(workflow_name=workflow_name), GetWorkflowShapeResultSuccess)
 
 
 async def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:

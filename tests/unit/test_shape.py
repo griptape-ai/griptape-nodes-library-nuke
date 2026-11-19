@@ -206,7 +206,7 @@ class TestDeclaredParameters:
 
 class TestInputParameterTypes:
     def test_only_input_side_data_parameters_are_listed_with_their_engine_type(self) -> None:
-        assert shape.input_parameter_types({"workflow_shape": SHAPE}) == {
+        assert shape.input_parameter_types(SHAPE) == {
             ("Start Flow", "topic"): "str",
             ("Start Flow", "plate"): "ImageUrlArtifact",
         }
@@ -223,7 +223,7 @@ class TestInputParameterTypes:
 
         monkeypatch.setattr(shape, "normalize_value", explode)
 
-        assert shape.input_parameter_types({"workflow_shape": SHAPE})
+        assert shape.input_parameter_types(SHAPE)
 
 
 class TestIsRunnable:

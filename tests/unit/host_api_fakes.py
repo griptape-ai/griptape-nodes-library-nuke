@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from griptape_nodes.node_library.workflow_registry import WorkflowShape
 from griptape_nodes.retained_mode.events.app_events import (
     AppJoinSessionRequest,
     AppJoinSessionResultFailure,
@@ -49,6 +50,8 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultSuccess,
     ImportWorkflowRequest,
     ImportWorkflowResultSuccess,
     ListAllWorkflowsRequest,
@@ -186,6 +189,9 @@ class FakeEngine:
                     has_active_flow=True,
                 )
                 return OpenWorkflowResultSuccess(open_workflow=info, already_open=already_open, result_details="opened")
+            # The live graph of every open workflow declares SHAPE unless a test says otherwise.
+            if isinstance(request, GetWorkflowShapeRequest):
+                return GetWorkflowShapeResultSuccess(workflow_shape=WorkflowShape(**SHAPE), result_details="shape")
             if isinstance(request, CloseWorkflowRequest):
                 self.open_workflows.close(request.workflow_id)
                 return CloseWorkflowResultSuccess(

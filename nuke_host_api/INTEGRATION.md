@@ -741,10 +741,17 @@ the declared parameters and their current values, for both sides, in one reply. 
 before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
 `NukeGetExecutionStateRequest` can answer for the workflow a host means.
 
-**Switches the host's workflow.** Loading opens the requested workflow, or takes it as it is,
-unsaved edits included, when an editor user already has it open. It then closes the workflow
-this host loaded before, if this host opened it. Other open workflows stay open. Confirm with
-the artist before sending it. A failed load leaves the previous workflow loaded.
+**Switches the host's workflow.** Loading opens the requested workflow from its file. Loading
+the workflow this host opened again reopens it from its file, which resets its values and picks up
+changes on disk. A workflow an editor user already has open is taken as it is, unsaved edits
+included, and never closed. Any other workflow this host opened before is closed once the new one
+is open. Other open workflows stay open. Confirm with the artist before sending it. A failed load
+leaves the previous workflow loaded, except a reload whose reopen fails, below.
+
+The `inputs` and `outputs` a load reports are read from the graph as it stands, so an editor
+user's unsaved Start Flow and End Flow edits count. `NukeDescribeWorkflowRequest` reads the
+saved file instead, so the two can differ. Execute and the parameter-value verbs check against the
+graph as it stands too.
 
 One case still loses work. If an editor user opens the workflow this host loaded after the host
 opened it, both act on the same open workflow, and the host's next load closes it, with any edits
@@ -853,17 +860,19 @@ Refused, and nothing is loaded:
 | The file cannot be imported | the engine's own reason |
 | The id is not registered | that no workflow with that name exists |
 | The registry cannot be read | that the engine could not read it, which is worth retrying |
+| The engine would not close this host's copy to reopen it | the engine's own reason |
 | The engine could not open the workflow | the engine's own reason |
 
 Every row leaves the loaded graph exactly as it was, so the knobs a host is showing still match
-what the engine holds and a retry is free. A `file_path` request is the one that touches
+what the engine holds and a retry is free, except one: a reload of this host's own workflow closes
+it before reopening it, so a reopen that fails leaves nothing loaded. A `file_path` request is the one that touches
 anything else: the file is imported and registered before the rows below it are checked, so a
 refusal there can leave a new registry entry behind.
 
 | `NukeLoadWorkflowResultFailure` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The id asked for, or the one resolved from `file_path`. Empty when the request never got far enough to name one |
-| `engine_state_cleared` | `bool` | Always `false`: a failed load leaves the previous workflow loaded |
+| `engine_state_cleared` | `bool` | `true` only when a reload closed this host's workflow and the reopen failed, so nothing is loaded. Drop the knobs and tell the artist |
 
 ### NukeExecuteWorkflowRequest
 
@@ -948,23 +957,15 @@ refused. Split on that rather than on counting kinds: a reason the host did not 
 the engine's.
 
 Sending inputs to a loaded graph that declares no input parameters is refused instead, rather
-than rejecting every one of them. The case a host meets is an unsaved graph: a host can load the
-graph an editor user is working on, which lives in the engine's registry under an `unsaved:` key
-with no declared shape. Rejecting each input
-there would hand the host its own parameter names back as if they were wrong, while the run
-went ahead on the author's values. The refusal says to save the workflow and load it by id, or
-to send no inputs and run it as it stands.
+than rejecting every one of them. A graph declares its inputs as parameters on a Start Flow node,
+and declares none without both a Start Flow and an End Flow node. Rejecting each input there
+would hand the host its own parameter names back as if they were wrong, while the run went ahead
+on the author's values. The refusal says what the graph needs, or to send no inputs and run it as
+it stands.
 
-A registry the engine cannot read gets a separate refusal, naming a retry, and so does a loaded
-id that is no longer in the registry at all, naming a reload. All three leave the same empty
-allow-list behind, so they are easy to conflate, but only one of them is the host's to fix by
-saving: a workflow that declares nothing still will next time, while the other two are engine
-state that moved. A host told to save a workflow it already saved has been sent down the wrong
-recovery path.
-
-None of the three fires when `inputs` carries no parameters, whether it is `{}` or only empty
+The refusal doesn't fire when `inputs` carries no parameters, whether it is `{}` or only empty
 node entries like `{"Start Flow": {}}`. With nothing to check, what the workflow declares
-does not bear on the run, so a graph with no declared shape still executes.
+does not bear on the run, so a graph that declares nothing still executes.
 
 A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.
 Honouring it would make execute destructive; ignoring it would run a workflow the host did not
@@ -1156,13 +1157,10 @@ for `"Expected an object of parameters."`, `"Not a declared input parameter of t
 workflow."`, and how the engine's own reason for refusing a declared pair reaches the host.
 Sending a request with no pair to act on is refused here, unlike execute, because there is
 nothing else for this verb to do; `NukeExecuteWorkflowRequest` treats empty inputs as "run the
-graph as it stands." A loaded graph that declares no input parameters, and a registry the
-engine cannot read, are refused the same two causes execute refuses them for, worded without
-the fallback execute offers: `NukeExecuteWorkflowRequest`'s versions of these two refusals end
-with "or send no inputs to run the graph as it stands," and this verb's do not, since sending
-no inputs is exactly what this verb's own empty-request refusal turns away. A loaded id no
-longer in the registry is refused the same third way execute refuses it: that refusal names no
-fallback either way.
+graph as it stands." A loaded graph that declares no input parameters is refused for the
+same cause execute refuses it for, worded without the fallback execute offers: execute's version
+ends with "or send no inputs to run the graph as it stands," and this verb's does not, since
+sending no inputs is exactly what this verb's own empty-request refusal turns away.
 
 Refused while the engine is executing. The engine's own scheduler decides when a node's
 parameter is actually read, so a value set mid-run cannot be told apart from one that lands

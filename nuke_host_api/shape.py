@@ -122,9 +122,9 @@ def _default_value(parameter: dict) -> Any:
         return [] if is_list_type(parameter.get("type")) else None
 
 
-def input_parameter_types(entry: dict) -> dict[tuple[str, str], str | None]:
+def input_parameter_types(declared_shape: dict) -> dict[tuple[str, str], str | None]:
     """Declared engine type by (node, parameter). Avoids normalizing defaults, which issues engine requests."""
     return {
         (node_name, parameter_name): parameter.get("type")
-        for node_name, parameter_name, parameter in data_parameters(workflow_shape(entry).get("inputs"))
+        for node_name, parameter_name, parameter in data_parameters(declared_shape.get("inputs"))
     }

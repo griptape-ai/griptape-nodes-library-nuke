@@ -80,42 +80,22 @@ class InputRefusal(NamedTuple):
 
 def unaddressable_inputs_reason(
     loaded_id: str,
-    found: engine.WorkflowLookup,
     declared: Collection[tuple[str, str]],
     *,
     no_inputs_remedy: str | None = None,
 ) -> InputRefusal | None:
-    """Distinguish registry failure, stale IDs, and workflows with no declared inputs."""
-    if not found.registry_readable:
-        retry_clause = "Retry." if no_inputs_remedy is None else f"Retry, or {no_inputs_remedy}."
-        return InputRefusal(
-            because=(
-                f"the engine could not read the workflow registry, so what '{loaded_id}' declares as inputs is "
-                f"unknown and the inputs sent could not be checked against it. {retry_clause}"
-            ),
-            error=RuntimeError,
-        )
-    # Context can retain an ID after the registry drops its entry.
-    if found.entry is None:
-        return InputRefusal(
-            because=(
-                f"the loaded workflow '{loaded_id}' is no longer in the registry, so the inputs sent could not "
-                f"be checked against what it declares. Load it again with NukeLoadWorkflowRequest."
-            ),
-            error=KeyError,
-        )
-    # Unsaved editor graphs have registry entries but no declared shape.
-    if not declared:
-        alternative_clause = "." if no_inputs_remedy is None else f", or {no_inputs_remedy}."
-        return InputRefusal(
-            because=(
-                f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
-                f"could be applied. An unsaved graph an editor user is working on has no declared shape: save "
-                f"it and load it by id{alternative_clause}"
-            ),
-            error=RuntimeError,
-        )
-    return None
+    """Refuse inputs for a workflow that declares none, rather than reject each one as unknown."""
+    if declared:
+        return None
+    alternative_clause = "." if no_inputs_remedy is None else f", or {no_inputs_remedy}."
+    return InputRefusal(
+        because=(
+            f"the loaded workflow '{loaded_id}' declares no input parameters, so none of the inputs sent "
+            f"could be applied. A workflow declares its inputs as parameters on a Start Flow node, and needs "
+            f"an End Flow node too{alternative_clause}"
+        ),
+        error=RuntimeError,
+    )
 
 
 async def apply_inputs(

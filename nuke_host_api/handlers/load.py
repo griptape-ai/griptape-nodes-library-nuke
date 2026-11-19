@@ -104,22 +104,45 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
             workflow_id=workflow_id,
         )
 
-    # Opened first, so a failed open leaves the host's previous workflow loaded. A workflow already
-    # open, such as an editor tab, comes back as it is, unsaved edits included.
+    previous = loaded_workflow.current()
+    # The host's own copy is closed first so it reopens from its file, which resets values and picks
+    # up changes on disk. An editor tab's copy is never closed.
+    reloading = False
+    if previous is not None and previous.opened_by_host and previous.name == workflow_id:
+        closed = await engine.request(CloseWorkflowRequest(workflow_id=previous.open_id), CloseWorkflowResultSuccess)
+        if closed.value is None:
+            return failure(
+                NukeLoadWorkflowResultFailure,
+                attempted=attempted,
+                because=(
+                    "the engine would not close the copy loaded before, so it could not reopen it from its "
+                    f"file. {closed.details}"
+                ),
+                workflow_id=workflow_id,
+            )
+        loaded_workflow.forget()
+        previous = None
+        reloading = True
+
+    # Opened before any other workflow is closed, so a failed open leaves the host's previous
+    # workflow loaded. A workflow already open in an editor tab comes back as it is.
     opened = await engine.request(OpenWorkflowRequest(workflow_name=workflow_id), OpenWorkflowResultSuccess)
     if opened.value is None:
+        because = f"the engine could not open it. {opened.details}"
+        if reloading:
+            because = f"{because} The copy loaded before was closed to reopen it, so nothing is loaded now."
         return failure(
             NukeLoadWorkflowResultFailure,
             attempted=attempted,
-            because=f"the engine could not open it. {opened.details}",
+            because=because,
             workflow_id=workflow_id,
+            engine_state_cleared=reloading,
         )
     open_id = opened.value.open_workflow.workflow_id
     opened_by_host = not opened.value.already_open
 
-    previous = loaded_workflow.current()
     if previous is not None and previous.open_id == open_id:
-        # Loading the host's workflow again keeps it, so whether the host opened it doesn't change.
+        # An editor tab's copy loaded again stays the editor's.
         opened_by_host = previous.opened_by_host
     elif previous is not None and previous.opened_by_host:
         await _close_previous(previous)
@@ -128,7 +151,7 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
     # A load replaces the graph a previous verdict described.
     run_outcome.clear()
 
-    declared_shape = shape.workflow_shape(entry)
+    declared_shape = await loaded_workflow.declared_shape()
     with loaded_workflow.bound():
         input_values, output_values, unavailable = await parameter_values.read_sections(
             declared_shape, list(PARAMETER_SECTIONS)

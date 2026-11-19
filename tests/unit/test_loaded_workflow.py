@@ -1,6 +1,7 @@
 """Tests for acting on the host's workflow while the engine has others open.
 
-Load opens the workflow it names, or takes it as it is when an editor tab already has it open, and
+Load opens the workflow it names, reopening the host's own copy from its file, or takes it as it is
+when an editor tab already has it open, and
 every verb names that workflow until the next load. With none loaded, verbs report it rather than
 act on another workflow.
 """
@@ -16,6 +17,7 @@ from griptape_nodes.retained_mode.events.context_events import (
     CloseWorkflowResultFailure,
     GetWorkflowContextRequest,
     OpenWorkflowRequest,
+    OpenWorkflowResultFailure,
     OpenWorkflowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.execution_events import GetFlowStateRequest, StartFlowRequest
@@ -30,6 +32,7 @@ from nuke_host_api.events import (
     NukeGetParameterValuesResultFailure,
     NukeGetParameterValuesResultSuccess,
     NukeLoadWorkflowRequest,
+    NukeLoadWorkflowResultFailure,
     NukeLoadWorkflowResultSuccess,
 )
 from nuke_host_api.handlers import handle_execute_workflow, handle_get_parameter_values, handle_load_workflow
@@ -114,17 +117,66 @@ class TestLoad:
 
         assert _closes(engine) == []
 
-    async def test_loading_the_hosts_workflow_again_keeps_it(self, engine: FakeEngine) -> None:
-        """No reload from disk, so edits made in an editor tab survive."""
+    async def test_reloading_a_workflow_the_host_opened_reopens_it_from_its_file(self, engine: FakeEngine) -> None:
+        """Closed before the open, so a reload resets values and picks up changes on disk."""
         engine.open_workflows.open("wf1-open")
         loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        kinds = [type(r) for r in engine.requests if isinstance(r, (CloseWorkflowRequest, OpenWorkflowRequest))]
+        assert kinds == [CloseWorkflowRequest, OpenWorkflowRequest]
+        assert _closes(engine) == ["wf1-open"]
+        assert loaded_workflow.current() == loaded_workflow.LoadedWorkflow(
+            open_id="wf1-open", name="wf1", opened_by_host=True
+        )
+
+    async def test_reloading_a_workflow_an_editor_tab_has_open_keeps_it(self, engine: FakeEngine) -> None:
+        """The editor's copy is never closed, so edits made there survive."""
+        engine.open_workflows.open("wf1-open")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=False)
 
         await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert _closes(engine) == []
         assert loaded_workflow.current() == loaded_workflow.LoadedWorkflow(
+            open_id="wf1-open", name="wf1", opened_by_host=False
+        )
+
+    async def test_a_refused_close_on_reload_refuses_the_load_and_keeps_the_workflow(
+        self, engine: FakeEngine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine.open_workflows.open("wf1-open")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
+        monkeypatch.setitem(
+            engine._responses, CloseWorkflowRequest, CloseWorkflowResultFailure(result_details="still running")
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultFailure)
+        assert result.engine_state_cleared is False
+        assert not any(isinstance(r, OpenWorkflowRequest) for r in engine.requests)
+        assert loaded_workflow.current() == loaded_workflow.LoadedWorkflow(
             open_id="wf1-open", name="wf1", opened_by_host=True
         )
+
+    async def test_a_failed_reopen_leaves_nothing_loaded_and_says_so(
+        self, engine: FakeEngine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine.open_workflows.open("wf1-open")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
+        monkeypatch.setitem(
+            engine._responses, OpenWorkflowRequest, OpenWorkflowResultFailure(result_details="missing library")
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultFailure)
+        assert result.engine_state_cleared is True
+        assert "nothing is loaded now" in str(result.result_details)
+        assert loaded_workflow.current() is None
 
     async def test_a_refused_close_still_loads_the_new_workflow(
         self, engine: FakeEngine, monkeypatch: pytest.MonkeyPatch

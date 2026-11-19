@@ -137,11 +137,14 @@ loaded, and every verb but load runs bound to it, so its engine requests name it
 recorded, or after the workflow is closed elsewhere or lost to an engine restart, verbs report
 that nothing is loaded. Load opens the workflow it names with `OpenWorkflowRequest`, which
 returns a workflow already open, such as an editor tab, as it is, unsaved edits included, so
-Nuke and the editor act on one graph. The next load closes the host's previous workflow only if
-the host opened it. The execution bridge drops events emitted by any other open workflow, so an
+Nuke and the editor act on one graph. A workflow the host opened is closed before it is loaded
+again, so the reload reopens it from its file. The next load closes the host's previous workflow
+only if the host opened it. The parameters every verb reports and accepts come from
+`GetWorkflowShapeRequest` on the loaded graph rather than the registry, whose shape is the one
+last saved. The execution bridge drops events emitted by any other open workflow, so an
 editor run in another tab never reaches the host as a verdict on its own graph.
 
-The engine has no load-and-describe entry point. Loading uses two engine requests plus one per declared parameter: `ListAllWorkflowsRequest` reads the registry, `OpenWorkflowRequest` opens the graph, and values require one `GetParameterValueRequest` each. A `file_path` adds `ImportWorkflowRequest`, which registers an unseen file, and a host with a workflow loaded adds two to check that it isn't running.
+The engine has no load-and-describe entry point. Loading uses three engine requests plus one per declared parameter: `ListAllWorkflowsRequest` checks the id is registered, `OpenWorkflowRequest` opens the graph, `GetWorkflowShapeRequest` reads its parameters as the graph stands, and values require one `GetParameterValueRequest` each. A `file_path` adds `ImportWorkflowRequest`, which registers an unseen file, a host with a workflow loaded adds two to check that it isn't running, and reloading the host's own workflow adds `CloseWorkflowRequest`.
 
 The reply carries four fields rather than two: `inputs` and `outputs` are exactly
 `describe_workflow`'s parameter lists, and `input_values` and `output_values` are exactly
@@ -158,8 +161,9 @@ registry to reject an unknown id, so a request refused on its own arguments leav
 graph intact. A `file_path` is imported and registered before those checks run, so a refusal
 there can leave a registry entry behind, never a different graph. The new workflow is opened
 before the previous one is closed, so a workflow that fails inside its own file leaves the
-previous one loaded too. `engine_state_cleared` is always false, and stays in the reply for hosts
-that read it.
+previous one loaded too. The exception is a reload of the host's own workflow, which closes it
+first so the open builds a fresh copy. If that open fails nothing is loaded, and only that
+failure carries `engine_state_cleared: true`.
 
 ### 3. Execute workflows
 
@@ -222,17 +226,10 @@ declared before they reach the engine, which would otherwise set a parameter on 
 the loaded graph for a caller this transport never authenticated.
 
 By the same rule, inputs sent to a loaded graph that declares no input parameters are refused
-rather than rejected one by one. A host can load the unsaved graph an editor user is working
-on, which the engine keeps in its registry under an `unsaved:` key with no declared shape. Rejecting each input there would report the
-host's own parameter names back at it as if they were wrong, while the run went ahead on the
-author's values.
-
-An unreadable registry, and an id that has vanished from a readable one, leave the same empty
-allow-list for unrelated reasons, and each gets a refusal of its own: retry the registry, or
-load the workflow again. A workflow that declares nothing will still declare nothing on the
-next call; the other two are not the host's doing. Telling a host to save a workflow it already
-saved sends it down the wrong recovery path. None of the three fires when no inputs were sent,
-because then there is nothing to check against the allow-list.
+rather than rejected one by one. A graph with no Start Flow or End Flow node declares none.
+Rejecting each input there would report the host's own parameter names back at it as if they
+were wrong, while the run went ahead on the author's values. The refusal doesn't fire when no
+inputs were sent, because then there is nothing to check against the allow-list.
 
 `NukeDescribeWorkflowRequest` carries each parameter's `is_list`, `default_value`, `choices`,
 `tooltip`, `settable`, and `hidden` alongside its type. The default is the value a reset-to-default
@@ -637,7 +634,7 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   refused. The escape is `NukeCancelExecutionRequest`, and whether cancel actually clears a node
   wedged inside `process()` is unverified. If it does not, only an engine restart recovers.
 - **Loading switches the host's workflow, and nothing but a host's own UI guards it.**
-  `NukeLoadWorkflowRequest` closes the host's previous workflow if the host opened it, with any
+  `NukeLoadWorkflowRequest` closes, or reopens from its file, the host's previous workflow if the host opened it, with any
   edits an editor user made to it there, even in a tab opened after the host's load. The engine
   doesn't yet report who has a workflow open or whether it has unsaved changes
   (griptape-ai/griptape-nodes-engine#6378). A workflow an editor user had open first is left

@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 import pytest
+from griptape_nodes.node_library.workflow_registry import WorkflowShape
 from griptape_nodes.retained_mode.events.context_events import (
     GetWorkflowContextRequest,
     GetWorkflowContextSuccess,
@@ -30,9 +31,11 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueResultFailure,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultFailure,
+    GetWorkflowShapeResultSuccess,
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultFailure,
-    ListAllWorkflowsResultSuccess,
     RunWorkflowFromRegistryRequest,
 )
 
@@ -51,20 +54,14 @@ from nuke_host_api.events import (
 from nuke_host_api.handlers import handle_cancel_execution, handle_execute_workflow, handle_get_execution_state
 from nuke_host_api.protocol import ExecutionState
 from tests.detached_run import settled
-from tests.unit.host_api_fakes import WORKFLOW_TABLE, execute_responses, use_engine
+from tests.unit.host_api_fakes import SHAPE, execute_responses, use_engine
 
 NOTHING_LOADED = {GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name=None, result_details="ok")}
 NO_WORKFLOW_IN_CONTEXT = {GetWorkflowContextRequest: GetWorkflowContextSuccess(workflow_name="", result_details="ok")}
 
-# The engine keeps the graph an editor user is working on in its registry under an "unsaved:"
-# key with no declared shape, and GetWorkflowContextRequest answers with that key.
-UNSAVED_GRAPH_LOADED = {
-    GetWorkflowContextRequest: GetWorkflowContextSuccess(
-        workflow_name="unsaved:9f0c", is_saved=False, result_details="ok"
-    ),
-    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
-        workflows={**WORKFLOW_TABLE, "unsaved:9f0c": {"name": "Untitled"}}, result_details="ok"
-    ),
+# A graph with no Start Flow or End Flow node declares no inputs or outputs.
+SHAPELESS_GRAPH = {
+    GetWorkflowShapeRequest: GetWorkflowShapeResultFailure(result_details="Workflow 'draft' does not have a StartNode.")
 }
 
 
@@ -233,27 +230,54 @@ class TestExecuteWorkflow:
     async def test_inputs_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An unsaved editor graph is in the registry with no shape, so nothing could be applied.
+        """A graph with no Start Flow node declares no inputs, so nothing could be applied.
 
         Starting anyway would report success while running the author's values, and every input
         would come back rejected for a reason that reads like the host named the wrong
         parameters.
         """
-        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED), loaded="unsaved:9f0c")
+        engine = use_engine(monkeypatch, execute_responses(SHAPELESS_GRAPH), loaded="draft")
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {"topic": "hello"}}))
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
-        assert result.workflow_id == "unsaved:9f0c"
+        assert result.workflow_id == "draft"
         assert "declares no input parameters" in str(result.result_details)
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
         assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
+
+    async def test_an_input_the_live_graph_declares_is_applied_before_it_is_saved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Inputs come from the graph as it stands, so a Start Flow parameter an editor user added counts."""
+        live = {**SHAPE, "inputs": {"Start Flow": {**SHAPE["inputs"]["Start Flow"], "mood": {"type": "str"}}}}
+        engine = use_engine(
+            monkeypatch,
+            execute_responses(
+                {
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultSuccess(
+                        workflow_shape=WorkflowShape(**live), result_details="shape"
+                    )
+                }
+            ),
+            loaded="wf1",
+        )
+
+        result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {"mood": "calm"}}))
+        await settled()
+
+        assert isinstance(result, NukeExecuteWorkflowResultSuccess)
+        assert result.applied_inputs == [{"node": "Start Flow", "parameter": "mood"}]
+        assert any(
+            isinstance(request, SetParameterValueRequest) and request.parameter_name == "mood"
+            for request in engine.requests
+        )
 
     async def test_empty_node_entries_run_a_graph_that_declares_no_inputs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Hosts that group inputs by node send an empty entry for a start node with no data parameters."""
-        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED), loaded="unsaved:9f0c")
+        engine = use_engine(monkeypatch, execute_responses(SHAPELESS_GRAPH), loaded="draft")
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": {}}))
         await settled()
@@ -266,40 +290,13 @@ class TestExecuteWorkflow:
     async def test_a_malformed_node_entry_sent_to_a_graph_that_declares_no_inputs_is_refused(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED), loaded="unsaved:9f0c")
+        engine = use_engine(monkeypatch, execute_responses(SHAPELESS_GRAPH), loaded="draft")
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest(inputs={"Start Flow": None}))  # pyright: ignore[reportArgumentType]
 
         assert isinstance(result, NukeExecuteWorkflowResultFailure)
         assert "declares no input parameters" in str(result.result_details)
         assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
-
-    async def test_an_unreadable_registry_is_a_retryable_refusal_not_a_graph_that_declares_nothing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Both produce an empty allow-list, and only one of them is the host's problem to fix.
-
-        Telling a host that a workflow it saved "declares no input parameters" sends it down the
-        unsaved-graph recovery path for something a retry fixes.
-        """
-        engine = use_engine(
-            monkeypatch,
-            execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
-            loaded="wf1",
-        )
-
-        result = await handle_execute_workflow(
-            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
-        )
-
-        assert isinstance(result, NukeExecuteWorkflowResultFailure)
-        details = str(result.result_details)
-        assert "could not read the workflow registry" in details
-        assert "Retry" in details
-        assert "declares no input parameters" not in details, "wf1 does declare one"
-        assert "save it and load it by id" not in details
-        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
-        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
     async def test_an_unreadable_registry_does_not_block_a_run_with_no_inputs(
         self, monkeypatch: pytest.MonkeyPatch
@@ -319,13 +316,12 @@ class TestExecuteWorkflow:
     async def test_a_graph_that_declares_no_inputs_still_runs_when_none_are_sent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Driving a graph an editor user opened is what an empty workflow_id is for."""
-        use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED), loaded="unsaved:9f0c")
+        use_engine(monkeypatch, execute_responses(SHAPELESS_GRAPH), loaded="draft")
 
         result = await handle_execute_workflow(NukeExecuteWorkflowRequest())
 
         assert isinstance(result, NukeExecuteWorkflowResultSuccess)
-        assert result.workflow_id == "unsaved:9f0c"
+        assert result.workflow_id == "draft"
         assert result.applied_inputs == []
         assert result.rejected_inputs == []
 
@@ -376,37 +372,6 @@ class TestExecuteWorkflow:
         assert result.applied_inputs == []
         assert result.rejected_inputs == [{"node": "Start Flow", "parameter": "topic", "reason": "knob is read-only"}]
         assert len(engine.requests) == 6, "five plus the one forwarded input, whatever the engine said about it"
-
-    async def test_a_loaded_id_missing_from_a_readable_registry_is_not_an_unsaved_graph(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A stale context key over a live registry: the engine can drop an entry without popping it.
-
-        Telling a host to save a workflow that is not unsaved names a cause it cannot act on.
-        Worded as NukeGetParameterValuesRequest words the same engine state.
-        """
-        engine = use_engine(
-            monkeypatch,
-            execute_responses(
-                {
-                    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
-                        workflows={k: v for k, v in WORKFLOW_TABLE.items() if k != "wf1"}, result_details="ok"
-                    )
-                }
-            ),
-            loaded="wf1",
-        )
-
-        result = await handle_execute_workflow(
-            NukeExecuteWorkflowRequest(workflow_id="wf1", inputs={"Start Flow": {"topic": "hello"}})
-        )
-
-        assert isinstance(result, NukeExecuteWorkflowResultFailure)
-        details = str(result.result_details)
-        assert "no longer in the registry" in details
-        assert "unsaved" not in details
-        assert not any(isinstance(request, StartFlowRequest) for request in engine.requests)
-        assert not any(isinstance(request, SetParameterValueRequest) for request in engine.requests)
 
     async def test_short_circuits_when_the_loaded_workflow_has_no_top_level_flow(
         self, monkeypatch: pytest.MonkeyPatch

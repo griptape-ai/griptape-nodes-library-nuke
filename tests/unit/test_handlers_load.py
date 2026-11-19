@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from griptape_nodes.node_library.workflow_registry import WorkflowShape
 from griptape_nodes.retained_mode.events.context_events import OpenWorkflowRequest, OpenWorkflowResultFailure
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
@@ -18,8 +19,12 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultFailure,
+    GetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultFailure,
+    GetWorkflowShapeResultSuccess,
     ImportWorkflowRequest,
     ImportWorkflowResultFailure,
     ImportWorkflowResultSuccess,
@@ -36,7 +41,7 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.handlers import handle_load_workflow
 from nuke_host_api.protocol import ParameterSection, ValueType
-from tests.unit.host_api_fakes import WORKFLOW_TABLE, load_responses, respond_to_get_value, use_engine
+from tests.unit.host_api_fakes import SHAPE, WORKFLOW_TABLE, load_responses, respond_to_get_value, use_engine
 
 BUSY_FLOW = GetFlowStateResultSuccess(
     control_nodes=["C1"], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="busy"
@@ -311,7 +316,7 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultFailure)
         assert result.engine_state_cleared is False
 
-    async def test_a_clean_load_costs_two_engine_requests_plus_one_per_declared_parameter(
+    async def test_a_clean_load_costs_three_engine_requests_plus_one_per_declared_parameter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The cost scales with the workflow, which is why no fixed number is documented."""
@@ -321,8 +326,37 @@ class TestLoadWorkflow:
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         declared = len(result.inputs) + len(result.outputs)
-        assert len(engine.requests) == 2 + declared
+        assert len(engine.requests) == 3 + declared
         assert sum(isinstance(r, GetParameterValueRequest) for r in engine.requests) == declared
+
+    async def test_load_reports_the_parameters_of_the_graph_as_it_stands(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An editor tab's unsaved Start Flow parameter is declared, though the saved shape lacks it."""
+        live = {**SHAPE, "inputs": {"Start Flow": {**SHAPE["inputs"]["Start Flow"], "mood": {"type": "str"}}}}
+
+        def respond(request: GetParameterValueRequest) -> Any:
+            if request.parameter_name == "mood":
+                return GetParameterValueResultSuccess(
+                    input_types=["str"], type="str", output_type="str", value="calm", result_details="ok"
+                )
+            return respond_to_get_value(request)
+
+        use_engine(
+            monkeypatch,
+            load_responses(
+                {
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultSuccess(
+                        workflow_shape=WorkflowShape(**live), result_details="shape"
+                    ),
+                    GetParameterValueRequest: respond,
+                }
+            ),
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        assert "mood" in {parameter["parameter"] for parameter in result.inputs}
+        assert "mood" in result.input_values["Start Flow"]
 
     async def test_a_file_path_load_costs_one_engine_request_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, load_responses())
@@ -330,7 +364,7 @@ class TestLoadWorkflow:
         result = await handle_load_workflow(NukeLoadWorkflowRequest(file_path="/shots/sq010/comp.py"))
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
-        assert len(engine.requests) == 3 + len(result.inputs) + len(result.outputs)
+        assert len(engine.requests) == 4 + len(result.inputs) + len(result.outputs)
 
     async def test_a_parameter_the_engine_will_not_answer_for_is_reported_not_omitted(
         self, monkeypatch: pytest.MonkeyPatch
@@ -360,15 +394,19 @@ class TestLoadWorkflow:
             "an unreadable value must not remove the parameter's declaration"
         )
 
-    async def test_a_workflow_with_no_declared_shape_loads_and_reports_nothing(
+    async def test_a_workflow_with_no_start_or_end_node_loads_and_reports_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The engine sends workflow_shape as null for some workflows. It is still loadable."""
         table = {**WORKFLOW_TABLE, "shapeless": {"name": "Shapeless"}}
         engine = use_engine(
             monkeypatch,
             load_responses(
-                {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=table, result_details="ok")}
+                {
+                    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=table, result_details="ok"),
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultFailure(
+                        result_details="Workflow 'shapeless' does not have a StartNode."
+                    ),
+                }
             ),
         )
 

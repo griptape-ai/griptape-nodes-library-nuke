@@ -20,8 +20,9 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueRequest,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultFailure,
     ListAllWorkflowsRequest,
-    ListAllWorkflowsResultFailure,
     ListAllWorkflowsResultSuccess,
 )
 
@@ -147,16 +148,9 @@ class TestGetParameterValues:
         assert set(descriptor) == {"value_type", "value", "engine_type"}
 
 
-# execute_responses() already sets up an idle flow with "wf1" loaded and its declared shape
-# readable, which is exactly the preflight NukeSetParameterValuesRequest shares with
-# NukeExecuteWorkflowRequest.
-UNSAVED_GRAPH_LOADED: dict[type, Any] = {
-    GetWorkflowContextRequest: GetWorkflowContextSuccess(
-        workflow_name="unsaved:9f0c", is_saved=False, result_details="ok"
-    ),
-    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(
-        workflows={"wf1": {"workflow_shape": SHAPE}, "unsaved:9f0c": {"name": "Untitled"}}, result_details="ok"
-    ),
+# A graph with no Start Flow or End Flow node declares no inputs or outputs.
+SHAPELESS_GRAPH: dict[type, Any] = {
+    GetWorkflowShapeRequest: GetWorkflowShapeResultFailure(result_details="Workflow 'draft' does not have a StartNode.")
 }
 
 
@@ -257,36 +251,17 @@ class TestSetParameterValues:
     async def test_values_sent_to_a_graph_that_declares_none_are_refused_not_rejected_one_by_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        engine = use_engine(monkeypatch, execute_responses(UNSAVED_GRAPH_LOADED), loaded="unsaved:9f0c")
+        engine = use_engine(monkeypatch, execute_responses(SHAPELESS_GRAPH), loaded="draft")
 
         result = await handle_set_parameter_values(
             NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}})
         )
 
         assert isinstance(result, NukeSetParameterValuesResultFailure)
-        assert result.workflow_id == "unsaved:9f0c"
+        assert result.workflow_id == "draft"
         details = str(result.result_details)
         assert "declares no input parameters" in details
-        assert details.endswith("save it and load it by id."), (
-            "no dead-end remedy: this verb refuses an empty request too"
-        )
-        assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)
-
-    async def test_an_unreadable_registry_is_a_retryable_refusal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        engine = use_engine(
-            monkeypatch,
-            execute_responses({ListAllWorkflowsRequest: ListAllWorkflowsResultFailure(result_details="registry down")}),
-            loaded="wf1",
-        )
-
-        result = await handle_set_parameter_values(
-            NukeSetParameterValuesRequest(inputs={"Start Flow": {"topic": "hello"}})
-        )
-
-        assert isinstance(result, NukeSetParameterValuesResultFailure)
-        details = str(result.result_details)
-        assert "could not read the workflow registry" in details
-        assert details.endswith("could not be checked against it. Retry."), (
+        assert details.endswith("needs an End Flow node too."), (
             "no dead-end remedy: this verb refuses an empty request too"
         )
         assert not any(isinstance(r, SetParameterValueRequest) for r in engine.requests)

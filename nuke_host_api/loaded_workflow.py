@@ -81,6 +81,18 @@ async def flow_name() -> str | None:
         return await engine.top_level_flow_name()
 
 
+async def declared_shape() -> dict:
+    """Read from the graph, not the registry's last-saved shape, so unsaved edits count; empty with none loaded or no Start or End node."""
+    loaded = current()
+    if loaded is None:
+        return {}
+    with bound():
+        attempt = await engine.workflow_shape(loaded.name)
+    if attempt.value is None:
+        return {}
+    return attempt.value.workflow_shape.model_dump()
+
+
 async def running() -> bool:
     """Whether the host's workflow is running. False when the host loaded none."""
     if _runtime() is None:
