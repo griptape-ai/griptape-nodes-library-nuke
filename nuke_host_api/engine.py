@@ -183,3 +183,12 @@ async def is_running() -> bool:
     if attempt.value is None:
         return False
     return flow_is_running(attempt.value)
+
+
+async def any_workflow_running() -> bool:
+    """Whether any open workflow is running, an editor tab's included."""
+    for workflow in GriptapeNodes.get_instance().open_workflows.all_open():
+        with bind_workflow(workflow):
+            if await is_running():
+                return True
+    return False

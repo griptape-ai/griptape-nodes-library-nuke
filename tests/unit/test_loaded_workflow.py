@@ -194,6 +194,7 @@ class TestLoad:
         assert loaded_workflow.current() == loaded_workflow.LoadedWorkflow(
             open_id="wf1-open", name="wf1", opened_by_host=True
         )
+        assert "Could not close 'wf0'" in str(result.result_details), "the host must learn it is still open"
 
     async def test_load_waits_only_on_the_hosts_own_run(self, engine: FakeEngine) -> None:
         """An editor tab's run is another workflow, so it does not block a load."""

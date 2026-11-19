@@ -122,6 +122,27 @@ def _default_value(parameter: dict) -> Any:
         return [] if is_list_type(parameter.get("type")) else None
 
 
+def with_saved_defaults(live_shape: dict, saved_shape: dict) -> dict:
+    """Restore each input's saved default, since the live graph reports a Start Flow parameter's current value as its default."""
+    live_inputs = live_shape.get("inputs")
+    saved_inputs = saved_shape.get("inputs")
+    if not isinstance(live_inputs, dict) or not isinstance(saved_inputs, dict):
+        return live_shape
+    inputs: dict = {}
+    for node_name, parameters in live_inputs.items():
+        saved_parameters = saved_inputs.get(node_name)
+        if not isinstance(parameters, dict) or not isinstance(saved_parameters, dict):
+            inputs[node_name] = parameters
+            continue
+        inputs[node_name] = {}
+        for parameter_name, parameter in parameters.items():
+            saved = saved_parameters.get(parameter_name)
+            if isinstance(parameter, dict) and isinstance(saved, dict) and "default_value" in saved:
+                parameter = {**parameter, "default_value": saved["default_value"]}
+            inputs[node_name][parameter_name] = parameter
+    return {**live_shape, "inputs": inputs}
+
+
 def input_parameter_types(declared_shape: dict) -> dict[tuple[str, str], str | None]:
     """Declared engine type by (node, parameter). Avoids normalizing defaults, which issues engine requests."""
     return {

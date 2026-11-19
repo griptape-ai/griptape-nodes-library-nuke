@@ -141,17 +141,18 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
     open_id = opened.value.open_workflow.workflow_id
     opened_by_host = not opened.value.already_open
 
+    left_open = None
     if previous is not None and previous.open_id == open_id:
         # An editor tab's copy loaded again stays the editor's.
         opened_by_host = previous.opened_by_host
     elif previous is not None and previous.opened_by_host:
-        await _close_previous(previous)
+        left_open = await _close_previous(previous)
 
     loaded_workflow.record(open_id, workflow_id, opened_by_host=opened_by_host)
     # A load replaces the graph a previous verdict described.
     run_outcome.clear()
 
-    declared_shape = await loaded_workflow.declared_shape()
+    declared_shape = shape.with_saved_defaults(await loaded_workflow.declared_shape(), shape.workflow_shape(entry))
     with loaded_workflow.bound():
         input_values, output_values, unavailable = await parameter_values.read_sections(
             declared_shape, list(PARAMETER_SECTIONS)
@@ -165,16 +166,15 @@ async def _load(request: NukeLoadWorkflowRequest) -> NukeLoadWorkflowResultSucce
         input_values=input_values,
         output_values=output_values,
         unavailable=unavailable,
-        result_details=f"Loaded workflow '{workflow_id}' for a host client.",
+        result_details=" ".join(filter(None, [f"Loaded workflow '{workflow_id}' for a host client.", left_open])),
     )
 
 
-async def _close_previous(previous: loaded_workflow.LoadedWorkflow) -> None:
-    """Close the workflow the host opened for its previous load. One it found open stays open."""
+async def _close_previous(previous: loaded_workflow.LoadedWorkflow) -> str | None:
+    """Close the workflow the host opened for its previous load, returning why it stayed open, if it did."""
     closed = await engine.request(CloseWorkflowRequest(workflow_id=previous.open_id), CloseWorkflowResultSuccess)
-    if closed.value is None:
-        logger.warning(
-            "Nuke host API: loading another workflow left '%s', which Nuke opened before, open: %s",
-            previous.name,
-            closed.details,
-        )
+    if closed.value is not None:
+        return None
+    left_open = f"Could not close '{previous.name}', which Nuke opened for its previous load, so it is still open: {closed.details}"
+    logger.warning("Nuke host API: %s", left_open)
+    return left_open

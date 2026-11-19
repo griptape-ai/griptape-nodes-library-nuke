@@ -125,7 +125,8 @@ async def handle_set_current_project(
     """Refuse switches during execution and compare live workspaces around the switch."""
     attempted = f"to set the current project to '{request.project_id}'"
 
-    if await flow_run.busy():
+    # A switch can reload every library, which closes every open workflow, so any run blocks it.
+    if await flow_run.engine_busy():
         return failure(
             NukeSetCurrentProjectResultFailure,
             attempted=attempted,

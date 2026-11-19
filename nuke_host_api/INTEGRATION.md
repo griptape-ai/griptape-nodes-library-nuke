@@ -745,13 +745,14 @@ before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
 the workflow this host opened again reopens it from its file, which resets its values and picks up
 changes on disk. A workflow an editor user already has open is taken as it is, unsaved edits
 included, and never closed. Any other workflow this host opened before is closed once the new one
-is open. Other open workflows stay open. Confirm with the artist before sending it. A failed load
+is open; if the engine refuses, the load still succeeds and its `result_details` says so. Other open workflows stay open. Confirm with the artist before sending it. A failed load
 leaves the previous workflow loaded, except a reload whose reopen fails, below.
 
 The `inputs` and `outputs` a load reports are read from the graph as it stands, so an editor
 user's unsaved Start Flow and End Flow edits count. `NukeDescribeWorkflowRequest` reads the
-saved file instead, so the two can differ. Execute and the parameter-value verbs check against the
-graph as it stands too.
+saved file instead, so the two can differ. Each input's `default_value` is still the one last
+saved; one added since has its current value. Execute and the parameter-value verbs check against
+the graph as it stands too.
 
 One case still loses work. If an editor user opens the workflow this host loaded after the host
 opened it, both act on the same open workflow, and the host's next load closes it, with any edits

@@ -62,6 +62,11 @@ async def busy() -> bool:
     return pending() or await loaded_workflow.running()
 
 
+async def engine_busy() -> bool:
+    """Like `busy`, but counting every open workflow's run, for verbs that affect them all."""
+    return pending() or await engine.any_workflow_running()
+
+
 async def _run(flow_name: str, workflow_id: str) -> None:
     """Wait for pending cancels because their terminal events may follow the start response."""
     failure: str | None = f"the start request for flow '{flow_name}' ended without an answer."

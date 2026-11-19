@@ -255,3 +255,26 @@ class TestIsRunnable:
 
         assert runnable is True
         assert reason == ""
+
+
+class TestWithSavedDefaults:
+    """The live graph reports a Start Flow parameter's current value as its default."""
+
+    def test_an_input_saved_before_keeps_its_saved_default(self) -> None:
+        live = {"inputs": {"Start Flow": {"topic": {"type": "str", "default_value": "edited in a tab"}}}, "outputs": {}}
+
+        merged = shape.with_saved_defaults(live, SHAPE)
+
+        assert merged["inputs"]["Start Flow"]["topic"]["default_value"] == "a quiet harbour at dusk"
+
+    def test_an_input_added_since_the_save_keeps_its_live_default(self) -> None:
+        live = {"inputs": {"Start Flow": {"mood": {"type": "str", "default_value": "calm"}}}, "outputs": {}}
+
+        merged = shape.with_saved_defaults(live, SHAPE)
+
+        assert merged["inputs"]["Start Flow"]["mood"]["default_value"] == "calm"
+
+    def test_a_workflow_never_saved_keeps_the_live_shape(self) -> None:
+        live = {"inputs": {"Start Flow": {"topic": {"type": "str", "default_value": "x"}}}, "outputs": {}}
+
+        assert shape.with_saved_defaults(live, {}) == live

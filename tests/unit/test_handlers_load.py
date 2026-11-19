@@ -358,6 +358,29 @@ class TestLoadWorkflow:
         assert "mood" in {parameter["parameter"] for parameter in result.inputs}
         assert "mood" in result.input_values["Start Flow"]
 
+    async def test_load_reports_the_saved_default_of_an_input_edited_in_a_tab(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A reset-to-default button must send the author's default, not the value an editor user typed."""
+        topic = {**SHAPE["inputs"]["Start Flow"]["topic"], "default_value": "edited in a tab"}
+        live = {**SHAPE, "inputs": {"Start Flow": {**SHAPE["inputs"]["Start Flow"], "topic": topic}}}
+        use_engine(
+            monkeypatch,
+            load_responses(
+                {
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultSuccess(
+                        workflow_shape=WorkflowShape(**live), result_details="shape"
+                    )
+                }
+            ),
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        defaults = {parameter["parameter"]: parameter["default_value"] for parameter in result.inputs}
+        assert defaults["topic"] == "a quiet harbour at dusk"
+
     async def test_a_file_path_load_costs_one_engine_request_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, load_responses())
 
