@@ -616,7 +616,9 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   `is_saved` flag stays true for them.
 - **`library_provided` is only as honest as the workflow file.** The engine reads
   `is_griptape_provided` from a library template's own header and records no providing
-  library, so a file can claim it and a host cannot group templates by library.
+  library, so a file can claim it. `library_name` is derived here instead, by matching the
+  file against each registered library's `workflows` list and workflow nodes, and a file
+  that claims `is_griptape_provided` without any library listing it reports `""`.
 - **Parameter metadata exposes only `default_value`, `choices`, `tooltip`, `settable`, and
   `hidden`.**
   The engine also carries slider ranges (`range_slider`, `step`), multi-select dropdowns

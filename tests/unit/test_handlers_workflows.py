@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsRequest,
@@ -9,7 +12,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     ListAllWorkflowsResultSuccess,
 )
 
-from nuke_host_api import shape
+from nuke_host_api import engine, shape
 from nuke_host_api.events import (
     NukeDescribeWorkflowRequest,
     NukeDescribeWorkflowResultFailure,
@@ -100,6 +103,112 @@ class TestListWorkflows:
 
         assert isinstance(result, NukeListWorkflowsResultSuccess)
         assert [workflow["id"] for workflow in result.workflows] == ["plain"]
+
+
+def _install_libraries(
+    monkeypatch: pytest.MonkeyPatch, fake: object, workspace: Path, libraries: dict[str, dict]
+) -> None:
+    """Stand in for the engine's library registry: name -> library_path, workflows, node_files."""
+    infos = {
+        name: SimpleNamespace(
+            library_path=str(library["library_path"]),
+            workflow_node_classes=[SimpleNamespace(workflow_file_path=str(f)) for f in library.get("node_files", [])],
+        )
+        for name, library in libraries.items()
+    }
+    datas = {name: SimpleNamespace(workflows=library.get("workflows")) for name, library in libraries.items()}
+    registry = SimpleNamespace(
+        list_libraries=lambda: list(libraries),
+        get_library=lambda name: SimpleNamespace(get_library_data=lambda: datas[name]),
+    )
+    manager = SimpleNamespace(get_library_info_by_library_name=infos.get)
+    monkeypatch.setattr(engine, "LibraryRegistry", registry)
+    monkeypatch.setattr(fake, "LibraryManager", lambda: manager, raising=False)
+    monkeypatch.setattr(engine.WorkflowRegistry, "get_complete_file_path", lambda file_path: str(workspace / file_path))
+
+
+class TestListWorkflowsLibraryName:
+    @pytest.fixture(autouse=True)
+    def _all_runnable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(shape, "is_runnable", lambda _entry: (True, ""))
+
+    async def test_a_workflow_in_a_librarys_workflows_list_names_that_library(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        library_dir = tmp_path / "libs" / "standard"
+        table = {
+            "shipped": {"is_griptape_provided": True, "file_path": str(library_dir / "workflows" / "shipped.py")},
+            "users_template": {"is_template": True, "file_path": "users_template.py"},
+        }
+        fake = use_engine(monkeypatch, _registry(table))
+        _install_libraries(
+            monkeypatch,
+            fake,
+            tmp_path / "workspace",
+            {"Standard": {"library_path": library_dir / "library.json", "workflows": ["workflows/shipped.py"]}},
+        )
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest())
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        assert {w["id"]: w["library_name"] for w in result.workflows} == {"shipped": "Standard", "users_template": ""}
+
+    async def test_a_workflow_behind_a_librarys_workflow_node_names_that_library(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        node_file = tmp_path / "libs" / "tools" / "nodes" / "behind_a_node.py"
+        table = {"behind_a_node": {"is_griptape_provided": True, "file_path": str(node_file)}}
+        fake = use_engine(monkeypatch, _registry(table))
+        _install_libraries(
+            monkeypatch,
+            fake,
+            tmp_path / "workspace",
+            {"Tools": {"library_path": tmp_path / "libs" / "tools" / "library.json", "node_files": [node_file]}},
+        )
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest())
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        assert result.workflows[0]["library_name"] == "Tools"
+
+    async def test_a_workspace_relative_path_matches_a_library_reached_through_a_symlink(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        real_library = workspace / "libraries" / "standard"
+        (real_library / "workflows").mkdir(parents=True)
+        linked_library = tmp_path / "linked"
+        linked_library.symlink_to(real_library)
+        table = {"shipped": {"is_griptape_provided": True, "file_path": "libraries/standard/workflows/shipped.py"}}
+        fake = use_engine(monkeypatch, _registry(table))
+        _install_libraries(
+            monkeypatch,
+            fake,
+            workspace,
+            {"Standard": {"library_path": linked_library / "library.json", "workflows": ["workflows/shipped.py"]}},
+        )
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest())
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        assert result.workflows[0]["library_name"] == "Standard"
+
+    async def test_a_library_workflow_no_registered_library_lists_has_an_empty_library_name(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        table = {"orphan": {"is_griptape_provided": True, "file_path": str(tmp_path / "gone" / "orphan.py")}}
+        fake = use_engine(monkeypatch, _registry(table))
+        _install_libraries(
+            monkeypatch,
+            fake,
+            tmp_path / "workspace",
+            {"Standard": {"library_path": tmp_path / "libs" / "standard" / "library.json", "workflows": None}},
+        )
+
+        result = await handle_list_workflows(NukeListWorkflowsRequest())
+
+        assert isinstance(result, NukeListWorkflowsResultSuccess)
+        assert result.workflows[0]["library_name"] == ""
 
 
 class TestDescribeWorkflow:

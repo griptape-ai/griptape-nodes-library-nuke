@@ -524,6 +524,7 @@ Workflows the engine marks internal, such as a library's test workflows, are nev
 | `unavailable_reason` | `str` | Why an entry is greyed out. Empty when runnable |
 | `template` | `bool` | True when the engine opens the workflow as a copy, leaving the original untouched. Every `library_provided` workflow is a template, and a user can mark their own |
 | `library_provided` | `bool` | True when an installed library ships the workflow, from Griptape or anyone else. The user cannot edit it in place |
+| `library_name` | `str` | The library that ships a `library_provided` workflow, as the engine names it. Empty for the user's own workflows, and when no registered library lists the file |
 
 ```json
 {
@@ -535,7 +536,8 @@ Workflows the engine marks internal, such as a library's test workflows, are nev
       "runnable": true,
       "unavailable_reason": "",
       "template": true,
-      "library_provided": true
+      "library_provided": true,
+      "library_name": "Griptape Nodes Library"
     }
   ]
 }
