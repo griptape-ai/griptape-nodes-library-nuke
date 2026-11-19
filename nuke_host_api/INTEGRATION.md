@@ -71,8 +71,8 @@ project verbs read and change engine-wide project state and need no loaded workf
 
 A parameter's live value exists on a loaded node, so no read verb can select one by
 `workflow_id`: for an unloaded workflow there is nothing to read. Loading is the only way to
-make one readable, and it is destructive, so it is a verb of its own rather than something a
-read does on a host's behalf.
+make one readable, and it switches the workflow the host's verbs act on, so it is a verb of its
+own rather than something a read does on a host's behalf.
 
 ## Connecting
 
@@ -868,8 +868,7 @@ Refused, and nothing is loaded:
 Every row leaves the loaded graph exactly as it was, so the knobs a host is showing still match
 what the engine holds and a retry is free, with one exception: a reload closes this host's
 workflow before reopening it, so a reopen that fails leaves nothing loaded. A `file_path` request
-is the one that touches
-anything else: the file is imported and registered before the rows below it are checked, so a
+is the one that touches anything else: the file is imported and registered before the rows below it are checked, so a
 refusal there can leave a new registry entry behind.
 
 | `NukeLoadWorkflowResultFailure` field | Type | Notes |
