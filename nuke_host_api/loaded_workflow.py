@@ -1,9 +1,4 @@
-"""The workflow the host loaded, which host verbs act on while the engine has others open.
-
-Every verb acts on the workflow the host's last load named and nothing else. With none loaded, or
-once it is closed elsewhere, verbs report that nothing is loaded rather than act on another
-workflow. A host that names the workflow on each verb would replace this.
-"""
+"""The workflow the host's last load named, the only one host verbs act on while the engine has others open."""
 
 from __future__ import annotations
 
@@ -23,14 +18,11 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class LoadedWorkflow:
-    """Opening a template makes a copy with its own id, so the open id and registry name can differ.
-
-    `opened_by_host` is False for a workflow the host found open, such as an editor tab, which the
-    host's next load leaves open.
-    """
+    """Opening a template makes a copy with its own id, so the open id and registry name can differ."""
 
     open_id: str
     name: str
+    # False for a workflow the host found open, such as an editor tab, which the host never closes.
     opened_by_host: bool
 
 

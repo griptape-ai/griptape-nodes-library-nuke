@@ -634,8 +634,9 @@ Without that guard, a rename propagated through the tests can leave the suite gr
   refused. The escape is `NukeCancelExecutionRequest`, and whether cancel actually clears a node
   wedged inside `process()` is unverified. If it does not, only an engine restart recovers.
 - **Loading switches the host's workflow, and nothing but a host's own UI guards it.**
-  `NukeLoadWorkflowRequest` closes, or reopens from its file, the host's previous workflow if the host opened it, with any
-  edits an editor user made to it there, even in a tab opened after the host's load. The engine
+  `NukeLoadWorkflowRequest` closes, or reopens from its file, the host's previous workflow if the
+  host opened it, with any edits an editor user made to it there, even in a tab opened after the
+  host's load. The engine
   doesn't yet report who has a workflow open or whether it has unsaved changes
   (griptape-ai/griptape-nodes-engine#6378). A workflow an editor user had open first is left
   open. A host should confirm with the artist before sending it.

@@ -741,12 +741,13 @@ the declared parameters and their current values, for both sides, in one reply. 
 before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
 `NukeGetExecutionStateRequest` can answer for the workflow a host means.
 
-**Switches the host's workflow.** Loading opens the requested workflow from its file. Loading
-the workflow this host opened again reopens it from its file, which resets its values and picks up
-changes on disk. A workflow an editor user already has open is taken as it is, unsaved edits
-included, and never closed. Any other workflow this host opened before is closed once the new one
-is open; if the engine refuses, the load still succeeds and its `result_details` says so. Other open workflows stay open. Confirm with the artist before sending it. A failed load
-leaves the previous workflow loaded, except a reload whose reopen fails, below.
+**Switches the host's workflow.** Loading opens the requested workflow from its file, so loading
+the one this host opened again resets its values and picks up changes on disk. A workflow an
+editor user already has open is taken as it is, unsaved edits included, and never closed. Any
+other workflow this host opened is closed once the new one is open; if the engine refuses, the load
+still succeeds and `result_details` says so. Other open workflows stay open. Confirm with the
+artist before sending it. A failed load leaves the previous workflow loaded, unless it was a
+reload (see below).
 
 The `inputs` and `outputs` a load reports are read from the graph as it stands, so an editor
 user's unsaved Start Flow and End Flow edits count. `NukeDescribeWorkflowRequest` reads the
@@ -865,8 +866,9 @@ Refused, and nothing is loaded:
 | The engine could not open the workflow | the engine's own reason |
 
 Every row leaves the loaded graph exactly as it was, so the knobs a host is showing still match
-what the engine holds and a retry is free, except one: a reload of this host's own workflow closes
-it before reopening it, so a reopen that fails leaves nothing loaded. A `file_path` request is the one that touches
+what the engine holds and a retry is free, with one exception: a reload closes this host's
+workflow before reopening it, so a reopen that fails leaves nothing loaded. A `file_path` request
+is the one that touches
 anything else: the file is imported and registered before the rows below it are checked, so a
 refusal there can leave a new registry entry behind.
 
