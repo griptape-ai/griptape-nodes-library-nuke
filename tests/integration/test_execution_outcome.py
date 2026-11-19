@@ -11,7 +11,7 @@ import pytest
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api import execution_bridge, notify
+from nuke_host_api import execution_bridge, loaded_workflow, notify
 from nuke_host_api.events import (
     NukeCancelExecutionRequest,
     NukeCancelExecutionResultSuccess,
@@ -34,7 +34,8 @@ DATA_NODE = "Canary"
 
 
 def _data_node() -> BaseNode:
-    node = GriptapeNodes.ObjectManager().attempt_get_object_by_name_as_type(DATA_NODE, BaseNode)
+    with loaded_workflow.bound():
+        node = GriptapeNodes.ObjectManager().attempt_get_object_by_name_as_type(DATA_NODE, BaseNode)
     assert node is not None
     return node
 
