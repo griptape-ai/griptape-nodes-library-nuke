@@ -29,7 +29,7 @@ SHIPPING_LIBRARY = "Shipping Library"
 async def test_a_workflow_a_library_lists_reports_that_librarys_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    build_start_canary_end_flow(tmp_path, monkeypatch, file_name="shipped")
+    workflow = build_start_canary_end_flow(tmp_path, monkeypatch, file_name="shipped")
 
     library_json = materialize_canary_library(tmp_path / "shipping_library")
     schema = json.loads(library_json.read_text())
@@ -44,7 +44,8 @@ async def test_a_workflow_a_library_lists_reports_that_librarys_name(
     assert "# is_griptape_provided = false\n" in header
     shipped.write_text(header.replace("# is_griptape_provided = false\n", "# is_griptape_provided = true\n", 1))
 
-    result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name="users_workflow"))
+    with GriptapeNodes.get_instance().bind_workflow(workflow):
+        result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name="users_workflow"))
     assert result.succeeded(), result
     result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(library_json)))
     assert result.succeeded(), result

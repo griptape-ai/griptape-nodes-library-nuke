@@ -20,10 +20,6 @@ from griptape_nodes.retained_mode.events.app_events import (
     GetEngineVersionResultSuccess,
 )
 from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
-from griptape_nodes.retained_mode.events.context_events import (
-    GetWorkflowContextRequest,
-    GetWorkflowContextSuccess,
-)
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -33,6 +29,8 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultSuccess,
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultSuccess,
 )
@@ -133,14 +131,6 @@ async def top_level_flow_name() -> str | None:
     return attempt.value.flow_name
 
 
-async def current_workflow_id() -> str:
-    """Return the loaded workflow's id, or empty when none is loaded."""
-    attempt = await request(GetWorkflowContextRequest(), GetWorkflowContextSuccess)
-    if attempt.value is None or not attempt.value.workflow_name:
-        return ""
-    return attempt.value.workflow_name
-
-
 def open_workflow(open_id: str) -> WorkflowRuntime | None:
     return GriptapeNodes.get_instance().open_workflows.find(open_id)
 
@@ -203,8 +193,9 @@ async def lookup_workflow(workflow_id: str) -> WorkflowLookup:
     return WorkflowLookup(entry=entry if isinstance(entry, dict) else None, registry_readable=True)
 
 
-async def workflow_entry(workflow_id: str) -> dict | None:
-    return (await lookup_workflow(workflow_id)).entry
+async def workflow_shape(workflow_name: str) -> Attempt[GetWorkflowShapeResultSuccess]:
+    """The bound workflow's inputs and outputs as its graph stands now; the name only labels messages."""
+    return await request(GetWorkflowShapeRequest(workflow_name=workflow_name), GetWorkflowShapeResultSuccess)
 
 
 async def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:
@@ -223,3 +214,12 @@ async def is_running() -> bool:
     if attempt.value is None:
         return False
     return flow_is_running(attempt.value)
+
+
+async def any_workflow_running() -> bool:
+    """Whether any open workflow is running, an editor tab's included."""
+    for workflow in GriptapeNodes.get_instance().open_workflows.all_open():
+        with bind_workflow(workflow):
+            if await is_running():
+                return True
+    return False

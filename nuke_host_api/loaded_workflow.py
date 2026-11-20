@@ -1,4 +1,4 @@
-"""The workflow the host loaded, which host verbs act on while the engine has others open."""
+"""The workflow the host's last load named, the only one host verbs act on while the engine has others open."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ from nuke_host_api import engine
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from griptape_nodes.retained_mode.runtime.workflow_runtime import WorkflowRuntime
+
 
 @dataclass(frozen=True)
 class LoadedWorkflow:
@@ -20,14 +22,16 @@ class LoadedWorkflow:
 
     open_id: str
     name: str
+    # False for a workflow the host found open, such as an editor tab, which the host never closes.
+    opened_by_host: bool
 
 
 _LOADED: LoadedWorkflow | None = None
 
 
-def record(open_id: str, name: str) -> None:
+def record(open_id: str, name: str, *, opened_by_host: bool) -> None:
     global _LOADED  # noqa: PLW0603
-    _LOADED = LoadedWorkflow(open_id=open_id, name=name)
+    _LOADED = LoadedWorkflow(open_id=open_id, name=name, opened_by_host=opened_by_host)
 
 
 def forget() -> None:
@@ -42,18 +46,18 @@ def current() -> LoadedWorkflow | None:
     return _LOADED
 
 
-async def workflow_id() -> str:
-    """The host's workflow by registry name, else the engine's only open workflow, else empty."""
+def workflow_id() -> str:
+    """The host's workflow by registry name, else empty."""
     loaded = current()
-    if loaded is not None:
-        return loaded.name
-    return await engine.current_workflow_id()
+    if loaded is None:
+        return ""
+    return loaded.name
 
 
 @contextmanager
 def bound() -> Iterator[None]:
-    """Act on the host's workflow; with none, the engine falls back to its only open workflow."""
-    runtime = engine.open_workflow(_LOADED.open_id) if _LOADED is not None else None
+    """Name the host's workflow on every request in the block. With none loaded, name none."""
+    runtime = _runtime()
     if runtime is None:
         yield
         return
@@ -61,10 +65,44 @@ def bound() -> Iterator[None]:
         yield
 
 
-def emitted_elsewhere() -> bool:
-    """True when the emitting work is bound to an open workflow other than the host's."""
+async def flow_name() -> str | None:
+    """The host's workflow's top-level flow, or None when the host loaded none."""
+    if _runtime() is None:
+        return None
+    with bound():
+        return await engine.top_level_flow_name()
+
+
+async def declared_shape() -> dict:
+    """Read from the graph, not the registry's last-saved shape, so unsaved edits count; empty with none loaded or no Start or End node."""
     loaded = current()
     if loaded is None:
+        return {}
+    with bound():
+        attempt = await engine.workflow_shape(loaded.name)
+    if attempt.value is None:
+        return {}
+    return attempt.value.workflow_shape.model_dump()
+
+
+async def running() -> bool:
+    """Whether the host's workflow is running. False when the host loaded none."""
+    if _runtime() is None:
         return False
+    with bound():
+        return await engine.is_running()
+
+
+def emitted_elsewhere() -> bool:
+    """True when the emitting work is bound to an open workflow other than the host's."""
     emitter = getattr(bound_workflow.get(), "workflow_id", None)
-    return emitter is not None and emitter != loaded.open_id
+    if emitter is None:
+        return False
+    loaded = current()
+    return loaded is None or emitter != loaded.open_id
+
+
+def _runtime() -> WorkflowRuntime | None:
+    if _LOADED is None:
+        return None
+    return engine.open_workflow(_LOADED.open_id)

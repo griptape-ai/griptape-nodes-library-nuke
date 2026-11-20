@@ -55,12 +55,13 @@ def _add_passthrough(name: str, engine_type: str) -> None:
 
 
 async def _outputs_after_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    build_start_canary_end_flow(tmp_path, monkeypatch, file_name="value_shapes")
-    _add_passthrough("image", "ImageUrlArtifact")
-    _add_passthrough("images", "list[ImageUrlArtifact]")
-    _add_passthrough("seeds", "list[int]")
-    _add_passthrough("plate", "Sequence")
-    saved = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name="value_shapes"))
+    workflow = build_start_canary_end_flow(tmp_path, monkeypatch, file_name="value_shapes")
+    with GriptapeNodes.get_instance().bind_workflow(workflow):
+        _add_passthrough("image", "ImageUrlArtifact")
+        _add_passthrough("images", "list[ImageUrlArtifact]")
+        _add_passthrough("seeds", "list[int]")
+        _add_passthrough("plate", "Sequence")
+        saved = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name="value_shapes"))
     assert isinstance(saved, SaveWorkflowResultSuccess), saved
     loaded = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id=saved.workflow_name))
     assert isinstance(loaded, NukeLoadWorkflowResultSuccess), loaded.result_details

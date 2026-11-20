@@ -13,8 +13,13 @@ import pytest
 from griptape_nodes.retained_mode.events.execution_events import NodeResolvedEvent
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from nuke_host_api.events import NukeExecuteWorkflowRequest, NukeExecuteWorkflowResultSuccess
-from nuke_host_api.handlers import handle_execute_workflow
+from nuke_host_api.events import (
+    NukeExecuteWorkflowRequest,
+    NukeExecuteWorkflowResultSuccess,
+    NukeLoadWorkflowRequest,
+    NukeLoadWorkflowResultSuccess,
+)
+from nuke_host_api.handlers import handle_execute_workflow, handle_load_workflow
 from tests.detached_run import settled
 
 from .fixtures.canary.canary_workflow_builder import build_start_canary_end_flow
@@ -39,6 +44,8 @@ async def resolved_nodes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> lis
     created outside one, the engine dispatches nothing and a node resolving is unobservable.
     """
     build_start_canary_end_flow(tmp_path, monkeypatch, file_name="rerun_canary", data_node_name=DATA_NODE)
+    loaded = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="rerun_canary"))
+    assert isinstance(loaded, NukeLoadWorkflowResultSuccess), loaded.result_details
 
     resolved: list[str] = []
     GriptapeNodes.EventManager().add_listener_to_execution_event(

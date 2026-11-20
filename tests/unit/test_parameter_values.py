@@ -26,7 +26,7 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueResultSuccess,
 )
 
-from nuke_host_api import engine, parameter_values
+from nuke_host_api import parameter_values
 from nuke_host_api.protocol import PARAMETER_SECTIONS, ParameterSection, ValueType
 from tests.unit.host_api_fakes import SHAPE, respond_to_get_value, use_engine
 
@@ -332,65 +332,24 @@ class TestUnaddressableInputsReason:
     """
 
     def test_nothing_is_wrong_when_the_workflow_declares_the_requested_inputs(self) -> None:
-        found = engine.WorkflowLookup(entry={"name": "wf1"}, registry_readable=True)
-
         reason = parameter_values.unaddressable_inputs_reason(
-            "wf1", found, {("Start Flow", "topic")}, no_inputs_remedy="do nothing"
+            "wf1", {("Start Flow", "topic")}, no_inputs_remedy="do nothing"
         )
 
         assert reason is None
 
-    def test_an_unreadable_registry_names_a_retry_and_the_callers_own_remedy(self) -> None:
-        found = engine.WorkflowLookup(entry=None, registry_readable=False)
-
-        reason = parameter_values.unaddressable_inputs_reason(
-            "wf1", found, set(), no_inputs_remedy="send no values, since there is nothing else to do"
-        )
-
-        assert reason is not None
-        assert "could not read the workflow registry" in reason.because
-        assert "send no values, since there is nothing else to do" in reason.because
-        assert reason.error is RuntimeError
-
-    def test_an_unreadable_registry_names_only_a_retry_when_the_caller_has_no_remedy(self) -> None:
-        """NukeSetParameterValuesRequest's case: no fallback to offer, so none is named."""
-        found = engine.WorkflowLookup(entry=None, registry_readable=False)
-
-        reason = parameter_values.unaddressable_inputs_reason("wf1", found, set())
-
-        assert reason is not None
-        assert reason.because.endswith("could not be checked against it. Retry.")
-
-    def test_a_loaded_id_missing_from_a_readable_registry_names_a_reload_not_the_callers_remedy(self) -> None:
-        found = engine.WorkflowLookup(entry=None, registry_readable=True)
-
-        reason = parameter_values.unaddressable_inputs_reason(
-            "wf1", found, set(), no_inputs_remedy="send no values, since there is nothing else to do"
-        )
-
-        assert reason is not None
-        assert "no longer in the registry" in reason.because
-        assert "NukeLoadWorkflowRequest" in reason.because
-        assert "send no values" not in reason.because
-        assert reason.error is KeyError
-
     def test_a_graph_with_no_declared_inputs_names_the_callers_own_remedy(self) -> None:
-        found = engine.WorkflowLookup(entry={"name": "Untitled"}, registry_readable=True)
-
-        reason = parameter_values.unaddressable_inputs_reason(
-            "unsaved:9f0c", found, set(), no_inputs_remedy="do nothing"
-        )
+        reason = parameter_values.unaddressable_inputs_reason("wf1", set(), no_inputs_remedy="do nothing")
 
         assert reason is not None
         assert "declares no input parameters" in reason.because
+        assert "Start Flow node" in reason.because
         assert "do nothing" in reason.because
         assert reason.error is RuntimeError
 
-    def test_a_graph_with_no_declared_inputs_names_only_the_reload_path_when_the_caller_has_no_remedy(self) -> None:
+    def test_a_graph_with_no_declared_inputs_names_no_remedy_when_the_caller_has_none(self) -> None:
         """NukeSetParameterValuesRequest's case: no fallback to offer, so none is named."""
-        found = engine.WorkflowLookup(entry={"name": "Untitled"}, registry_readable=True)
-
-        reason = parameter_values.unaddressable_inputs_reason("unsaved:9f0c", found, set())
+        reason = parameter_values.unaddressable_inputs_reason("wf1", set())
 
         assert reason is not None
-        assert reason.because.endswith("save it and load it by id.")
+        assert reason.because.endswith("needs an End Flow node too.")

@@ -17,8 +17,6 @@ from griptape_nodes.retained_mode.events.execution_events import (
     ParameterValueUpdateEvent,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.managers.context_manager import ContextManager
-from griptape_nodes.retained_mode.runtime.binding import WorkflowNotNamedError, WorkflowNotOpenError
 
 from nuke_host_api import loaded_workflow, notify, run_outcome
 from nuke_host_api.events import (
@@ -40,13 +38,7 @@ logger = logging.getLogger("griptape_nodes")
 
 def current_workflow_id() -> str:
     """Read synchronously because bridge callbacks cannot await an engine request."""
-    loaded = loaded_workflow.current()
-    if loaded is not None:
-        return loaded.name
-    try:
-        return GriptapeNodes.ContextManager().get_current_workflow_name()
-    except (ContextManager.NoActiveWorkflowError, WorkflowNotNamedError, WorkflowNotOpenError):
-        return ""
+    return loaded_workflow.workflow_id()
 
 
 def _for_host(callback: Callable[[Any], None]) -> Callable[[Any], None]:

@@ -73,7 +73,7 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
 
     if not attempt.granted:
         running = await flow_run.busy()
-        workflow_id = await loaded_workflow.workflow_id()
+        workflow_id = loaded_workflow.workflow_id()
         activity = f"A workflow{f' ({workflow_id})' if workflow_id else ''} is running now. " if running else ""
         return failure(
             NukeConnectResultFailure,

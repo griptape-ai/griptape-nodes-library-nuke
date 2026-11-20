@@ -22,7 +22,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     NodeStartProcessEvent,
     ParameterValueUpdateEvent,
 )
-from griptape_nodes.retained_mode.runtime.binding import WorkflowNotNamedError, bound_workflow
+from griptape_nodes.retained_mode.runtime.binding import bound_workflow
 
 from nuke_host_api import execution_bridge, loaded_workflow, notify, run_outcome
 from nuke_host_api.events import (
@@ -369,7 +369,7 @@ class TestOtherOpenWorkflows:
     ) -> None:
         """An editor tab's run is not the host's run, and its verdict must not read as one."""
         use_engine(monkeypatch).open_workflows.open("wf1-open")
-        loaded_workflow.record("wf1-open", "wf1")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
         ExecutionBridge().install()
 
         token = bound_workflow.set(FakeWorkflow("editor-tab"))  # type: ignore[arg-type]
@@ -385,7 +385,7 @@ class TestOtherOpenWorkflows:
         self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         use_engine(monkeypatch).open_workflows.open("wf1-open")
-        loaded_workflow.record("wf1-open", "wf1")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
         ExecutionBridge().install()
 
         token = bound_workflow.set(FakeWorkflow("wf1-open"))  # type: ignore[arg-type]
@@ -396,12 +396,12 @@ class TestOtherOpenWorkflows:
 
         assert [p.node_name for p in event_manager.payloads()] == ["Blur"]
 
-    def test_events_reach_the_host_once_its_workflow_is_closed_elsewhere(
+    def test_events_from_another_workflow_do_not_reach_the_host_once_its_workflow_is_closed_elsewhere(
         self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verbs then fall back to the only open workflow, so its progress and verdict must reach the host."""
+        """Verbs then report nothing loaded, so another workflow's run is not the host's either."""
         use_engine(monkeypatch)
-        loaded_workflow.record("closed-in-editor", "wf0")
+        loaded_workflow.record("closed-in-editor", "wf0", opened_by_host=True)
         ExecutionBridge().install()
 
         token = bound_workflow.set(FakeWorkflow("editor-tab"))  # type: ignore[arg-type]
@@ -411,19 +411,9 @@ class TestOtherOpenWorkflows:
         finally:
             bound_workflow.reset(token)
 
-        payloads = event_manager.payloads()
-        assert [type(p) for p in payloads] == [NukeNodeStateEvent, NukeExecutionStateEvent]
+        assert event_manager.payloads() == []
 
-    def test_a_verdict_is_still_published_when_several_workflows_are_open_and_none_loaded(
-        self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def unnamed() -> str:
-            msg = "2 workflows are open"
-            raise WorkflowNotNamedError(msg)
-
-        monkeypatch.setattr(
-            execution_bridge.GriptapeNodes, "ContextManager", lambda: SimpleNamespace(get_current_workflow_name=unnamed)
-        )
+    def test_a_verdict_is_still_published_when_no_workflow_is_loaded(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()
         bridge.install()
 

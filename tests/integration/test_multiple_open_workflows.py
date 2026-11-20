@@ -90,14 +90,25 @@ async def test_the_host_loads_reads_and_runs_its_workflow(
     assert editor_tab in _open_ids(), "the editor's workflow must stay open"
 
 
-async def test_loading_another_workflow_closes_the_hosts_previous_one(editor_tab: str, tmp_path: Path) -> None:
-    """Clean slate closes only the workflow being loaded, so the host's previous one is the handler's to close."""
-    other = tmp_path / "other_canary.py"
-    shutil.copy(tmp_path / "workspace" / f"{WORKFLOW}.py", other)
+async def test_load_takes_a_workflow_already_open_as_it_is(editor_tab: str) -> None:
+    """The builder leaves the saved workflow open, as an editor tab would, so loading it opens nothing."""
+    before = _open_ids()
+
     await _load()
 
-    second = await _load(file_path=str(other))
+    assert _open_ids() == before
+    assert editor_tab in _open_ids()
 
-    assert second.workflow_id != WORKFLOW
-    assert len(_open_ids()) == 2, "the host keeps one workflow open, beside the editor's"
+
+async def test_loading_another_workflow_closes_the_one_the_host_opened(editor_tab: str, tmp_path: Path) -> None:
+    """A workflow the host found open, such as the saved canary here, stays open."""
+    other = tmp_path / "other_canary.py"
+    shutil.copy(tmp_path / "workspace" / f"{WORKFLOW}.py", other)
+    before = _open_ids()
+    await _load(file_path=str(other))
+    assert len(_open_ids()) == len(before) + 1, "the host opened the copy"
+
+    await _load()
+
+    assert _open_ids() == before
     assert editor_tab in _open_ids()
