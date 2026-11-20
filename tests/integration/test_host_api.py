@@ -72,12 +72,12 @@ def client(engine: Engine) -> Iterator[HostClient]:
             {"client_protocol_versions": [PROTOCOL_VERSION], "client_name": "smoke test", "force": True},
         )
         assert succeeded(handshake), f"could not connect to the engine: {detail_of(handshake)}"
+        connected.subscribe(result_of(handshake)["event_topic"])
         try:
             yield connected
         finally:
-            # Drain first. The engine writes every frame to every client, so leaving a
-            # backlog unread risks filling the socket buffer, and a client the engine cannot
-            # write to is dropped from its broadcast set and stops receiving replies too.
+            # Drain first. Leaving a backlog unread risks filling the socket buffer, and a
+            # client the engine cannot write to is dropped and stops receiving replies too.
             connected.drain(0.5)
             state = connected.request(Verb.GET_EXECUTION_STATE)
             if succeeded(state) and result_of(state).get("running"):
@@ -288,6 +288,9 @@ class TestDescribe:
                 f"{addressed} label must not be prefixed with the node, which is already its own field"
             )
             assert declared["type"] in VALUE_TYPES, f"{addressed} escaped the closed set with {declared['type']!r}"
+            assert not (isinstance(declared["default_value"], dict) and "value_type" in declared["default_value"]), (
+                f"{addressed} default must be a value, not a descriptor"
+            )
             assert declared["is_list"] in {True, False, None}
             assert isinstance(declared["choices"], list)
             assert isinstance(declared["tooltip"], str)
@@ -366,8 +369,8 @@ class TestExecute:
         """The one test that proves push works on this transport.
 
         Notifications are collected without sending a single request, so a pass cannot be
-        explained by polling. local_socket has no subscribe step and the engine's fan-out
-        ignores topics for it, so either events arrive unsolicited or the push path is broken.
+        explained by polling. Events reach this client only through the fixture's subscription
+        to `event_topic`, so a failure here is that subscription or the push path.
 
         The fixture has already connected, which is what installs the bridge.
         """

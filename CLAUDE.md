@@ -22,6 +22,7 @@ nuke_runner/             Headless runner — scripts that run inside nuke -t (st
   runner.py                Entry point; reads manifest, runs Write nodes, collects outputs
   introspect.py            Knob schema introspection; writes JSON to temp file
   baker.py                 Bakes knob override values into a copy of the .nk before render
+  read_input.py            Points an annotated Read node at an input, carrying a sequence's frame range
   exporter.py              Extracts camera matrices and converts meshes to GLB for 3D outputs
   manifest.py              JobManifest dataclass and schema
 execution/               Execution layer — launches and polls Nuke subprocesses
@@ -52,11 +53,12 @@ Makefile                 All dev workflows (check, fix, version, deps)
 
 **Language and runtime**
 - Griptape-side code: Python 3.12 (matches `pyproject.toml`).
-- Nuke-runner scripts (`nuke_runner/runner.py`, `nuke_runner/introspect.py`): Python 3.10+ (must run inside Nuke 15+'s bundled interpreter). These files must be **stdlib only** — no third-party imports. `nuke` itself is available.
+- Nuke-runner scripts (`nuke_runner/runner.py`, `nuke_runner/baker.py`, `nuke_runner/introspect.py`, `nuke_runner/read_input.py`): Python 3.10+ (must run inside Nuke 15+'s bundled interpreter). These files must be **stdlib only** — no third-party imports. `nuke` itself is available.
 - PySide6 first, PySide2 fallback. Match the pattern in `publish_gizmo/run_button.py`.
 
 **Dependencies**
 - Use `uv` only — never `pip install` directly.
+- Dev tooling lives in `.venv-dev`; `.venv` beside the manifest belongs to the engine. Run tools through `make` targets, or set `UV_PROJECT_ENVIRONMENT=.venv-dev` for a direct `uv sync` or `uv run`. Installing the dev group into `.venv` makes the library load FLAWED. See CONTRIBUTING.md.
 - Adding a new dependency: edit `pyproject.toml`, then run `make deps/sync` to sync `pip_dependencies` into the library JSON.
 
 **Style**
@@ -119,7 +121,7 @@ import pytest, os
 nuke_exe = os.environ.get("NUKE_EXECUTABLE")
 pytestmark = pytest.mark.skipif(not nuke_exe, reason="NUKE_EXECUTABLE not set")
 ```
-Run integration tests locally with `NUKE_EXECUTABLE=/path/to/nuke uv run pytest tests/integration/`.
+Run integration tests locally with `NUKE_EXECUTABLE=/path/to/nuke make test/integration`.
 
 **Test the manifest schema end-to-end.** Write a test that round-trips a JobManifest through `manifest.py` and asserts every field is preserved.
 
@@ -149,8 +151,8 @@ Run integration tests locally with `NUKE_EXECUTABLE=/path/to/nuke uv run pytest 
 make check                                        # format + lint + types + JSON validation
 make fix                                          # auto-fix format and lint
 make deps/sync                                    # sync deps after pyproject.toml changes
-uv run pytest tests/unit/                         # run unit tests (no Nuke needed)
-NUKE_EXECUTABLE=/path/to/nuke uv run pytest tests/integration/   # integration tests
+make test/unit                                    # run unit tests (no Nuke needed)
+NUKE_EXECUTABLE=/path/to/nuke make test/integration   # integration tests
 make version/patch                                # bump patch version
 ```
 
@@ -161,3 +163,19 @@ make version/patch                                # bump patch version
 1. Create the node class in `nuke_nodes/<name>.py`.
 2. Add an entry to the `"nodes"` array in `griptape-nodes-library.json` under the `"FoundryNuke"` category.
 3. Run `make check`.
+
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog 2.0.0](https://keepachangelog.com/en/2.0.0/). Each version is the `library_version` in `griptape-nodes-library.json`. Its readers are artists using these nodes and the agents that build workflows with them.
+
+**Add an entry for every user-facing change** - In the same PR, add a file to `changelog.d/` holding the entry. User-facing means anything a user notices after updating the library: a node added, removed, or renamed; a parameter, default, or output that differs; a provider model added or retired; a saved workflow that loads or runs differently. After adding one, tell the user so they can review the wording.
+
+**One file per entry, named for its type** - Never edit `## [Unreleased]` in `CHANGELOG.md` directly; `make check/changelog` rejects it. Create `changelog.d/<type>-<slug>.md`, where `<type>` is one of `added`, `changed`, `deprecated`, `removed`, `fixed`, or `security`, and `<slug>` is a few lowercase words joined by hyphens. The whole file is the bullet, with no heading. `make changelog` prints `[Unreleased]` with these files folded in. `changelog.d/README.md` is the same contract for humans.
+
+**Skip what users never see** - Refactors, tests, CI, docs-only changes, and dev dependency bumps get no entry. Neither does a fix for a bug that never shipped in a version: edit or delete the entry that introduced it.
+
+**Describe the result, not the code** - Name the node and parameter in backticks or by their editor label, say what the user sees now, present tense, one or two sentences. `Fixed` if the old behavior was a bug, `Changed` if it was intentional. Link the GitHub issue on its own last line. Leave out PR numbers and `@handles`. Wrap at about 100 characters, continuation lines indented two spaces.
+
+**Mark breaking changes** - A change that makes a saved workflow stop working, or give a different result, without edits starts with `**Breaking:**`. Say what breaks and what to do about it.
+
+**Leave `CHANGELOG.md` to the version bump** - Do not add version headings or link definitions. `make version/patch`, `make version/minor`, `make version/major`, and `make version/set` fold the `changelog.d/` entries into the new version section and delete them. Fixing a mistake in a released entry is fine.

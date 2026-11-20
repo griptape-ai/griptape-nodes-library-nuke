@@ -19,11 +19,13 @@ from griptape_nodes.retained_mode.events.execution_events import (
     ControlFlowResolvedEvent,
     InvolvedNodesEvent,
     NodeErrorEvent,
+    NodeResolvedEvent,
     NodeStartProcessEvent,
     ParameterValueUpdateEvent,
 )
+from griptape_nodes.retained_mode.runtime.binding import bound_workflow
 
-from nuke_host_api import execution_bridge, notify, run_outcome
+from nuke_host_api import execution_bridge, loaded_workflow, notify, run_outcome
 from nuke_host_api.events import (
     NukeExecutionNodesEvent,
     NukeExecutionStateEvent,
@@ -35,6 +37,7 @@ from nuke_host_api.protocol import ExecutionState, NodeState, ValueType
 from nuke_host_api.value_types import CONTROL_PARAM_TYPE
 from nuke_nodes import nuke_library_advanced
 from nuke_nodes.nuke_library_advanced import NukeLibraryAdvanced
+from tests.unit.host_api_fakes import FakeWorkflow, use_engine
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -322,11 +325,22 @@ class TestTranslation:
         """The engine's cancel path fires resolved then cancelled; only the start's answer ends a host run."""
         bridge = ExecutionBridge()
         bridge.install()
-        run_outcome.begin_host_run()
+        run_outcome.begin_host_run(frozenset())
         bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
         bridge._on_flow_cancelled(ControlFlowCancelledEvent())
         assert not any(isinstance(p, NukeExecutionStateEvent) for p in event_manager.payloads())
         assert run_outcome.conclude(None, "").state == ExecutionState.CANCELLED
+
+    def test_a_host_run_succeeds_when_the_bridge_sees_its_end_node_resolve(
+        self, event_manager: FakeEventManager
+    ) -> None:
+        bridge = ExecutionBridge()
+        bridge.install()
+        run_outcome.begin_host_run(frozenset({"End Flow"}))
+        bridge._on_node_resolved(
+            NodeResolvedEvent(node_name="End Flow", parameter_output_values={}, node_type="NukeEndFlow")
+        )
+        assert run_outcome.conclude(None, "").state == ExecutionState.SUCCEEDED
 
     def test_involved_nodes_are_forwarded_as_the_progress_denominator(self, event_manager: FakeEventManager) -> None:
         bridge = ExecutionBridge()
@@ -353,3 +367,70 @@ class TestTranslation:
         bridge.install()
         bridge._on_node_start(NodeStartProcessEvent(node_name="Blur"))
         assert all(isinstance(event, AppEvent) for event in event_manager.emitted)
+
+
+def _deliver(event_manager: FakeEventManager, event: Any) -> None:
+    """Fan an event out to the installed listeners, as the engine's event manager does."""
+    for listener in list(event_manager.listeners.get(type(event), ())):
+        listener(event)
+
+
+class TestOtherOpenWorkflows:
+    def test_events_from_another_open_workflow_do_not_reach_the_host(
+        self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An editor tab's run is not the host's run, and its verdict must not read as one."""
+        use_engine(monkeypatch).open_workflows.open("wf1-open")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
+        ExecutionBridge().install()
+
+        token = bound_workflow.set(FakeWorkflow("editor-tab"))  # type: ignore[arg-type]
+        try:
+            _deliver(event_manager, NodeStartProcessEvent(node_name="Blur"))
+            _deliver(event_manager, ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
+        finally:
+            bound_workflow.reset(token)
+
+        assert event_manager.payloads() == []
+
+    def test_events_from_the_hosts_workflow_reach_the_host(
+        self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        use_engine(monkeypatch).open_workflows.open("wf1-open")
+        loaded_workflow.record("wf1-open", "wf1", opened_by_host=True)
+        ExecutionBridge().install()
+
+        token = bound_workflow.set(FakeWorkflow("wf1-open"))  # type: ignore[arg-type]
+        try:
+            _deliver(event_manager, NodeStartProcessEvent(node_name="Blur"))
+        finally:
+            bound_workflow.reset(token)
+
+        assert [p.node_name for p in event_manager.payloads()] == ["Blur"]
+
+    def test_events_from_another_workflow_do_not_reach_the_host_once_its_workflow_is_closed_elsewhere(
+        self, event_manager: FakeEventManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verbs then report nothing loaded, so another workflow's run is not the host's either."""
+        use_engine(monkeypatch)
+        loaded_workflow.record("closed-in-editor", "wf0", opened_by_host=True)
+        ExecutionBridge().install()
+
+        token = bound_workflow.set(FakeWorkflow("editor-tab"))  # type: ignore[arg-type]
+        try:
+            _deliver(event_manager, NodeStartProcessEvent(node_name="Blur"))
+            _deliver(event_manager, ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
+        finally:
+            bound_workflow.reset(token)
+
+        assert event_manager.payloads() == []
+
+    def test_a_verdict_is_still_published_when_no_workflow_is_loaded(self, event_manager: FakeEventManager) -> None:
+        bridge = ExecutionBridge()
+        bridge.install()
+
+        bridge._on_flow_resolved(ControlFlowResolvedEvent(end_node_name="End", parameter_output_values={}))
+
+        verdict = event_manager.payloads()[-1]
+        assert isinstance(verdict, NukeExecutionStateEvent)
+        assert verdict.state == ExecutionState.SUCCEEDED

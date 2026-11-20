@@ -30,7 +30,7 @@ from publish_gizmo.output_paths import absolutize
 logger = logging.getLogger(__name__)
 
 
-def _find_nuke_start_flow_node(workflow_name: str):  # noqa: ANN202
+def _find_nuke_start_flow_node():  # noqa: ANN202
     """Return the NukeStartFlow node from the top-level flow, or None."""
     result = GriptapeNodes.handle_request(GetTopLevelFlowRequest())
     if not isinstance(result, GetTopLevelFlowResultSuccess) or result.flow_name is None:
@@ -49,7 +49,7 @@ def get_nuke_publish_options(request: GetPublishOptionsRequest) -> GetPublishOpt
     # If the caller sent no selections, try to restore the last saved publish_config
     # from the NukeStartFlow node so the dialog is pre-populated.
     if not current:
-        start_flow = _find_nuke_start_flow_node(request.workflow_name)
+        start_flow = _find_nuke_start_flow_node()
         if start_flow is not None:
             saved = start_flow.metadata.get("publish_config")
             if saved and isinstance(saved, dict):

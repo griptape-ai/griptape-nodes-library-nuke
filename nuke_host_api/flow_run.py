@@ -12,7 +12,7 @@ from griptape_nodes.retained_mode.events.execution_events import (
     StartFlowResultSuccess,
 )
 
-from nuke_host_api import engine, notify, run_outcome
+from nuke_host_api import engine, loaded_workflow, notify, run_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -39,9 +39,9 @@ def reserve() -> Iterator[bool]:
         _RESERVED = False
 
 
-def start(flow_name: str, workflow_id: str) -> None:
+def start(flow_name: str, workflow_id: str, end_nodes: frozenset[str]) -> None:
     global _RUN  # noqa: PLW0603
-    run_outcome.begin_host_run()
+    run_outcome.begin_host_run(end_nodes)
     _RUN = asyncio.create_task(_run(flow_name, workflow_id))
 
 
@@ -59,7 +59,12 @@ def pending() -> bool:
 
 
 async def busy() -> bool:
-    return pending() or await engine.is_running()
+    return pending() or await loaded_workflow.running()
+
+
+async def engine_busy() -> bool:
+    """Like `busy`, but counting every open workflow's run, for verbs that affect them all."""
+    return pending() or await engine.any_workflow_running()
 
 
 async def _run(flow_name: str, workflow_id: str) -> None:

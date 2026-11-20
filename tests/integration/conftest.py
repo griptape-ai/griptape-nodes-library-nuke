@@ -17,10 +17,9 @@ import griptape_nodes.retained_mode.managers.config_manager as config_manager_mo
 import griptape_nodes.retained_mode.managers.secrets_manager as secrets_manager_module
 import pytest
 from griptape_nodes.node_library.library_registry import LibraryRegistry
-from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.engine import reset_root_engine
 
-from nuke_host_api import run_outcome
+from nuke_host_api import loaded_workflow, run_outcome
 
 from .fixtures.canary.canary_workflow_builder import PublishedBundle, publish_canary_bundle
 
@@ -31,8 +30,8 @@ if TYPE_CHECKING:
 def _reset_engine() -> None:
     """Drop the root ``Engine`` and clear its process-global registries."""
     reset_root_engine()
+    loaded_workflow.forget()
     LibraryRegistry._clear()
-    WorkflowRegistry._workflows.clear()
     run_outcome.clear()
 
 
@@ -49,6 +48,10 @@ def _isolated_engine_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
     # there when it is absent, so an unscoped run scaffolds into the developer's own home.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg_config"))
+    # SyncManager mkdirs synced_workflows under the workspace during Engine.__init__, and the
+    # workspace defaults to ./GriptapeNodes, so an engine built before a test sets its own
+    # workspace scaffolds into the repo root, where the next publish copies it into a bundle.
+    monkeypatch.setenv("GTN_CONFIG_WORKSPACE_DIRECTORY", str(tmp_path / "workspace"))
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_config_path = Path(temp_dir) / "griptape_nodes_config.json"

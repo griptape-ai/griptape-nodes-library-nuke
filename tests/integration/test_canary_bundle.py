@@ -380,12 +380,12 @@ def test_writable_directories_resolve_beside_the_nk_script(
 
     # A static file is the one writable location project.yml alone cannot move: the engine takes
     # it from the `static_files_directory` config value, so this proves the runner's override lands.
-    url = payload["created_static_file_url"]
-    match = re.fullmatch(rf"http://[^/]+/external/(?P<path>.+/{re.escape(_CANARY_STATIC_FILE_NAME)})\?t=\d+", url)
-    assert match is not None, f"Static file URL {url!r} is not a well-formed external static URL.\n{diagnostic}"
-
-    written = Path("/" + match.group("path"))
-    assert written.is_file(), f"Static file URL {url!r} names no file on disk.\n{diagnostic}"
+    reported_static_file = payload["created_static_file_url"]
+    written = Path(reported_static_file)
+    assert written.is_absolute(), (
+        f"Static file came back as {reported_static_file!r}, not a local path Nuke can open.\n{diagnostic}"
+    )
+    assert written.is_file(), f"Static file {reported_static_file!r} names no file on disk.\n{diagnostic}"
     assert written.resolve().is_relative_to((nk_dir / ".griptape" / "staticfiles").resolve()), (
         f"Static file was written to {written}, not beside the .nk script.\n{diagnostic}"
     )

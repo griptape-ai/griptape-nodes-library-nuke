@@ -1,9 +1,8 @@
 """Tests for the load verb.
 
-Loading clears all object state, so most of these assert what the handler does *not* do: a
-request that cannot succeed must not reach ``RunWorkflowFromRegistryRequest``, because
-whatever the engine had loaded before, including a graph an editor user has open, is gone the
-moment it does.
+Loading closes the host's previous workflow, so most of these assert what the handler does
+*not* do: a request that cannot succeed must not reach ``RunWorkflowFromRegistryRequest``,
+because the graph the host had loaded is gone the moment it does.
 """
 
 from __future__ import annotations
@@ -11,6 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from griptape_nodes.node_library.workflow_registry import WorkflowShape
+from griptape_nodes.retained_mode.events.context_events import OpenWorkflowRequest, OpenWorkflowResultFailure
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -18,19 +19,21 @@ from griptape_nodes.retained_mode.events.execution_events import (
 from griptape_nodes.retained_mode.events.parameter_events import (
     GetParameterValueRequest,
     GetParameterValueResultFailure,
+    GetParameterValueResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultFailure,
+    GetWorkflowShapeResultSuccess,
     ImportWorkflowRequest,
     ImportWorkflowResultFailure,
     ImportWorkflowResultSuccess,
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultFailure,
     ListAllWorkflowsResultSuccess,
-    RunWorkflowFromRegistryRequest,
-    RunWorkflowFromRegistryResultFailure,
 )
 
-from nuke_host_api import engine, flow_run, run_outcome
+from nuke_host_api import engine, flow_run, loaded_workflow, run_outcome
 from nuke_host_api.events import (
     NukeLoadWorkflowRequest,
     NukeLoadWorkflowResultFailure,
@@ -38,7 +41,7 @@ from nuke_host_api.events import (
 )
 from nuke_host_api.handlers import handle_load_workflow
 from nuke_host_api.protocol import ParameterSection, ValueType
-from tests.unit.host_api_fakes import WORKFLOW_TABLE, load_responses, respond_to_get_value, use_engine
+from tests.unit.host_api_fakes import SHAPE, WORKFLOW_TABLE, load_responses, respond_to_get_value, use_engine
 
 BUSY_FLOW = GetFlowStateResultSuccess(
     control_nodes=["C1"], resolving_nodes=["N1"], involved_nodes=["N1"], result_details="busy"
@@ -46,11 +49,11 @@ BUSY_FLOW = GetFlowStateResultSuccess(
 
 
 def _loaded(engine: Any) -> bool:
-    return any(isinstance(request, RunWorkflowFromRegistryRequest) for request in engine.requests)
+    return any(isinstance(request, OpenWorkflowRequest) for request in engine.requests)
 
 
 class TestLoadWorkflow:
-    async def test_a_workflow_id_is_loaded_with_a_clean_slate(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_workflow_id_is_opened(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, load_responses())
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
@@ -58,9 +61,8 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         assert result.workflow_id == "wf1"
         assert result.name == "WF One"
-        load = next(r for r in engine.requests if isinstance(r, RunWorkflowFromRegistryRequest))
-        assert load.workflow_name == "wf1"
-        assert load.run_with_clean_slate is True
+        opened = next(r for r in engine.requests if isinstance(r, OpenWorkflowRequest))
+        assert opened.workflow_name == "wf1"
 
     async def test_a_load_forgets_the_previous_graphs_verdict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Reloading the same id still discards the graph the verdict described."""
@@ -103,7 +105,10 @@ class TestLoadWorkflow:
             "name",
             "type",
             "is_list",
+            "is_sequence",
+            "default_value",
             "choices",
+            "file_format",
             "tooltip",
             "settable",
             "hidden",
@@ -120,7 +125,9 @@ class TestLoadWorkflow:
         assert result.output_values["End Flow"]["was_successful"]["value_type"] == ValueType.BOOL
         assert result.unavailable == []
 
-    async def test_a_live_value_is_a_descriptor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_declared_default_is_a_value_while_a_live_value_is_a_descriptor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         use_engine(monkeypatch, load_responses())
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
@@ -128,6 +135,8 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         keys = {"value_type", "value", "engine_type"}
         assert set(result.input_values["Start Flow"]["topic"]) == keys
+        topic = next(declared for declared in result.inputs if declared["parameter"] == "topic")
+        assert topic["default_value"] == "a quiet harbour at dusk"
 
     async def test_control_parameters_reach_neither_the_declarations_nor_the_values(
         self, monkeypatch: pytest.MonkeyPatch
@@ -194,18 +203,26 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultFailure)
         assert engine.requests == []
 
-    async def test_refuses_while_the_engine_is_executing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Loading discards the running graph, and the host would still be told it succeeded."""
-        engine = use_engine(monkeypatch, load_responses({GetFlowStateRequest: BUSY_FLOW}))
+    async def test_refuses_while_the_hosts_workflow_is_executing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Loading replaces the workflow the host's run belongs to, and the host would lose track of it."""
+        engine = use_engine(monkeypatch, load_responses({GetFlowStateRequest: BUSY_FLOW}), loaded="wf0")
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultFailure)
+        assert result.engine_state_cleared is False
         assert not _loaded(engine)
 
-    async def test_an_unknown_id_is_refused_before_the_engine_state_is_cleared(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_another_workflows_run_does_not_block_a_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With nothing loaded there is no host run to wait for, whatever an editor tab is running."""
+        engine = use_engine(monkeypatch, load_responses({GetFlowStateRequest: BUSY_FLOW}))
+        engine.open_workflows.open("editor-tab")
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+
+    async def test_an_unknown_id_is_refused_before_anything_is_opened(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The registry is read first for exactly this reason."""
         engine = use_engine(monkeypatch, load_responses())
 
@@ -236,11 +253,7 @@ class TestLoadWorkflow:
         engine = use_engine(
             monkeypatch,
             load_responses(
-                {
-                    RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(
-                        result_details="the workflow file is missing"
-                    )
-                }
+                {OpenWorkflowRequest: OpenWorkflowResultFailure(result_details="the workflow file is missing")}
             ),
         )
 
@@ -253,26 +266,25 @@ class TestLoadWorkflow:
             "must not read values off a graph it never loaded"
         )
 
-    async def test_a_load_the_engine_refuses_reports_that_the_previous_graph_is_already_gone(
+    async def test_a_load_the_engine_refuses_keeps_the_previous_workflow_loaded(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The engine clears all object state before it builds the graph, so this failure costs.
-
-        A host that read the refusal as "nothing changed" would keep showing knobs for a graph
-        the engine no longer holds, and the artist whose comp was discarded gets no signal.
-        """
-        use_engine(
+        """The new workflow is opened before the previous one is closed, so a failed open costs nothing."""
+        engine = use_engine(
             monkeypatch,
-            load_responses(
-                {RunWorkflowFromRegistryRequest: RunWorkflowFromRegistryResultFailure(result_details="library missing")}
-            ),
+            load_responses({OpenWorkflowRequest: OpenWorkflowResultFailure(result_details="library missing")}),
+            loaded="wf0",
         )
 
         result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
 
         assert isinstance(result, NukeLoadWorkflowResultFailure)
-        assert result.engine_state_cleared is True
-        assert "cleared" in str(result.result_details)
+        assert result.engine_state_cleared is False
+        assert "library missing" in str(result.result_details)
+        assert engine.open_workflows.find("wf0-open") is not None
+        loaded = loaded_workflow.current()
+        assert loaded is not None
+        assert loaded.name == "wf0"
 
     @pytest.mark.parametrize(
         ("request_payload", "overrides"),
@@ -280,7 +292,6 @@ class TestLoadWorkflow:
             (NukeLoadWorkflowRequest(workflow_id="ghost"), {}),
             (NukeLoadWorkflowRequest(), {}),
             (NukeLoadWorkflowRequest(workflow_id="wf1", file_path="/shots/other.py"), {}),
-            (NukeLoadWorkflowRequest(workflow_id="wf1"), {GetFlowStateRequest: BUSY_FLOW}),
             (
                 NukeLoadWorkflowRequest(file_path="/tmp/notes.txt"),
                 {ImportWorkflowRequest: ImportWorkflowResultFailure(result_details="not a workflow file")},
@@ -305,7 +316,7 @@ class TestLoadWorkflow:
         assert isinstance(result, NukeLoadWorkflowResultFailure)
         assert result.engine_state_cleared is False
 
-    async def test_a_clean_load_costs_four_engine_requests_plus_one_per_declared_parameter(
+    async def test_a_clean_load_costs_three_engine_requests_plus_one_per_declared_parameter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The cost scales with the workflow, which is why no fixed number is documented."""
@@ -315,8 +326,60 @@ class TestLoadWorkflow:
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
         declared = len(result.inputs) + len(result.outputs)
-        assert len(engine.requests) == 4 + declared
+        assert len(engine.requests) == 3 + declared
         assert sum(isinstance(r, GetParameterValueRequest) for r in engine.requests) == declared
+
+    async def test_load_reports_the_parameters_of_the_graph_as_it_stands(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An editor tab's unsaved Start Flow parameter is declared, though the saved shape lacks it."""
+        live = {**SHAPE, "inputs": {"Start Flow": {**SHAPE["inputs"]["Start Flow"], "mood": {"type": "str"}}}}
+
+        def respond(request: GetParameterValueRequest) -> Any:
+            if request.parameter_name == "mood":
+                return GetParameterValueResultSuccess(
+                    input_types=["str"], type="str", output_type="str", value="calm", result_details="ok"
+                )
+            return respond_to_get_value(request)
+
+        use_engine(
+            monkeypatch,
+            load_responses(
+                {
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultSuccess(
+                        workflow_shape=WorkflowShape(**live), result_details="shape"
+                    ),
+                    GetParameterValueRequest: respond,
+                }
+            ),
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        assert "mood" in {parameter["parameter"] for parameter in result.inputs}
+        assert "mood" in result.input_values["Start Flow"]
+
+    async def test_load_reports_the_saved_default_of_an_input_edited_in_a_tab(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A reset-to-default button must send the author's default, not the value an editor user typed."""
+        topic = {**SHAPE["inputs"]["Start Flow"]["topic"], "default_value": "edited in a tab"}
+        live = {**SHAPE, "inputs": {"Start Flow": {**SHAPE["inputs"]["Start Flow"], "topic": topic}}}
+        use_engine(
+            monkeypatch,
+            load_responses(
+                {
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultSuccess(
+                        workflow_shape=WorkflowShape(**live), result_details="shape"
+                    )
+                }
+            ),
+        )
+
+        result = await handle_load_workflow(NukeLoadWorkflowRequest(workflow_id="wf1"))
+
+        assert isinstance(result, NukeLoadWorkflowResultSuccess)
+        defaults = {parameter["parameter"]: parameter["default_value"] for parameter in result.inputs}
+        assert defaults["topic"] == "a quiet harbour at dusk"
 
     async def test_a_file_path_load_costs_one_engine_request_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
         engine = use_engine(monkeypatch, load_responses())
@@ -324,7 +387,7 @@ class TestLoadWorkflow:
         result = await handle_load_workflow(NukeLoadWorkflowRequest(file_path="/shots/sq010/comp.py"))
 
         assert isinstance(result, NukeLoadWorkflowResultSuccess)
-        assert len(engine.requests) == 5 + len(result.inputs) + len(result.outputs)
+        assert len(engine.requests) == 4 + len(result.inputs) + len(result.outputs)
 
     async def test_a_parameter_the_engine_will_not_answer_for_is_reported_not_omitted(
         self, monkeypatch: pytest.MonkeyPatch
@@ -354,15 +417,19 @@ class TestLoadWorkflow:
             "an unreadable value must not remove the parameter's declaration"
         )
 
-    async def test_a_workflow_with_no_declared_shape_loads_and_reports_nothing(
+    async def test_a_workflow_with_no_start_or_end_node_loads_and_reports_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The engine sends workflow_shape as null for some workflows. It is still loadable."""
         table = {**WORKFLOW_TABLE, "shapeless": {"name": "Shapeless"}}
         engine = use_engine(
             monkeypatch,
             load_responses(
-                {ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=table, result_details="ok")}
+                {
+                    ListAllWorkflowsRequest: ListAllWorkflowsResultSuccess(workflows=table, result_details="ok"),
+                    GetWorkflowShapeRequest: GetWorkflowShapeResultFailure(
+                        result_details="Workflow 'shapeless' does not have a StartNode."
+                    ),
+                }
             ),
         )
 

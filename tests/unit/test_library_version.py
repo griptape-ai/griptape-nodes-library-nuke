@@ -6,6 +6,7 @@ protocol.py's old LIBRARY_VERSION constant drifted from the manifest; this reads
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,7 +23,8 @@ def _clear_cache() -> Any:
 
 
 def test_reads_the_shipped_version_from_the_manifest() -> None:
-    assert library_version.version() == "0.3.0"
+    manifest = json.loads((Path(__file__).parents[2] / "griptape-nodes-library.json").read_text())
+    assert library_version.version() == manifest["metadata"]["library_version"]
 
 
 def test_the_read_is_cached() -> None:

@@ -17,6 +17,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }}
 
+      # The bump rolls changelog.d into CHANGELOG.md with scripts/changelog.py.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"

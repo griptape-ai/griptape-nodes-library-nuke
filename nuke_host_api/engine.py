@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
+from griptape_nodes.node_library.library_registry import LibraryRegistry
+from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.app_events import (
+    AppJoinSessionRequest,
+    AppJoinSessionResultSuccess,
+    AppLeaveSessionRequest,
+    AppLeaveSessionResultSuccess,
     GetEngineNameRequest,
     GetEngineNameResultSuccess,
     GetEngineVersionRequest,
     GetEngineVersionResultSuccess,
 )
 from griptape_nodes.retained_mode.events.base_events import RequestPayload, ResultPayload
-from griptape_nodes.retained_mode.events.context_events import (
-    GetWorkflowContextRequest,
-    GetWorkflowContextSuccess,
-)
 from griptape_nodes.retained_mode.events.execution_events import (
     GetFlowStateRequest,
     GetFlowStateResultSuccess,
@@ -24,10 +29,21 @@ from griptape_nodes.retained_mode.events.flow_events import (
     GetTopLevelFlowResultSuccess,
 )
 from griptape_nodes.retained_mode.events.workflow_events import (
+    GetWorkflowShapeRequest,
+    GetWorkflowShapeResultSuccess,
     ListAllWorkflowsRequest,
     ListAllWorkflowsResultSuccess,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+    from griptape_nodes.retained_mode.runtime.workflow_runtime import WorkflowRuntime
+
+logger = logging.getLogger("griptape_nodes")
+
+HOST_CLIENT_TYPE = "nuke"
 
 
 @dataclass(frozen=True)
@@ -76,6 +92,29 @@ def session_id() -> str:
     return GriptapeNodes.get_session_id() or ""
 
 
+async def join_session_as_host(client_id: str) -> None:
+    """List the host on the active session so discovery shows who holds the engine; a host never opens one."""
+    active_session = session_id()
+    if not active_session:
+        logger.debug("Nuke host API: no active session to list %s on", client_id)
+        return
+    attempt = await request(
+        AppJoinSessionRequest(
+            session_id=active_session, client_id=client_id, client_type=HOST_CLIENT_TYPE, client_label=client_id
+        ),
+        AppJoinSessionResultSuccess,
+    )
+    if attempt.value is None:
+        logger.warning("Nuke host API: could not join session %s as %s: %s", active_session, client_id, attempt.details)
+
+
+async def leave_session_as_host(client_id: str) -> None:
+    """Delist a displaced host; nothing to do when no session was ever opened."""
+    attempt = await request(AppLeaveSessionRequest(client_id=client_id), AppLeaveSessionResultSuccess)
+    if attempt.value is None:
+        logger.debug("Nuke host API: could not delist %s: %s", client_id, attempt.details)
+
+
 async def engine_name() -> str:
     """Empty is reserved for an engine name lookup failure."""
     attempt = await request(GetEngineNameRequest(), GetEngineNameResultSuccess)
@@ -92,12 +131,13 @@ async def top_level_flow_name() -> str | None:
     return attempt.value.flow_name
 
 
-async def current_workflow_id() -> str:
-    """Return the loaded workflow's id, or empty when none is loaded."""
-    attempt = await request(GetWorkflowContextRequest(), GetWorkflowContextSuccess)
-    if attempt.value is None or not attempt.value.workflow_name:
-        return ""
-    return attempt.value.workflow_name
+def open_workflow(open_id: str) -> WorkflowRuntime | None:
+    return GriptapeNodes.get_instance().open_workflows.find(open_id)
+
+
+def bind_workflow(workflow: WorkflowRuntime) -> AbstractContextManager[None]:
+    """Name the workflow for every request in the block, which the engine needs once several are open."""
+    return GriptapeNodes.get_instance().bind_workflow(workflow)
 
 
 async def workflow_table() -> dict | None:
@@ -106,6 +146,34 @@ async def workflow_table() -> dict | None:
     if attempt.value is None:
         return None
     return attempt.value.workflows
+
+
+def library_workflow_owners() -> dict[Path, str]:
+    """Map each library-provided workflow file to the library that provides it."""
+    # The registry does not record the providing library, so rebuild the two lists the engine
+    # registers library workflows from: each library's `workflows` and its workflow nodes' files.
+    owners: dict[Path, str] = {}
+    library_manager = GriptapeNodes.LibraryManager()
+    for library_name in LibraryRegistry.list_libraries():
+        library_info = library_manager.get_library_info_by_library_name(library_name)
+        if library_info is None:
+            continue
+        try:
+            declared = LibraryRegistry.get_library(name=library_name).get_library_data().workflows or []
+        except KeyError:
+            declared = []
+        base_dir = Path(library_info.library_path).parent
+        files = [base_dir / workflow for workflow in declared]
+        files.extend(Path(node_class.workflow_file_path) for node_class in library_info.workflow_node_classes)
+        for file in files:
+            # Two libraries listing one file is ambiguous; the first one listed keeps it.
+            owners.setdefault(file.resolve(), library_name)
+    return owners
+
+
+def workflow_file(file_path: str) -> Path:
+    """Resolve a registry file path, which is workspace-relative, to compare with a library's files."""
+    return Path(WorkflowRegistry.get_complete_file_path(file_path)).resolve()
 
 
 @dataclass(frozen=True)
@@ -125,8 +193,9 @@ async def lookup_workflow(workflow_id: str) -> WorkflowLookup:
     return WorkflowLookup(entry=entry if isinstance(entry, dict) else None, registry_readable=True)
 
 
-async def workflow_entry(workflow_id: str) -> dict | None:
-    return (await lookup_workflow(workflow_id)).entry
+async def workflow_shape(workflow_name: str) -> Attempt[GetWorkflowShapeResultSuccess]:
+    """The bound workflow's inputs and outputs as its graph stands now; the name only labels messages."""
+    return await request(GetWorkflowShapeRequest(workflow_name=workflow_name), GetWorkflowShapeResultSuccess)
 
 
 async def flow_state(flow_name: str) -> Attempt[GetFlowStateResultSuccess]:
@@ -145,3 +214,12 @@ async def is_running() -> bool:
     if attempt.value is None:
         return False
     return flow_is_running(attempt.value)
+
+
+async def any_workflow_running() -> bool:
+    """Whether any open workflow is running, an editor tab's included."""
+    for workflow in GriptapeNodes.get_instance().open_workflows.all_open():
+        with bind_workflow(workflow):
+            if await is_running():
+                return True
+    return False

@@ -215,13 +215,24 @@ class TestFrameHandling:
         assert payload["response_topic"] == host_api_client.REPLY_TOPIC
         assert payload["request_id"]
 
+    def test_entering_subscribes_to_the_reply_topic_before_any_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The engine routes by topic, so a client that never subscribes never hears a reply."""
+        sock = FakeSocket([])
+        sock.connect = lambda _path: None  # type: ignore[attr-defined]
+        monkeypatch.setattr(host_api_client.socket, "socket", lambda *_args: sock)
+        with HostClient(socket_path="/unused", timeout_s=1.0) as client, pytest.raises(TimeoutError):
+            client.request("NukeConnectRequest")
+
+        assert sock.sent[0] == {"type": "subscribe", "topic": host_api_client.REPLY_TOPIC, "payload": {}}
+        assert sock.sent[1]["payload"]["response_topic"] == host_api_client.REPLY_TOPIC
+
     def test_a_reply_for_a_different_request_is_discarded(self) -> None:
         client, _ = _client([_reply("someone-else"), _reply("mine")])
         payload = client._pump(until_request_id="mine")  # noqa: SLF001
         assert payload["request_id"] == "mine"
 
     def test_an_event_from_another_library_is_not_recorded(self) -> None:
-        """Every outbound frame reaches every client, so filtering is the host's job."""
+        """The event topic is shared with every library, so filtering is the host's job."""
         client, _ = _client(
             [
                 _app_event("SomeOtherLibraryEvent", detail="not mine"),

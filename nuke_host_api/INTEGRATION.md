@@ -27,9 +27,9 @@ Defined in `nuke_host_api/protocol.py`. The surface has no recorded compatibilit
 
 | Category | Members |
 |---|---|
-| Verbs | `NukeConnectRequest`, `NukeDisconnectRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
+| Verbs | `NukeConnectRequest`, `NukeDisconnectRequest`, `NukePingRequest`, `NukeListWorkflowsRequest`, `NukeDescribeWorkflowRequest`, `NukeLoadWorkflowRequest`, `NukeExecuteWorkflowRequest`, `NukeGetExecutionStateRequest`, `NukeGetParameterValuesRequest`, `NukeSetParameterValuesRequest`, `NukeCancelExecutionRequest`, `NukeListProjectsRequest`, `NukeGetCurrentProjectRequest`, `NukeSetCurrentProjectRequest`, `NukeDescribeProjectRequest` |
 | Notifications | `NukeNodeStateEvent`, `NukeParameterValueEvent`, `NukeExecutionStateEvent`, `NukeExecutionNodesEvent`, `NukeHostDisconnectEvent` |
-| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool` |
+| Value types | `GTImage`, `GTMovie`, `GTFile`, `GTText`, `GTInt`, `GTFloat`, `GTBool`, `GTUnknown` |
 | Parameter sections | `inputs`, `outputs` |
 | Node states | `unresolved`, `running`, `resolved`, `failed` |
 | Execution states | `succeeded`, `failed`, `cancelled` |
@@ -55,6 +55,7 @@ project verbs read and change engine-wide project state and need no loaded workf
 |---|---|---|
 | `NukeConnectRequest` | no | no |
 | `NukeDisconnectRequest` | no | no |
+| `NukePingRequest` | no | no |
 | `NukeListWorkflowsRequest` | no | no |
 | `NukeDescribeWorkflowRequest` | no | yes, required |
 | `NukeListProjectsRequest` | no | no |
@@ -70,8 +71,8 @@ project verbs read and change engine-wide project state and need no loaded workf
 
 A parameter's live value exists on a loaded node, so no read verb can select one by
 `workflow_id`: for an unloaded workflow there is nothing to read. Loading is the only way to
-make one readable, and it is destructive, so it is a verb of its own rather than something a
-read does on a host's behalf.
+make one readable, and it switches the workflow the host's verbs act on, so it is a verb of its
+own rather than something a read does on a host's behalf.
 
 ## Connecting
 
@@ -85,9 +86,9 @@ and queueing as documented app behaviour rather than as behaviour this library p
 A host connects over `websocket_direct`, a WebSocket server the engine binds on loopback.
 There are two other transports and neither is the one to build a plugin on:
 `websocket_api` is the outbound link to the hosted service and accepts no local
-connections, and `local_socket` (Unix socket, named pipe on Windows) fans every frame out
-to every client with no topic routing, drops a slow reader permanently, and serializes that
-fan-out under one lock.
+connections, and `local_socket` (Unix socket, named pipe on Windows) drops a slow reader
+permanently and serializes its writes under one lock. It routes by topic the same way
+`websocket_direct` does, so the subscribe-then-connect order in step 3 holds on either.
 
 ### 1. Enable the transport, once per machine
 
@@ -192,11 +193,16 @@ whose `payload_type` does not begin with `Nuke`.
 |---|---|
 | Which engines exist | Configured URLs ([step 2](#2-open-the-connection)); a completed handshake checks liveness |
 | Which engine is this, and is it busy | `NukeConnectResultSuccess` for id, name, version, and session, then `NukeGetExecutionStateRequest` for what is running |
-| Is a Nuke session already driving it | The claim holder named in a connect success or refusal |
+| Is a Nuke session already driving it | The claim holder named in a connect success or refusal. A refusal also reports `running` and `workflow_id`. Before connecting, the `clients` list in engine discovery is a hint only: an empty list does not mean the engine is unclaimed |
 
 The engine's `EngineHeartbeatRequest` returns engine identity, session id, and active workflow
 in one round trip without requiring this library. It is outside the [bound surface](#bound-surface)
-and follows the engine's release cadence. It does not report the Nuke host claim.
+and follows the engine's release cadence. Its `clients` list carries the claim holder as
+`{"client_id": <trimmed client_name>, "client_type": "nuke", "connected_at": <ISO time>}`.
+The list and the claim drift: a crashed host stays listed until a disconnect, a `force`
+takeover, or the session ending removes it, and a host on an engine with no session, or whose
+session the editor has since replaced, holds the claim without being listed. Treat the list as
+a hint and the connect reply or refusal as the answer.
 
 ## Frame formats
 
@@ -214,11 +220,9 @@ Frames are discriminated by the top-level `type` field, absent on outbound reque
 | `app_event` | engine to host | `payload.payload_type` |
 | `pong` | engine to host | answer to `ping`, echoes `id` |
 
-Heartbeat: send `{ "type": "ping", "id": "..." }` and the engine answers
-`{ "type": "pong", "id": "..." }` on the same connection, without the frame reaching the
-engine's event dispatch. Nothing pings the host, and WebSocket protocol-level ping frames
-are not part of what this driver answers. A dead engine otherwise shows up as a closed
-connection, or as a failure to answer a cheap `NukeGetExecutionStateRequest`.
+Transport heartbeat: send `{ "type": "ping", "id": "..." }` and the transport answers
+`{ "type": "pong", "id": "..." }`. A pong proves the connection is up, not the engine. To
+check the engine, send [`NukePingRequest`](#nukepingrequest).
 
 ### Requests
 
@@ -346,7 +350,7 @@ other verbs answer without it.
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `client_protocol_versions` | `list[int]` | `[]` | Every version the host can speak. Empty means "assume current" |
-| `client_name` | `str` | `""` | Required, nonblank claim key. Trimmed before use; choose a per-session name |
+| `client_name` | `str` | `""` | Required, nonblank claim key. Trimmed before use; choose a per-session name. It is published verbatim as `client_id` in engine discovery, visible to the whole organization, so pick it knowing that |
 | `force` | `bool` | `false` | Take another host's claim after artist confirmation |
 
 | `NukeConnectResultSuccess` field | Type | Notes |
@@ -358,7 +362,7 @@ other verbs answer without it.
 | `event_topic` | `str` | The topic notifications are published on. Subscribe to it or receive none |
 | `value_types` | `list[str]` | Closed value type set for this version |
 | `engine_id` | `str` | The engine's own id. Empty when the engine has not set one |
-| `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open |
+| `session_id` | `str` | The engine's active session, shared engine state, not this connection's own. Empty when no session is open; a host never opens one |
 | `engine_name` | `str` | Human-readable. Empty when the engine could not report one |
 | `host_client_name` | `str` | This host's trimmed `client_name` |
 | `host_connected_at` | `float` | Epoch seconds of this handshake |
@@ -380,6 +384,11 @@ The transport provides no disconnect signal, so a host releases its claim with
 library reloads and last until engine restart, even if the host crashes; use `force` to
 reclaim such an engine.
 
+A granted connect also joins the engine's active session, if there is one, and lists the host
+on it under its trimmed `client_name` so engine discovery can show the engine as held (see
+[step 5](#5-deciding-whether-this-is-the-engine-to-drive)). A host never opens a session. A
+`force` takeover delists the displaced host. Neither step can fail the handshake.
+
 **Connect before expecting notifications.** The outbound event bridge installs on the first
 `NukeConnectRequest` rather than at library load, so an engine no host has spoken to does not
 pay to translate and re-emit every execution event it runs. A host that skips connect and
@@ -394,7 +403,7 @@ yet.
   "engine_version": "0.99.0",
   "library_version": "0.3.0",
   "event_topic": "sessions/50c24f4744a4463084ea3a701644993a/response",
-  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool"],
+  "value_types": ["GTImage", "GTMovie", "GTFile", "GTText", "GTInt", "GTFloat", "GTBool", "GTUnknown"],
   "engine_id": "a69c283e-...",
   "session_id": "50c24f47-...",
   "engine_name": "Dan's workstation",
@@ -404,14 +413,25 @@ yet.
 }
 ```
 
-`NukeConnectResultFailure` names the claim holder on a claim refusal. A blank-name or version
+`NukeConnectResultFailure` names the claim holder on a claim refusal, and reports what the
+engine is doing so the artist can decide whether to take it over. A blank-name or version
 refusal names no host; a version refusal reports the support window:
+
+| `NukeConnectResultFailure` field | Type | Notes |
+|---|---|---|
+| `supported_protocol_versions` | `list[int]` | Full support window |
+| `host_client_name` | `str` | The claim holder on a claim refusal, otherwise empty |
+| `host_connected_at` | `float` | Epoch seconds the holder connected, otherwise `0.0` |
+| `running` | `bool` | On a claim refusal, whether anything is executing, as `NukeGetExecutionStateRequest` reports it. Otherwise `false` |
+| `workflow_id` | `str` | On a claim refusal, the loaded workflow. Empty when none is loaded, and on other refusals |
 
 ```json
 {
   "supported_protocol_versions": [1],
   "host_client_name": "",
   "host_connected_at": 0.0,
+  "running": false,
+  "workflow_id": "",
   "result_details": {
     "result_details": [
       {
@@ -423,18 +443,21 @@ refusal names no host; a version refusal reports the support window:
 }
 ```
 
-Show a claim refusal to the artist. A "connect anyway" action re-sends with `force: true`:
+Show a claim refusal to the artist, and warn when `running` is true, since forcing asks the host
+driving that run to disconnect. A "connect anyway" action re-sends with `force: true`:
 
 ```json
 {
   "supported_protocol_versions": [1],
   "host_client_name": "Nuke 16.0v7 shot_040 dan",
   "host_connected_at": 1763596991.183,
+  "running": true,
+  "workflow_id": "wf1",
   "result_details": {
     "result_details": [
       {
         "level": 40,
-        "message": "Attempted to connect Nuke 16.0v7 shot_112 amy. Failed because Nuke 16.0v7 shot_040 dan connected to this engine at 2025-11-19 15:03:11 and is the host it reports. Send force=true to become that host instead. The other host is not disconnected, keeps its own event subscription, and can still drive this engine."
+        "message": "Attempted to connect Nuke 16.0v7 shot_112 amy. Failed because Nuke 16.0v7 shot_040 dan connected to this engine at 2025-11-19 15:03:11 and is the host it reports. A workflow (wf1) is running now. Send force=true to become that host instead. The other host is not disconnected, keeps its own event subscription, and can still drive this engine."
       }
     ]
   }
@@ -444,8 +467,9 @@ Show a claim refusal to the artist. A "connect anyway" action re-sends with `for
 ### NukeDisconnectRequest
 
 Send before closing the socket, on script close and on Nuke exit. It releases the host claim
-so the next host connects without `force`. It does not close the connection, unsubscribe the
-host, or stop notifications.
+so the next host connects without `force`, and delists the host from the engine's session so
+discovery stops showing it. It does not close the connection, unsubscribe the host, or stop
+notifications.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -473,11 +497,21 @@ unchanged.
 A library older than this verb answers with the engine's failure for an unknown request type.
 Treat that as nothing to release and close anyway.
 
+### NukePingRequest
+
+Checks that the engine is alive. A reply means it is, and no reply within the host's timeout
+means it is not. Works before `NukeConnectRequest` and changes nothing.
+
+No request or result fields. This library never returns `NukePingResultFailure`.
+
 ### NukeListWorkflowsRequest
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
 | `runnable_only` | `bool` | `true` | `false` returns unavailable workflows too, for diagnostic lists |
+| `templates_only` | `bool` | `false` | `true` returns only entries whose `template` is true |
+
+Workflows the engine marks internal, such as a library's test workflows, are never listed.
 
 `NukeListWorkflowsResultSuccess.workflows` entries:
 
@@ -488,6 +522,9 @@ Treat that as nothing to release and close anyway.
 | `description` | `str` | |
 | `runnable` | `bool` | True when the workflow declares an input/output shape and its file is still on disk |
 | `unavailable_reason` | `str` | Why an entry is greyed out. Empty when runnable |
+| `template` | `bool` | True when the engine opens the workflow as a copy, leaving the original untouched. Every `library_provided` workflow is a template, and a user can mark their own |
+| `library_provided` | `bool` | True when an installed library ships the workflow, from Griptape or anyone else. The user cannot edit it in place |
+| `library_name` | `str` | The library that ships a `library_provided` workflow, as the engine names it. Empty for the user's own workflows, and when no registered library lists the file |
 
 ```json
 {
@@ -497,7 +534,10 @@ Treat that as nothing to release and close anyway.
       "name": "Nuke API Smoke",
       "description": "",
       "runnable": true,
-      "unavailable_reason": ""
+      "unavailable_reason": "",
+      "template": true,
+      "library_provided": true,
+      "library_name": "Griptape Nodes Library"
     }
   ]
 }
@@ -524,18 +564,40 @@ Parameter descriptor fields:
 | `node` | Node name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `parameter` | Parameter name. Addresses inputs in `NukeExecuteWorkflowRequest` |
 | `name` | Author's display label, or `parameter` when absent. Never prefixed with `node` |
-| `type` | Always one of the seven value types. For a list parameter, the type of each item |
+| `type` | Always one of the value types in `value_types`. For a list parameter, the type of each item |
 | `is_list` | `true` for a list parameter, `false` for a single one, `null` when the declaration says neither (`any`). Decides whether a value is an array. See [Value descriptors](#value-descriptors) |
+| `is_sequence` | `true` for a declared `Sequence` or `list[Sequence]`, whose `type` is `GTImage`. Its value is a `####` pattern with `first` and `last`. See [Setting a sequence](#setting-a-sequence) |
+| `default_value` | The workflow author's default, in the same shape as a value descriptor's `value`, macros resolved. What a reset-to-default button sends |
 | `choices` | The values a dropdown parameter offers, in author order. Empty for every parameter that is not one |
+| `file_format` | `image`, `video`, `audio`, or `threed` when the parameter's value names a file format of that kind, so `choices` are format names. `null` otherwise. See [File format choices](#file-format-choices) |
 | `tooltip` | Help text for the knob. Empty when the author wrote none |
 | `settable` | False means the engine will refuse a value. Build the knob read-only |
 | `hidden` | True when the author hid the parameter in the editor. Still declared, still settable |
+
+`default_value` has the same shape as a value descriptor's `value`, so one parser reads both,
+and sending it back through `NukeSetParameterValuesRequest` resets the knob. It is `null`, or
+`[]` for a list parameter, when the author set no default or the default has no host form.
 
 Non-empty `choices` is the set of values the workflow author offers, so build an
 `Enumeration_Knob` from them. Treat the list as what to offer, not as a guarantee: the engine can
 repopulate a dropdown while the graph holds an older value, so a value outside `choices` can be
 read back, and setting one the engine rejects is reported in `rejected_inputs`. Multi-select
 parameters report no choices.
+
+### File format choices
+
+A parameter whose node marks it with the engine's `FileFormat` trait reports its kind in
+`file_format`. The trait renders the kind as the parameter's `file_format` UI option, and the editor
+copies a parameter's UI options onto the Start Flow parameter it builds when the author drags a
+connection out of Start Flow, so the Start Flow parameter reports the same kind. A Start Flow
+parameter the author built by hand reports `null` unless they set the option themselves. Use it to
+drop choices the host cannot open; leave `choices` alone when `file_format` is `null`, since an
+ordinary dropdown can hold anything. A marked parameter can still
+offer a choice that is not an extension, such as `auto`, so decide whether to keep unrecognized
+choices rather than dropping everything that is not a known extension. Compare case-insensitively
+and treat `jpeg` and `jpg` as one format: some nodes offer `PNG`, others `png`.
+
+A workflow saved before its nodes declared the trait reports `null` until it is saved again.
 
 A hidden parameter is still declared, readable, and settable. Build it as a hidden or advanced
 knob, or leave it off the panel and set it programmatically.
@@ -545,8 +607,8 @@ widget but leaves the port connectable, and it excludes a hidden parameter group
 workflow shape does not describe at all. Either reports `hidden: false`, so read the field as "the
 author hid this parameter" rather than "the editor shows nothing here".
 
-Every field is always present. A parameter the engine gave no metadata for reports
-`is_list: null`, no choices, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
+Every field is always present. A parameter the engine gave no metadata for reports a `null`
+default, `is_list: null`, no choices, `file_format: null`, an empty tooltip, `settable: true`, and `hidden: false` rather than omitting
 keys.
 
 **`type` can be narrower at runtime.** `type` is built from the declared type name, before any
@@ -557,7 +619,8 @@ direction only, by narrowing:
 |---|---|---|
 | A media type or scalar (`ImageUrlArtifact`, `Sequence`, `int`, `bool`) | that type | that type, or one of the two overrides below |
 | An artifact class this version does not map (`GenericArtifact`) | `GTFile` | `GTFile`, `GTImage`, `GTMovie`, or one of the two overrides below |
-| `str` / `string`, or a wildcard (`any`, `all`) | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
+| `str` / `string`, `python`, `yaml`, `json`, a wildcard (`any`, `all`), a bare `list`, or no type | `GTText` | anything: a local path classifies from its extension, since only a `GTImage`- or `GTMovie`-declared parameter keeps its declared type |
+| A class that is not an artifact and that this version does not map (`dict`, `PromptDriver`) | `GTUnknown` | `GTUnknown` while unset, or whatever type the value itself classifies as |
 | `float` | `GTFloat` | `GTFloat`, whatever the value holds: a float parameter the engine happens to hold `4` in is still a float parameter |
 | `int` | `GTInt` | `GTInt`, or `GTFloat` when the engine hands over a float, because reporting `GTInt` would invite a host to truncate it |
 
@@ -586,7 +649,10 @@ arrives. Never branch on the declared type at runtime.
       "name": "Topic",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": "a quiet harbour at dusk",
       "choices": [],
+      "file_format": null,
       "tooltip": "What the shot is about.",
       "settable": true,
       "hidden": false
@@ -597,7 +663,10 @@ arrives. Never branch on the declared type at runtime.
       "name": "Size",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": "1024x1024",
       "choices": ["1024x1024", "1536x1024", "1024x1536"],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -608,7 +677,10 @@ arrives. Never branch on the declared type at runtime.
       "name": "Frame Rate",
       "type": "GTFloat",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": 23.976,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -621,7 +693,10 @@ arrives. Never branch on the declared type at runtime.
       "name": "was_successful",
       "type": "GTBool",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": null,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -632,7 +707,10 @@ arrives. Never branch on the declared type at runtime.
       "name": "result_details",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": null,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -643,7 +721,10 @@ arrives. Never branch on the declared type at runtime.
       "name": "summary",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": null,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -662,10 +743,24 @@ the declared parameters and their current values, for both sides, in one reply. 
 before `NukeExecuteWorkflowRequest`, `NukeGetParameterValuesRequest`, or
 `NukeGetExecutionStateRequest` can answer for the workflow a host means.
 
-**Destructive.** The engine clears all object state to load a graph, so this discards whatever
-was loaded before, including a graph an editor user has open on the same engine. Confirm with
-the artist before sending it. It clears before it knows the load will succeed, so a failed load
-can leave nothing loaded at all.
+**Switches the host's workflow.** Loading opens the requested workflow from its file, so loading
+the one this host opened again resets its values and picks up changes on disk. A workflow an
+editor user already has open is taken as it is, unsaved edits included, and never closed. Any
+other workflow this host opened is closed once the new one is open; if the engine refuses, the load
+still succeeds and `result_details` says so. Other open workflows stay open. Confirm with the
+artist before sending it. A failed load leaves the previous workflow loaded, unless it was a
+reload (see below).
+
+The `inputs` and `outputs` a load reports are read from the graph as it stands, so an editor
+user's unsaved Start Flow and End Flow edits count. `NukeDescribeWorkflowRequest` reads the
+saved file instead, so the two can differ. Each input's `default_value` is still the one last
+saved; one added since has its current value. Execute and the parameter-value verbs check against
+the graph as it stands too.
+
+One case still loses work. If an editor user opens the workflow this host loaded after the host
+opened it, both act on the same open workflow, and the host's next load closes it, with any edits
+made in the editor. The engine doesn't yet report who has a workflow open or whether it has
+unsaved changes (griptape-ai/griptape-nodes-engine#6378), so the host can't tell.
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
@@ -687,8 +782,9 @@ workflows; neither is refused too.
 
 Four fields separate declarations, which are fixed for the workflow, from values, which change on every run. Their shapes match the describe and bulk-read verbs.
 
-**Initialize knobs from `input_values`.** It is what the graph currently holds, which differs
-from the author's defaults for any workflow whose inputs have been touched.
+**Initialize knobs from `input_values`, not from `default_value`.** `default_value` is the
+workflow author's value; `input_values` is what the graph currently holds. They differ for any
+workflow whose inputs have been touched.
 
 ```json
 { "workflow_id": "nuke_api_smoke" }
@@ -705,7 +801,10 @@ from the author's defaults for any workflow whose inputs have been touched.
       "name": "Topic",
       "type": "GTText",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": "a quiet harbour at dusk",
       "choices": [],
+      "file_format": null,
       "tooltip": "What the shot is about.",
       "settable": true,
       "hidden": false
@@ -718,7 +817,10 @@ from the author's defaults for any workflow whose inputs have been touched.
       "name": "was_successful",
       "type": "GTBool",
       "is_list": false,
+      "is_sequence": false,
+      "default_value": null,
       "choices": [],
+      "file_format": null,
       "tooltip": "",
       "settable": true,
       "hidden": false
@@ -758,29 +860,23 @@ Refused, and nothing is loaded:
 |---|---|
 | Both `workflow_id` and `file_path` | that they may name different workflows |
 | Neither | that there is nothing to load |
-| A run is in progress | that loading discards the running graph, and `NukeCancelExecutionRequest` |
+| The loaded workflow is running | that loading replaces the workflow in use, and `NukeCancelExecutionRequest` |
 | The file cannot be imported | the engine's own reason |
 | The id is not registered | that no workflow with that name exists |
 | The registry cannot be read | that the engine could not read it, which is worth retrying |
-| The engine could not load the workflow | the engine's own reason, and that the previous graph is already gone |
+| The engine would not close this host's copy to reopen it | the engine's own reason |
+| The engine could not open the workflow | the engine's own reason |
 
-Every row but the last leaves the loaded graph exactly as it was, so the knobs a host is
-showing still match what the engine holds. A `file_path` request is the one that touches
-anything else: the file is imported and registered before the rows below it are checked, so a
-refusal there can leave a new registry entry behind. The last row cannot leave the graph alone:
-`run_with_clean_slate` makes the engine clear all object state before it builds the graph, so a
-workflow that fails inside its own file, on a missing library or an exception, leaves nothing
-loaded. That failure alone carries `engine_state_cleared: true`.
-
-Branch on `engine_state_cleared`, not on the reason text. When it is `false`, the knobs a host
-is showing still match what the engine holds and a retry is free. When it is `true`, the graph
-the host was driving is gone: drop the knobs, and tell the artist before retrying, because the
-comp they had open went with it.
+Every row leaves the loaded graph exactly as it was, so the knobs a host is showing still match
+what the engine holds and a retry is free, with one exception: a reload closes this host's
+workflow before reopening it, so a reopen that fails leaves nothing loaded. A `file_path` request
+is the one that touches anything else: the file is imported and registered before the rows below it are checked, so a
+refusal there can leave a new registry entry behind.
 
 | `NukeLoadWorkflowResultFailure` field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | The id asked for, or the one resolved from `file_path`. Empty when the request never got far enough to name one |
-| `engine_state_cleared` | `bool` | `true` only when the engine had already discarded the previous graph before it failed |
+| `engine_state_cleared` | `bool` | `true` only when a reload closed this host's workflow and the reopen failed, so nothing is loaded. Drop the knobs and tell the artist |
 
 ### NukeExecuteWorkflowRequest
 
@@ -795,13 +891,13 @@ began. The run's verdict arrives later as exactly one
 
 | Request field | Type | Default | Notes |
 |---|---|---|---|
-| `workflow_id` | `str` | `""` | Optional. Empty runs whatever is loaded. Set, it must be the loaded workflow or the request is refused |
+| `workflow_id` | `str` | `""` | Optional. Empty runs whatever the host loaded. Set, it must be the loaded workflow or the request is refused |
 | `inputs` | `dict[str, dict[str, Any]]` | `{}` | `{node: {parameter: value}}` keyed by describe's `node` and `parameter`. Plain JSON values, or a value in the shape a read returns: a media entry is sent to the engine as its `path`. See [Setting a sequence](#setting-a-sequence) |
 | `unresolve_first` | `bool` | `false` | Unresolve every node in the flow before starting, so nodes left resolved by an earlier run compute again instead of being reused |
 
 Send `workflow_id` if the host tracks what it loaded. It costs nothing and turns a graph
 swapped out from under the host, by an editor user or another tool, into a refusal instead of a
-run of the wrong workflow. Leave it empty to drive a graph the host did not load itself.
+run of the wrong workflow.
 
 An unchanged re-run needs `unresolve_first`. Control flow unresolves each control node as it
 enters it, so those run every time, but a data node that is already resolved is reused rather
@@ -865,23 +961,15 @@ refused. Split on that rather than on counting kinds: a reason the host did not 
 the engine's.
 
 Sending inputs to a loaded graph that declares no input parameters is refused instead, rather
-than rejecting every one of them. The case a host meets is an unsaved graph: with `workflow_id`
-empty, execute runs whatever the engine holds, and the graph an editor user is working on lives
-in the engine's registry under an `unsaved:` key with no declared shape. Rejecting each input
-there would hand the host its own parameter names back as if they were wrong, while the run
-went ahead on the author's values. The refusal says to save the workflow and load it by id, or
-to send no inputs and run it as it stands.
+than rejecting every one of them. A graph declares its inputs as parameters on a Start Flow node,
+and declares none without both a Start Flow and an End Flow node. Rejecting each input there
+would hand the host its own parameter names back as if they were wrong, while the run went ahead
+on the author's values. The refusal says what the graph needs, or to send no inputs and run it as
+it stands.
 
-A registry the engine cannot read gets a separate refusal, naming a retry, and so does a loaded
-id that is no longer in the registry at all, naming a reload. All three leave the same empty
-allow-list behind, so they are easy to conflate, but only one of them is the host's to fix by
-saving: a workflow that declares nothing still will next time, while the other two are engine
-state that moved. A host told to save a workflow it already saved has been sent down the wrong
-recovery path.
-
-None of the three fires when `inputs` carries no parameters, whether it is `{}` or only empty
+The refusal doesn't fire when `inputs` carries no parameters, whether it is `{}` or only empty
 node entries like `{"Start Flow": {}}`. With nothing to check, what the workflow declares
-does not bear on the run, so a graph with no declared shape still executes.
+does not bear on the run, so a graph that declares nothing still executes.
 
 A `workflow_id` naming anything other than the loaded workflow is refused, not loaded.
 Honouring it would make execute destructive; ignoring it would run a workflow the host did not
@@ -1073,13 +1161,10 @@ for `"Expected an object of parameters."`, `"Not a declared input parameter of t
 workflow."`, and how the engine's own reason for refusing a declared pair reaches the host.
 Sending a request with no pair to act on is refused here, unlike execute, because there is
 nothing else for this verb to do; `NukeExecuteWorkflowRequest` treats empty inputs as "run the
-graph as it stands." A loaded graph that declares no input parameters, and a registry the
-engine cannot read, are refused the same two causes execute refuses them for, worded without
-the fallback execute offers: `NukeExecuteWorkflowRequest`'s versions of these two refusals end
-with "or send no inputs to run the graph as it stands," and this verb's do not, since sending
-no inputs is exactly what this verb's own empty-request refusal turns away. A loaded id no
-longer in the registry is refused the same third way execute refuses it: that refusal names no
-fallback either way.
+graph as it stands." A loaded graph that declares no input parameters is refused for the
+same cause execute refuses it for, worded without the fallback execute offers: execute's version
+ends with "or send no inputs to run the graph as it stands," and this verb's does not, since
+sending no inputs is exactly what this verb's own empty-request refusal turns away.
 
 Refused while the engine is executing. The engine's own scheduler decides when a node's
 parameter is actually read, so a value set mid-run cannot be told apart from one that lands
@@ -1138,6 +1223,7 @@ No arguments.
 
 | `NukeGetCurrentProjectResultSuccess` field | Type | Notes |
 |---|---|---|
+| `project_id` | `str` | Same opaque id as `NukeListProjectsRequest`'s `id`, including the system defaults' id. Do not parse or display |
 | `name` | `str` | |
 | `workspace_dir` | `str` | The workspace directory the engine is actually using right now, read live. Never empty, including on the system defaults project |
 | `validation_status` | `str` | One of `GOOD`, `FLAWED`, `UNUSABLE`, `MISSING`. `GOOD` and `FLAWED` are usable; the other two are not |
@@ -1148,6 +1234,7 @@ engine treats as distinct from being on the system defaults project.
 
 ```json
 {
+  "project_id": "proj-1",
   "name": "Nuke Smoke Project",
   "workspace_dir": "/workspace/proj-1",
   "validation_status": "GOOD",
@@ -1282,7 +1369,7 @@ editor cancels it (see below).
 |---|---|---|
 | `state` | `str` | `succeeded`, `failed`, or `cancelled`. A successful execute reply is what reports a run as begun |
 | `terminal_node` | `str` | Node control flow ended on. Diagnostic, often not a declared output node. Empty when the flow never resolved |
-| `detail` | `str` | Human-readable reason. For `failed`, the engine's error |
+| `detail` | `str` | Human-readable reason. For `failed`, the engine's error, or which node the run stopped at before reaching a declared output node |
 
 ```json
 {
@@ -1297,9 +1384,15 @@ then carries it as `last_outcome`, so a host that reconnects or misses the notif
 still read it. Declared outputs are readable with `NukeGetParameterValuesRequest` once the
 verdict is `succeeded`.
 
+A run started with `NukeExecuteWorkflowRequest` is `failed` when none of the nodes in the
+workflow's declared outputs ran, even though the engine reported no error. The engine treats a
+control chain that stops early as a finished run, which would otherwise leave a `succeeded` run
+with no outputs. A workflow that declares no outputs is not held to this.
+
 A run started from the editor also gets a verdict, but a best-effort one. The engine's
 completion event carries no outcome, so the verdict is `failed` when a node errored since the
-last verdict and `succeeded` otherwise. A node run on its own from the editor emits no
+last verdict and `succeeded` otherwise. It is not checked against the declared outputs, because
+an editor run may stop short on purpose. A node run on its own from the editor emits no
 verdict, so its error makes the next editor run report `failed`. The engine fires completion
 before cancellation on its cancel path, so an editor run cancelled mid-node can report
 `succeeded` followed by `cancelled`; let `cancelled` replace it. A run started with `NukeExecuteWorkflowRequest` and
@@ -1404,6 +1497,7 @@ wildcard (`is_list: null`) decides per value, so check whether it is an array.
 | `GTInt` | A whole number. An Int_Knob on the host side |
 | `GTFloat` | A real number. A Double_Knob on the host side. JSON writes `4.0` as `4`, so read the type rather than the literal |
 | `GTBool` | A bool |
+| `GTUnknown` | Only ever unset (`null`, or `[]` for a list). Describe reports it for a declared type this protocol has no knob for, so show the parameter as unsupported |
 
 ### Media entries
 
@@ -1491,7 +1585,8 @@ Read from the engine's `websocket_direct` implementation, as noted under
 
 ## Version compatibility
 
-`PROTOCOL_VERSION` is a single integer, not semver.
+`PROTOCOL_VERSION` is a single integer, not semver. The bump rules below take effect once a
+plugin ships and the contract snapshot is recorded. Until then, version 1 may still change.
 
 | Change | Version bump | Effect on a host |
 |---|---|---|

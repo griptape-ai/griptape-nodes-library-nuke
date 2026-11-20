@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from griptape_nodes.retained_mode.events.connection_events import CreateConnectionRequest, CreateConnectionResultSuccess
-from griptape_nodes.retained_mode.events.context_events import SetWorkflowContextRequest, SetWorkflowContextSuccess
+from griptape_nodes.retained_mode.events.context_events import OpenWorkflowRequest, OpenWorkflowResultSuccess
 from griptape_nodes.retained_mode.events.flow_events import CreateFlowRequest, CreateFlowResultSuccess
 from griptape_nodes.retained_mode.events.library_events import (
     RegisterLibraryFromFileRequest,
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     import pytest
+    from griptape_nodes.retained_mode.runtime.workflow_runtime import WorkflowRuntime
 
 CANARY_LIBRARY_DIR = Path(__file__).parent / "canary_library"
 NUKE_LIBRARY_DIR = Path(__file__).parents[4]
@@ -154,80 +155,79 @@ def publish_canary_bundle(
     register_result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(library_json)))
     assert isinstance(register_result, RegisterLibraryFromFileResultSuccess), register_result
 
-    # Simulate new unsaved workflow.
-    context_result = GriptapeNodes.handle_request(SetWorkflowContextRequest())
-    assert isinstance(context_result, SetWorkflowContextSuccess), context_result
-
-    flow_result = GriptapeNodes.handle_request(
-        CreateFlowRequest(parent_flow_name=None, flow_name="ControlFlow_1", set_as_new_context=False)
-    )
-    assert isinstance(flow_result, CreateFlowResultSuccess), flow_result
-
-    create_node("NukeStartFlow", "Nuke Start Flow", flow_result.flow_name)
-    create_node("CanaryNode", "Canary", flow_result.flow_name)
-    create_node("NukeEndFlow", "Nuke End Flow", flow_result.flow_name)
-
-    connect("Nuke Start Flow", "exec_out", "Canary", "exec_in")
-    connect("Canary", "exec_out", "Nuke End Flow", "exec_in")
-
-    # NukeEndFlow only exposes its own default outputs (was_successful, result_details);
-    # a custom output must be added explicitly for extract_workflow_shape() to surface it.
-    add_param_result = GriptapeNodes.handle_request(
-        AddParameterToNodeRequest(
-            node_name="Nuke End Flow",
-            parameter_name="output_path",
-            default_value="",
-            tooltip="Canary output",
-            type="str",
-            input_types=["str"],
-            mode_allowed_output=False,
+    # Open a new unsaved workflow, as an editor tab does, and name it on every request below.
+    workflow = _open_unsaved_workflow()
+    with GriptapeNodes.get_instance().bind_workflow(workflow):
+        flow_result = GriptapeNodes.handle_request(
+            CreateFlowRequest(parent_flow_name=None, flow_name="ControlFlow_1", set_as_new_context=False)
         )
-    )
-    assert add_param_result.succeeded(), add_param_result
-    connect("Canary", "output_path", "Nuke End Flow", "output_path")
+        assert isinstance(flow_result, CreateFlowResultSuccess), flow_result
 
-    # The same output path again, but carried inside an artifact rather than as a bare string.
-    add_artifact_param_result = GriptapeNodes.handle_request(
-        AddParameterToNodeRequest(
-            node_name="Nuke End Flow",
-            parameter_name="image_url_artifact",
-            default_value=None,
-            tooltip="Canary artifact output",
-            type="ImageUrlArtifact",
-            input_types=["ImageUrlArtifact"],
-            mode_allowed_output=False,
-        )
-    )
-    assert add_artifact_param_result.succeeded(), add_artifact_param_result
-    connect("Canary", "image_url_artifact", "Nuke End Flow", "image_url_artifact")
+        create_node("NukeStartFlow", "Nuke Start Flow", flow_result.flow_name)
+        create_node("CanaryNode", "Canary", flow_result.flow_name)
+        create_node("NukeEndFlow", "Nuke End Flow", flow_result.flow_name)
 
-    for macro_name in _MACRO_OUTPUTS:
-        add_macro_param_result = GriptapeNodes.handle_request(
+        connect("Nuke Start Flow", "exec_out", "Canary", "exec_in")
+        connect("Canary", "exec_out", "Nuke End Flow", "exec_in")
+
+        # NukeEndFlow only exposes its own default outputs (was_successful, result_details);
+        # a custom output must be added explicitly for extract_workflow_shape() to surface it.
+        add_param_result = GriptapeNodes.handle_request(
             AddParameterToNodeRequest(
                 node_name="Nuke End Flow",
-                parameter_name=macro_name,
+                parameter_name="output_path",
                 default_value="",
+                tooltip="Canary output",
                 type="str",
-                tooltip="",
                 input_types=["str"],
                 mode_allowed_output=False,
             )
         )
-        assert add_macro_param_result.succeeded(), add_macro_param_result
-        connect("Canary", macro_name, "Nuke End Flow", macro_name)
+        assert add_param_result.succeeded(), add_param_result
+        connect("Canary", "output_path", "Nuke End Flow", "output_path")
 
-    # Saving rekeys the unsaved entry to a path-derived registry key, so that -- not WORKFLOW_NAME
-    # -- is what the publisher must be handed.
-    save_result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name=WORKFLOW_NAME))
-    assert isinstance(save_result, SaveWorkflowResultSuccess), save_result
+        # The same output path again, but carried inside an artifact rather than as a bare string.
+        add_artifact_param_result = GriptapeNodes.handle_request(
+            AddParameterToNodeRequest(
+                node_name="Nuke End Flow",
+                parameter_name="image_url_artifact",
+                default_value=None,
+                tooltip="Canary artifact output",
+                type="ImageUrlArtifact",
+                input_types=["ImageUrlArtifact"],
+                mode_allowed_output=False,
+            )
+        )
+        assert add_artifact_param_result.succeeded(), add_artifact_param_result
+        connect("Canary", "image_url_artifact", "Nuke End Flow", "image_url_artifact")
 
-    install_dir.mkdir(parents=True, exist_ok=True)
-    publisher = NukeGizmoPublisher(
-        workflow_name=save_result.workflow_name,  # == Registry key
-        metadata={"gizmo_install_path": GIZMO_INSTALL_CUSTOM, "custom_gizmo_path": str(install_dir)},
-    )
-    publish_result = publisher.publish_workflow()
-    assert isinstance(publish_result, PublishWorkflowResultSuccess), publish_result
+        for macro_name in _MACRO_OUTPUTS:
+            add_macro_param_result = GriptapeNodes.handle_request(
+                AddParameterToNodeRequest(
+                    node_name="Nuke End Flow",
+                    parameter_name=macro_name,
+                    default_value="",
+                    type="str",
+                    tooltip="",
+                    input_types=["str"],
+                    mode_allowed_output=False,
+                )
+            )
+            assert add_macro_param_result.succeeded(), add_macro_param_result
+            connect("Canary", macro_name, "Nuke End Flow", macro_name)
+
+        # Saving rekeys the unsaved entry to a path-derived registry key, so that -- not WORKFLOW_NAME
+        # -- is what the publisher must be handed.
+        save_result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name=WORKFLOW_NAME))
+        assert isinstance(save_result, SaveWorkflowResultSuccess), save_result
+
+        install_dir.mkdir(parents=True, exist_ok=True)
+        publisher = NukeGizmoPublisher(
+            workflow_name=save_result.workflow_name,  # == Registry key
+            metadata={"gizmo_install_path": GIZMO_INSTALL_CUSTOM, "custom_gizmo_path": str(install_dir)},
+        )
+        publish_result = publisher.publish_workflow()
+        assert isinstance(publish_result, PublishWorkflowResultSuccess), publish_result
 
     griptape_dir = install_dir / "griptape"
     companion_base = griptape_dir / WORKFLOW_NAME
@@ -241,6 +241,14 @@ def publish_canary_bundle(
         workflow_file=version_dir / f"{WORKFLOW_NAME}.py",
         gizmo_path=Path(publish_result.published_workflow_file_path),
     )
+
+
+def _open_unsaved_workflow() -> WorkflowRuntime:
+    opened = GriptapeNodes.handle_request(OpenWorkflowRequest(display_name=WORKFLOW_NAME))
+    assert isinstance(opened, OpenWorkflowResultSuccess), opened
+    workflow = GriptapeNodes.get_instance().open_workflows.find(opened.open_workflow.workflow_id)
+    assert workflow is not None, opened
+    return workflow
 
 
 def materialize_canary_library(target_dir: Path) -> Path:
@@ -286,8 +294,8 @@ def connect(source_node: str, source_param: str, target_node: str, target_param:
 
 def build_start_canary_end_flow(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, file_name: str, data_node_name: str = "Canary"
-) -> None:
-    """Register the canary library and save Start -> End with a data node feeding End."""
+) -> WorkflowRuntime:
+    """Register the canary library and save Start -> End with a data node feeding End, returning the open workflow."""
     workspace = tmp_path / "workspace"
     (workspace / "assets").mkdir(parents=True)
     (workspace / "assets" / "canary_asset.txt").write_text("canary asset\n")
@@ -305,27 +313,28 @@ def build_start_canary_end_flow(
     result = GriptapeNodes.handle_request(RegisterLibraryFromFileRequest(file_path=str(canary_library)))
     assert result.succeeded(), result
 
-    result = GriptapeNodes.handle_request(SetWorkflowContextRequest())
-    assert result.succeeded(), result
-    flow = GriptapeNodes.handle_request(CreateFlowRequest(parent_flow_name=None, flow_name="ControlFlow_1"))
-    assert isinstance(flow, CreateFlowResultSuccess), flow
-    create_node("NukeStartFlow", "Start", flow.flow_name)
-    create_node("CanaryNode", data_node_name, flow.flow_name)
-    create_node("NukeEndFlow", "End", flow.flow_name)
-    result = GriptapeNodes.handle_request(
-        AddParameterToNodeRequest(
-            node_name="End",
-            parameter_name="output_path",
-            default_value="",
-            tooltip="",
-            type="str",
-            input_types=["str"],
-            mode_allowed_output=False,
+    workflow = _open_unsaved_workflow()
+    with GriptapeNodes.get_instance().bind_workflow(workflow):
+        flow = GriptapeNodes.handle_request(CreateFlowRequest(parent_flow_name=None, flow_name="ControlFlow_1"))
+        assert isinstance(flow, CreateFlowResultSuccess), flow
+        create_node("NukeStartFlow", "Start", flow.flow_name)
+        create_node("CanaryNode", data_node_name, flow.flow_name)
+        create_node("NukeEndFlow", "End", flow.flow_name)
+        result = GriptapeNodes.handle_request(
+            AddParameterToNodeRequest(
+                node_name="End",
+                parameter_name="output_path",
+                default_value="",
+                tooltip="",
+                type="str",
+                input_types=["str"],
+                mode_allowed_output=False,
+            )
         )
-    )
-    assert result.succeeded(), result
-    connect("Start", "exec_out", "End", "exec_in")
-    connect(data_node_name, "output_path", "End", "output_path")
+        assert result.succeeded(), result
+        connect("Start", "exec_out", "End", "exec_in")
+        connect(data_node_name, "output_path", "End", "output_path")
 
-    result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name=file_name))
-    assert result.succeeded(), result
+        result = GriptapeNodes.handle_request(SaveWorkflowRequest(file_name=file_name))
+        assert result.succeeded(), result
+    return workflow

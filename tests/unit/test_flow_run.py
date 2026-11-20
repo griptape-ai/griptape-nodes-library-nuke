@@ -39,7 +39,7 @@ def _published(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 async def test_the_start_request_is_not_issued_before_the_caller_returns(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = use_engine(monkeypatch, STARTS)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
 
     assert engine.requests == []
     await settled()
@@ -49,7 +49,7 @@ async def test_the_start_request_is_not_issued_before_the_caller_returns(monkeyp
 async def test_a_started_flow_is_pending_until_the_start_settles(monkeypatch: pytest.MonkeyPatch) -> None:
     use_engine(monkeypatch, STARTS)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     assert flow_run.pending() is True
 
     await settled()
@@ -59,7 +59,7 @@ async def test_a_started_flow_is_pending_until_the_start_settles(monkeypatch: py
 async def test_an_idle_engine_is_busy_while_a_start_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     use_engine(monkeypatch, {**STARTS, **IDLE})
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
 
     assert await flow_run.busy() is True
     await settled()
@@ -106,7 +106,7 @@ async def test_a_failed_run_reaches_the_host_as_a_failed_execution_state(
         {StartFlowRequest: StartFlowResultFailure(result_details="validation failed", validation_exceptions=[])},
     )
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     await settled()
 
     assert len(_published) == 1
@@ -117,7 +117,7 @@ async def test_a_failed_run_reaches_the_host_as_a_failed_execution_state(
 async def test_a_clean_run_publishes_one_success(monkeypatch: pytest.MonkeyPatch, _published: list[Any]) -> None:
     use_engine(monkeypatch, STARTS)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     await settled()
 
     assert [payload.state for payload in _published] == [ExecutionState.SUCCEEDED]
@@ -129,7 +129,7 @@ async def test_a_cancel_seen_during_the_run_wins_over_the_starts_success(
     """The engine answers a cancelled start with success."""
     use_engine(monkeypatch, STARTS)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     run_outcome.on_cancelled("stopped", "wf1")
     await settled()
 
@@ -143,7 +143,7 @@ async def test_a_start_that_raises_still_ends_the_run(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(engine, "request", boom)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     await settled()
 
     assert [payload.state for payload in _published] == [ExecutionState.FAILED]
@@ -168,7 +168,7 @@ async def test_a_start_that_answers_mid_cancel_waits_for_the_cancel(
 
     monkeypatch.setattr(engine, "request", request)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     await flow_run.cancel("main")
     await settled()
 
@@ -195,7 +195,7 @@ async def test_a_run_waits_for_every_overlapping_cancel(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(engine, "request", request)
 
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     first = asyncio.create_task(flow_run.cancel("main"))
     await asyncio.sleep(0)
     await flow_run.cancel("main")
@@ -228,7 +228,7 @@ async def test_a_cancel_sent_while_the_run_waits_on_another_is_awaited_too(
 
     first = asyncio.create_task(flow_run.cancel("main"))
     await asyncio.sleep(0)
-    flow_run.start("main", "wf1")
+    flow_run.start("main", "wf1", frozenset())
     await asyncio.sleep(0.01)
     second = asyncio.create_task(flow_run.cancel("main"))
     await asyncio.sleep(0)

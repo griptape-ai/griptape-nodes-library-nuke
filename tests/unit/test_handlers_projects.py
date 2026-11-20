@@ -243,6 +243,7 @@ class TestGetCurrentProject:
         result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
+        assert result.project_id == "proj-1"
         assert result.name == "Proj One"
         assert result.workspace_dir == "/workspace/proj-1"
         assert result.validation_status == "FLAWED"
@@ -266,6 +267,7 @@ class TestGetCurrentProject:
         result = await handle_get_current_project(NukeGetCurrentProjectRequest())
 
         assert isinstance(result, NukeGetCurrentProjectResultSuccess)
+        assert result.project_id == "<system-defaults>"
         assert result.workspace_dir == "/workspace/global"
 
 
@@ -348,12 +350,32 @@ class TestSetCurrentProject:
                     control_nodes=["a"], resolving_nodes=[], involved_nodes=["a"], result_details="running"
                 ),
             },
+            loaded="wf1",
         )
 
         result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
 
         assert isinstance(result, NukeSetCurrentProjectResultFailure)
         assert "already executing" in str(result.result_details)
+
+    async def test_refuses_while_an_editor_tab_runs_with_nothing_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A switch can reload every library, which closes every open workflow, not only the host's."""
+        engine = use_engine(
+            monkeypatch,
+            {
+                GetTopLevelFlowRequest: GetTopLevelFlowResultSuccess(flow_name="main", result_details="ok"),
+                GetFlowStateRequest: GetFlowStateResultSuccess(
+                    control_nodes=["a"], resolving_nodes=[], involved_nodes=["a"], result_details="running"
+                ),
+            },
+        )
+        engine.open_workflows.open("editor-tab")
+
+        result = await handle_set_current_project(NukeSetCurrentProjectRequest(project_id="proj-2"))
+
+        assert isinstance(result, NukeSetCurrentProjectResultFailure)
+        assert "already executing" in str(result.result_details)
+        assert engine.named_for(GetFlowStateRequest) == ["editor-tab"]
 
     async def test_an_engine_refusal_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
         use_engine(

@@ -11,7 +11,10 @@ from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 
 from nuke_host_api.value_types import (
     CONTROL_PARAM_TYPE,
+    UnrepresentableValueError,
     is_list_type,
+    is_sequence_type,
+    normalize_value,
     value_type_for_engine_type,
 )
 
@@ -89,7 +92,11 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
         "name": str(ui_options.get("display_name") or parameter_name),
         "type": value_type_for_engine_type(parameter.get("type")),
         "is_list": is_list_type(parameter.get("type")),
+        "is_sequence": is_sequence_type(parameter.get("type")),
+        "default_value": _default_value(parameter),
         "choices": list(choices) if isinstance(choices, list) else [],
+        # Rendered by the engine's `FileFormat` trait; the editor copies it onto a Start Flow parameter.
+        "file_format": _file_format(ui_options.get("file_format")),
         "tooltip": str(parameter.get("tooltip") or ""),
         "settable": bool(parameter.get("settable", True)),
         # `hide_property` leaves a connectable port, which a knob cannot represent.
@@ -97,9 +104,56 @@ def _declared_parameter(node_name: str, parameter_name: str, parameter: dict) ->
     }
 
 
-def input_parameter_types(entry: dict) -> dict[tuple[str, str], str | None]:
-    """Declared engine type by (node, parameter)."""
+FILE_FORMAT_KINDS = frozenset({"image", "video", "audio", "threed"})
+
+
+def _file_format(value: object) -> str | None:
+    """Narrow to the documented kinds, so a kind a newer engine adds reads as unmarked."""
+    if value not in FILE_FORMAT_KINDS:
+        return None
+    return str(value)
+
+
+def _default_value(parameter: dict) -> Any:
+    """Same shape as a value descriptor's ``value``, so one host parser reads both."""
+    try:
+        return normalize_value(parameter.get("default_value"), parameter.get("type"))["value"]
+    except UnrepresentableValueError:
+        return [] if is_list_type(parameter.get("type")) else None
+
+
+def with_saved_defaults(live_shape: dict, saved_shape: dict) -> dict:
+    """Restore each input's saved default, since the live graph reports a Start Flow parameter's current value as its default."""
+    live_inputs = live_shape.get("inputs")
+    saved_inputs = saved_shape.get("inputs")
+    if not isinstance(live_inputs, dict) or not isinstance(saved_inputs, dict):
+        return live_shape
+    inputs: dict = {}
+    for node_name, parameters in live_inputs.items():
+        saved_parameters = saved_inputs.get(node_name)
+        if not isinstance(parameters, dict) or not isinstance(saved_parameters, dict):
+            inputs[node_name] = parameters
+            continue
+        inputs[node_name] = {}
+        for parameter_name, parameter in parameters.items():
+            saved = saved_parameters.get(parameter_name)
+            if isinstance(parameter, dict) and isinstance(saved, dict) and "default_value" in saved:
+                parameter = {**parameter, "default_value": saved["default_value"]}
+            inputs[node_name][parameter_name] = parameter
+    return {**live_shape, "inputs": inputs}
+
+
+def end_node_names(declared_shape: dict) -> frozenset[str]:
+    """Nodes whose outputs the workflow declares."""
+    outputs = declared_shape.get("outputs")
+    if not isinstance(outputs, dict):
+        return frozenset()
+    return frozenset(str(node_name) for node_name in outputs)
+
+
+def input_parameter_types(declared_shape: dict) -> dict[tuple[str, str], str | None]:
+    """Declared engine type by (node, parameter). Avoids normalizing defaults, which issues engine requests."""
     return {
         (node_name, parameter_name): parameter.get("type")
-        for node_name, parameter_name, parameter in data_parameters(workflow_shape(entry).get("inputs"))
+        for node_name, parameter_name, parameter in data_parameters(declared_shape.get("inputs"))
     }

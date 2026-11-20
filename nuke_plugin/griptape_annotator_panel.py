@@ -33,7 +33,7 @@ _TILE_COLOR_ROLE = 0x5FAD4EFF
 _TILE_COLOR_EXPOSE = 0x9B59B6FF
 
 # Artifact types available when marking a node as an input.
-_INPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact"]
+_INPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "Sequence"]
 
 # Artifact types available when marking a node as an output.
 _OUTPUT_ARTIFACT_TYPES = ["ImageArtifact", "VideoUrlArtifact", "Sequence", "ThreeDUrlArtifact"]
@@ -809,6 +809,10 @@ def register() -> None:
         print(f"[Griptape Annotator] ERROR: failed to register panel: {exc}", file=sys.stderr)
         return
 
+    # These two are right-click context menus, not menu-bar entries, and nothing in the
+    # UI advertises them. "Properties" opens by right-clicking inside a node's properties
+    # panel; "Animation" by right-clicking a knob's animation button. The log line below
+    # names both so a user who only sees "registered panel" knows where to look.
     props = nuke.menu("Properties")
     props.addCommand("Griptape/Mark as Input", lambda: _gt_mark_node("input"))
     props.addCommand("Griptape/Mark as Output", lambda: _gt_mark_node("output"))
@@ -817,3 +821,8 @@ def register() -> None:
     anim = nuke.menu("Animation")
     anim.addCommand("Griptape/Expose Knob", "__import__('griptape_annotator_panel')._gt_toggle_expose_knob(True)")
     anim.addCommand("Griptape/Un-expose Knob", "__import__('griptape_annotator_panel')._gt_toggle_expose_knob(False)")
+    print(
+        "[Griptape Annotator] Mark as Input/Output: right-click inside a node's properties panel -> Griptape. "
+        "Expose Knob: right-click a knob's animation button -> Griptape.",
+        file=sys.stderr,
+    )

@@ -12,9 +12,15 @@ from nuke_host_api.events import (
     NukeListWorkflowsRequest,
     NukeListWorkflowsResultFailure,
 )
+from tests.unit.host_api_fakes import use_engine
 
 
 class TestVerb:
+    @pytest.fixture(autouse=True)
+    def _engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A verb binds the workflow it acts on, which it looks up on the engine."""
+        use_engine(monkeypatch)
+
     async def test_the_declared_request_type_reaches_the_body(self) -> None:
         @verb(NukeConnectRequest)
         async def handler(request: NukeConnectRequest) -> ResultPayload:

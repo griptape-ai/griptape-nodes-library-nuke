@@ -1,9 +1,10 @@
 """Publish the canary workflow gizmo for the real-Nuke wiring check's ``.nk`` fixture generator.
 
 Step 1 of regenerating ``tests/integration/fixtures/canary/canary_workflow.nk``. Run in
-this repo's own venv (needs ``griptape_nodes``, unavailable inside Nuke's bundled Python):
+this repo's dev venv, ``.venv-dev`` (needs ``griptape_nodes``, unavailable inside Nuke's
+bundled Python; see CONTRIBUTING.md for why not ``.venv``):
 
-    uv run python -m tests.integration.fixtures.canary.publish_canary_gizmo --install-dir /tmp/canary_gizmo_fixture
+    UV_PROJECT_ENVIRONMENT=.venv-dev uv run python -m tests.integration.fixtures.canary.publish_canary_gizmo --install-dir /tmp/canary_gizmo_fixture
 
 Run that from the repository root: ``-m`` puts the current directory on ``sys.path``, which
 is what lets both the ``tests.*`` package chain and the ``publish_gizmo.*`` imports resolve.

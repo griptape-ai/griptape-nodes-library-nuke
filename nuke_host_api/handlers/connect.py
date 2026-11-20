@@ -3,9 +3,17 @@ from __future__ import annotations
 import logging
 import time
 
-from nuke_host_api import execution_bridge, host_claim, library_version, notify
+from nuke_host_api import execution_bridge, flow_run, host_claim, library_version, loaded_workflow, notify
 from nuke_host_api.dispatch import failure, verb
-from nuke_host_api.engine import engine_id, engine_name, engine_version, event_topic, session_id
+from nuke_host_api.engine import (
+    engine_id,
+    engine_name,
+    engine_version,
+    event_topic,
+    join_session_as_host,
+    leave_session_as_host,
+    session_id,
+)
 from nuke_host_api.events import (
     NukeConnectRequest,
     NukeConnectResultFailure,
@@ -14,6 +22,8 @@ from nuke_host_api.events import (
     NukeDisconnectResultFailure,
     NukeDisconnectResultSuccess,
     NukeHostDisconnectEvent,
+    NukePingRequest,
+    NukePingResultSuccess,
 )
 from nuke_host_api.protocol import (
     PROTOCOL_VERSION,
@@ -62,18 +72,23 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
     attempt = host_claim.claim(client, force=request.force)
 
     if not attempt.granted:
+        running = await flow_run.busy()
+        workflow_id = loaded_workflow.workflow_id()
+        activity = f"A workflow{f' ({workflow_id})' if workflow_id else ''} is running now. " if running else ""
         return failure(
             NukeConnectResultFailure,
             attempted=f"to connect {client}",
             because=(
                 f"{attempt.holder.client_name} connected to this engine at "
-                f"{_local_time(attempt.holder.connected_at)} and is the host it reports. "
+                f"{_local_time(attempt.holder.connected_at)} and is the host it reports. {activity}"
                 f"Send force=true to become that host instead. The other host is not disconnected, "
                 f"keeps its own event subscription, and can still drive this engine."
             ),
             supported_protocol_versions=list(SUPPORTED_PROTOCOL_VERSIONS),
             host_client_name=attempt.holder.client_name,
             host_connected_at=attempt.holder.connected_at,
+            running=running,
+            workflow_id=workflow_id,
         )
 
     if attempt.displaced:
@@ -90,6 +105,13 @@ async def handle_connect(request: NukeConnectRequest) -> NukeConnectResultSucces
                 replaced_by=client,
             )
         )
+
+    # Engine discovery lists the session's clients, so the host joins the active session under
+    # its claim name. Neither step can fail the handshake: a host that cannot be listed can
+    # still drive the engine, as it always could.
+    if attempt.displaced:
+        await leave_session_as_host(attempt.displaced)
+    await join_session_as_host(client)
 
     # The bridge is engine-global, so defer its cost until a host needs notifications.
     execution_bridge.ensure_installed()
@@ -127,6 +149,8 @@ async def handle_disconnect(
     released = host_claim.release_if_held_by(client)
     holder = host_claim.held()
     if released:
+        # Discovery lists the host by its claim name, so a clean disconnect delists it too.
+        await leave_session_as_host(client)
         details = f"Released the host claim held by {client}."
     elif holder is None:
         details = f"{client} held no claim, and no host holds one."
@@ -138,3 +162,8 @@ async def handle_disconnect(
         host_client_name=holder.client_name if holder else "",
         result_details=details,
     )
+
+
+@verb(NukePingRequest)
+async def handle_ping(_request: NukePingRequest) -> NukePingResultSuccess:
+    return NukePingResultSuccess(result_details="Engine is alive.")

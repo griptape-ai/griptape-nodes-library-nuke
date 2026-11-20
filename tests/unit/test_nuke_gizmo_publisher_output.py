@@ -48,6 +48,10 @@ _KNOWN_SITUATIONS = frozenset(
         "save_failed_workflow",
         "save_temp_file",
         "save_workflow_backup",
+        # Reviewed by reading their macros (both resolve under {outputs}, which the publisher already
+        # redirects), but not yet covered end to end in the canary bundle.
+        "save_file_sequence",
+        "save_output_directory",
     }
 )
 

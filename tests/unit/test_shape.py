@@ -98,12 +98,96 @@ class TestDeclaredParameters:
         assert shape.declared_parameters(section)[0]["hidden"] is False
 
     @pytest.mark.parametrize(
+        ("parameter", "expected"),
+        [
+            ({"type": "str", "default_value": "a quiet harbour"}, "a quiet harbour"),
+            ({"type": "int", "default_value": 24}, 24),
+            ({"type": "float", "default_value": 23.976}, 23.976),
+            ({"type": "bool", "default_value": True}, True),
+            ({"type": "ImageUrlArtifact", "default_value": None}, None),
+            ({"type": "ImageUrlArtifact", "default_value": ""}, None),
+            (
+                {"type": "ImageUrlArtifact", "default_value": "/show/plate.exr"},
+                {"path": "/show/plate.exr", "format": "exr", "first": None, "last": None},
+            ),
+            ({"type": "list[int]", "default_value": [42]}, [42]),
+            ({"type": "list[int]", "default_value": None}, []),
+            ({"type": "str"}, None),
+        ],
+    )
+    def test_a_default_has_the_same_shape_as_a_value(self, parameter: dict, expected: Any) -> None:
+        declared = shape.declared_parameters({"Start Flow": {"p": parameter}})[0]
+        assert declared["default_value"] == expected
+
+    def test_a_windows_default_path_is_slash_normalized(self) -> None:
+        """Nuke's TCL layer reads a backslash as an escape."""
+        section = {"Start Flow": {"plate": {"type": "ImageUrlArtifact", "default_value": "C:\\show\\plate.exr"}}}
+        assert shape.declared_parameters(section)[0]["default_value"]["path"] == "C:/show/plate.exr"
+
+    def test_a_sequence_default_is_one_entry_with_its_range(self) -> None:
+        default = {
+            "entries": [{"number": 1, "padded_number": "0001", "path": "/show/plate/frame_0001.exr"}],
+            "first": 1,
+            "last": 1,
+            "padding": 4,
+            "pattern": "frame_####.exr",
+            "directory": "/show/plate",
+        }
+        section = {"Start Flow": {"plate": {"type": "Sequence", "default_value": default}}}
+        assert shape.declared_parameters(section)[0]["default_value"] == {
+            "path": "/show/plate/frame_####.exr",
+            "format": "exr",
+            "first": 1,
+            "last": 1,
+        }
+
+    @pytest.mark.parametrize(("engine_type", "expected"), [("ImageUrlArtifact", None), ("list[ImageUrlArtifact]", [])])
+    def test_a_default_with_no_host_form_is_empty(self, engine_type: str, expected: Any) -> None:
+        section = {"Start Flow": {"plate": {"type": engine_type, "default_value": "https://cdn.example.com/a.png"}}}
+        assert shape.declared_parameters(section)[0]["default_value"] == expected
+
+    def test_a_list_default_with_one_item_of_no_host_form_is_empty(self) -> None:
+        default = ["/show/plate.0001.exr", "https://cdn.example.com/a.png"]
+        section = {"Start Flow": {"plate": {"type": "list[ImageUrlArtifact]", "default_value": default}}}
+        assert shape.declared_parameters(section)[0]["default_value"] == []
+
+    @pytest.mark.parametrize(
         ("engine_type", "expected"),
         [("list[ImageUrlArtifact]", True), ("Sequence", False), ("ImageUrlArtifact", False), ("any", None)],
     )
     def test_list_cardinality_is_declared(self, engine_type: str, expected: bool | None) -> None:
         section = {"Start Flow": {"p": {"type": engine_type}}}
         assert shape.declared_parameters(section)[0]["is_list"] is expected
+
+    @pytest.mark.parametrize(
+        ("engine_type", "expected"),
+        [("Sequence", True), ("list[Sequence]", True), ("ImageUrlArtifact", False), ("str", False), ("any", False)],
+    )
+    def test_a_declared_sequence_is_marked(self, engine_type: str, expected: bool) -> None:
+        section = {"Start Flow": {"p": {"type": engine_type}}}
+        assert shape.declared_parameters(section)[0]["is_sequence"] is expected
+
+    def test_a_sequence_is_still_an_image(self) -> None:
+        section = {"Start Flow": {"frames": {"type": "Sequence"}}}
+        assert shape.declared_parameters(section)[0]["type"] == ValueType.IMAGE
+
+    def test_a_text_input_with_a_sequence_picker_is_not_a_sequence(self) -> None:
+        picker = {"fileSystemPicker": {"allowSequences": True}}
+        section = {"Start Flow": {"frames": {"type": "str", "ui_options": picker}}}
+        assert shape.declared_parameters(section)[0]["is_sequence"] is False
+
+    def test_a_file_format_parameter_reports_its_kind(self) -> None:
+        options = {"simple_dropdown": ["glb", "fbx"], "file_format": "threed"}
+        section = {"Start Flow": {"fmt": {"type": "str", "ui_options": options}}}
+        assert shape.declared_parameters(section)[0]["file_format"] == "threed"
+
+    def test_an_unknown_file_format_kind_reports_none(self) -> None:
+        section = {"Start Flow": {"fmt": {"type": "str", "ui_options": {"file_format": "hologram"}}}}
+        assert shape.declared_parameters(section)[0]["file_format"] is None
+
+    def test_an_ordinary_dropdown_reports_no_file_format(self) -> None:
+        section = {"Start Flow": {"size": {"type": "str", "ui_options": {"simple_dropdown": ["1024x1024"]}}}}
+        assert shape.declared_parameters(section)[0]["file_format"] is None
 
     def test_types_are_narrowed_to_the_closed_set(self) -> None:
         types = {declared["parameter"]: declared["type"] for declared in shape.declared_parameters(SHAPE["inputs"])}
@@ -122,13 +206,32 @@ class TestDeclaredParameters:
 
 class TestInputParameterTypes:
     def test_only_input_side_data_parameters_are_listed_with_their_engine_type(self) -> None:
-        assert shape.input_parameter_types({"workflow_shape": SHAPE}) == {
+        assert shape.input_parameter_types(SHAPE) == {
             ("Start Flow", "topic"): "str",
             ("Start Flow", "plate"): "ImageUrlArtifact",
         }
 
     def test_a_workflow_with_no_shape_allows_nothing(self) -> None:
         assert shape.input_parameter_types({}) == {}
+
+    def test_types_are_read_without_normalizing_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Normalizing a macro-templated default issues an engine request this caller discards."""
+
+        def explode(*_args: Any, **_kwargs: Any) -> Any:
+            msg = "input_parameter_types must not normalize defaults; it needs identity and type only"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(shape, "normalize_value", explode)
+
+        assert shape.input_parameter_types(SHAPE)
+
+
+class TestEndNodeNames:
+    def test_every_node_in_the_output_section_is_an_end_node(self) -> None:
+        assert shape.end_node_names(SHAPE) == {"End Flow"}
+
+    def test_a_workflow_with_no_shape_has_no_end_node(self) -> None:
+        assert shape.end_node_names({}) == frozenset()
 
 
 class TestIsRunnable:
@@ -160,3 +263,26 @@ class TestIsRunnable:
 
         assert runnable is True
         assert reason == ""
+
+
+class TestWithSavedDefaults:
+    """The live graph reports a Start Flow parameter's current value as its default."""
+
+    def test_an_input_saved_before_keeps_its_saved_default(self) -> None:
+        live = {"inputs": {"Start Flow": {"topic": {"type": "str", "default_value": "edited in a tab"}}}, "outputs": {}}
+
+        merged = shape.with_saved_defaults(live, SHAPE)
+
+        assert merged["inputs"]["Start Flow"]["topic"]["default_value"] == "a quiet harbour at dusk"
+
+    def test_an_input_added_since_the_save_keeps_its_live_default(self) -> None:
+        live = {"inputs": {"Start Flow": {"mood": {"type": "str", "default_value": "calm"}}}, "outputs": {}}
+
+        merged = shape.with_saved_defaults(live, SHAPE)
+
+        assert merged["inputs"]["Start Flow"]["mood"]["default_value"] == "calm"
+
+    def test_a_workflow_never_saved_keeps_the_live_shape(self) -> None:
+        live = {"inputs": {"Start Flow": {"topic": {"type": "str", "default_value": "x"}}}, "outputs": {}}
+
+        assert shape.with_saved_defaults(live, {}) == live

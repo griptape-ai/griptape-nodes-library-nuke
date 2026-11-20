@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from griptape_nodes.common.macro_parser import ParsedMacro
@@ -40,20 +41,44 @@ _HAS_BRACE_TOKEN = re.compile(r"\{[^{}]*\}")
 # Recognizes POSIX, drive-letter, and UNC absolute paths.
 _ABSOLUTE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/)")
 
-# Unknown artifact types map to GTFile; other unknown types map to GTText.
-ENGINE_TYPE_TO_VALUE_TYPE = {
-    "ImageArtifact": ValueType.IMAGE,
-    "ImageUrlArtifact": ValueType.IMAGE,
-    "ImageSequenceArtifact": ValueType.IMAGE,
-    "Sequence": ValueType.IMAGE,
-    "VideoArtifact": ValueType.MOVIE,
-    "VideoUrlArtifact": ValueType.MOVIE,
+_SCALAR_TYPE_TO_VALUE_TYPE = {
     "str": ValueType.TEXT,
     "string": ValueType.TEXT,
+    # The engine's code and markup parameter types, each of which also accepts `str`.
+    "python": ValueType.TEXT,
+    "yaml": ValueType.TEXT,
+    "json": ValueType.TEXT,
     "int": ValueType.INT,
     "float": ValueType.FLOAT,
     "bool": ValueType.BOOL,
 }
+
+
+@dataclass(frozen=True)
+class _ClassReading:
+    """The host type a class declares, and which field of its state holds the value a host reads."""
+
+    value_type: str
+    field: str = "value"
+    holds_bytes: bool = False
+
+
+# Keyed by class name, so a library's class needs no import, and a griptape artifact is no more
+# special than a library's dataclass. Unknown classes read their "value" field, and their declared
+# host type is GTFile for an artifact name and GTUnknown otherwise.
+_CLASS_READINGS = {
+    "ImageArtifact": _ClassReading(ValueType.IMAGE, holds_bytes=True),
+    "ImageUrlArtifact": _ClassReading(ValueType.IMAGE),
+    "ImageSequenceArtifact": _ClassReading(ValueType.IMAGE),
+    "Sequence": _ClassReading(ValueType.IMAGE),
+    "VideoArtifact": _ClassReading(ValueType.MOVIE),
+    "VideoUrlArtifact": _ClassReading(ValueType.MOVIE),
+    "BlobArtifact": _ClassReading(ValueType.FILE, holds_bytes=True),
+    "AudioArtifact": _ClassReading(ValueType.FILE, holds_bytes=True),
+    # griptape-nodes-library-openexr's descriptor.
+    "EXRPartArtifact": _ClassReading(ValueType.IMAGE, field="file_path"),
+}
+_DEFAULT_VALUE_FIELD = "value"
 
 # Strip the engine's ``list[T]`` wrapper before mapping the element type.
 _LIST_TYPE = re.compile(r"^list\[(.+)\]$")
@@ -68,9 +93,6 @@ _FRAME_TOKEN = re.compile(r"#+|%0?\d*d|@+|\$F\d*")
 
 _WILDCARD_ENGINE_TYPES = frozenset({"any", "all"})
 
-# griptape's BlobArtifact family. Serialized, their bytes are base64 text indistinguishable from prose.
-_BYTE_ARTIFACT_TYPES = frozenset({"BlobArtifact", "ImageArtifact", "AudioArtifact"})
-
 _SOURCED_VALUE_TYPES = frozenset({ValueType.IMAGE, ValueType.MOVIE, ValueType.FILE})
 
 MEDIA_ENTRY_FIELDS = frozenset({"path", "format", "first", "last"})
@@ -81,25 +103,37 @@ VALUE_KEY = "$value"
 _BYTES_TYPE_NAMES = frozenset({"builtins:bytes", "builtins:bytearray"})
 
 
+@dataclass(frozen=True)
+class _EngineObject:
+    """An engine value with fields, named by its class so every kind is classified the same way."""
+
+    class_name: str
+    state: dict[str, Any]
+
+
 class UnrepresentableValueError(ValueError):
     """Raised when this protocol cannot represent a value."""
 
 
 def value_type_for_engine_type(engine_type: str | None) -> str:
     """Map a declared type, or a list's element type, before a runtime value is available."""
-    if engine_type is None:
+    # A silent or wildcard declaration accepts text, so it is not unsupported.
+    if engine_type is None or engine_type == "list" or engine_type.lower() in _WILDCARD_ENGINE_TYPES:
         return ValueType.TEXT
 
     list_match = _LIST_TYPE.match(engine_type)
     if list_match is not None:
         return value_type_for_engine_type(list_match.group(1))
 
-    mapped = ENGINE_TYPE_TO_VALUE_TYPE.get(engine_type)
-    if mapped is not None:
-        return mapped
+    scalar = _SCALAR_TYPE_TO_VALUE_TYPE.get(engine_type)
+    if scalar is not None:
+        return scalar
+    reading = _CLASS_READINGS.get(engine_type)
+    if reading is not None:
+        return reading.value_type
     if engine_type.endswith("Artifact"):
         return ValueType.FILE
-    return ValueType.TEXT
+    return ValueType.UNKNOWN
 
 
 def is_list_type(engine_type: str | None) -> bool | None:
@@ -156,7 +190,7 @@ def engine_value(value: Any) -> Any:
 
 
 def _plain_value(value: Any) -> Any:
-    """The value as untagged plain data, so an artifact reads as its ``to_dict()`` form."""
+    """The value as plain data, with each object as an ``_EngineObject`` once untagged."""
     if engine_values is None:
         # Engines before 0.104 have no value codec, and their safe_unstructure still calls to_dict().
         # Imported here because later engines deprecate it.
@@ -170,7 +204,7 @@ def _plain_value(value: Any) -> Any:
 
 
 def _untagged(data: Any) -> Any:
-    """Drop the codec's ``$type`` tags, keeping each value's state."""
+    """Replace the codec's ``$type`` tags with plain data, keeping an object's class name."""
     if isinstance(data, list):
         return [_untagged(item) for item in data]
     if not isinstance(data, dict):
@@ -182,7 +216,9 @@ def _untagged(data: Any) -> Any:
         msg = "It holds raw bytes the engine never saved to a file."
         raise UnrepresentableValueError(msg)
     if VALUE_KEY not in data:
-        return {key: _untagged(item) for key, item in data.items() if key != TYPE_KEY}
+        # The tag is "module:QualName"; a nested class's qualname is dotted.
+        class_name = str(tag).rsplit(":", 1)[-1].rsplit(".", 1)[-1]
+        return _EngineObject(class_name, {key: _untagged(item) for key, item in data.items() if key != TYPE_KEY})
     state = data[VALUE_KEY]
     if tag == "builtins:dict" and isinstance(state, dict):
         # A wrapped dict: its own "$type" key is data, not a tag.
@@ -196,23 +232,46 @@ def _descriptor(value_type: str, value: Any, engine_type: str) -> dict[str, Any]
     return {"value_type": value_type, "value": value, "engine_type": engine_type}
 
 
+def _as_object(plain: Any) -> _EngineObject | None:
+    """Untagged dicts come from a serialized artifact or an engine without the value codec."""
+    if isinstance(plain, _EngineObject):
+        return plain
+    if not isinstance(plain, dict):
+        return None
+    if _is_sequence(plain):
+        return _EngineObject(SEQUENCE_ENGINE_TYPE, plain)
+    if plain.get("type"):
+        return _EngineObject(str(plain["type"]), plain)
+    return None
+
+
+def _is_engine_sequence(engine_object: _EngineObject) -> bool:
+    """Shape as well as name, since the bare class name also matches a library's own ``Sequence``."""
+    return engine_object.class_name == SEQUENCE_ENGINE_TYPE and _is_sequence(engine_object.state)
+
+
+def _value_field(class_name: str) -> str:
+    reading = _CLASS_READINGS.get(class_name)
+    return reading.field if reading else _DEFAULT_VALUE_FIELD
+
+
 def _engine_type(value: Any, plain: Any, declared_engine_type: str | None) -> str:
-    if isinstance(plain, dict) and _is_sequence(plain):
-        return SEQUENCE_ENGINE_TYPE
+    engine_object = _as_object(plain)
+    if engine_object is not None:
+        return engine_object.class_name
     if isinstance(plain, dict):
-        return str(plain.get("type") or declared_engine_type or "dict")
+        return declared_engine_type or "dict"
     return type(value).__name__
 
 
 def _list_items(plain: Any) -> list[Any] | None:
     if isinstance(plain, (list, tuple)):
         return list(plain)
-    if not isinstance(plain, dict):
+    engine_object = _as_object(plain)
+    if engine_object is None or _is_engine_sequence(engine_object):
         return None
-    inner = plain.get("value")
-    if plain.get("type") and isinstance(inner, list):
-        return list(inner)
-    return None
+    inner = engine_object.state.get(_value_field(engine_object.class_name))
+    return list(inner) if isinstance(inner, list) else None
 
 
 def _merge_value_types(value_types: list[str], declared_value_type: str) -> str:
@@ -240,10 +299,12 @@ def _normalize_item(item: Any, declared_engine_type: str | None) -> tuple[str | 
         return _numeric_value_type(item, declared_engine_type), item
     if isinstance(item, str):
         return _normalize_string(item, declared_engine_type)
-    if isinstance(item, dict) and _is_sequence(item):
-        return _normalize_sequence(item, declared_engine_type)
+    engine_object = _as_object(item)
+    if engine_object is not None:
+        return _normalize_object(engine_object, declared_engine_type)
     if isinstance(item, dict):
-        return _normalize_artifact_dict(item, declared_engine_type)
+        msg = "It holds a dict, which this protocol has no type for."
+        raise UnrepresentableValueError(msg)
     if isinstance(item, (list, tuple)):
         msg = "It holds a list nested inside a list."
         raise UnrepresentableValueError(msg)
@@ -258,6 +319,11 @@ def _numeric_value_type(value: int | float, declared_engine_type: str | None) ->
     return ValueType.INT
 
 
+def nuke_frame_pattern(pattern: str, padding: int | None) -> str:
+    """Rewrite a scanner frame token into the `#` form Nuke reads."""
+    return _FRAME_TOKEN.sub("#" * max(padding or 0, 1), pattern, count=1)
+
+
 def _is_sequence(value: dict[str, Any]) -> bool:
     return "pattern" in value and "entries" in value
 
@@ -268,8 +334,7 @@ def _normalize_sequence(value: dict[str, Any], declared_engine_type: str | None)
     # An empty scan result has no pattern and no entries.
     if not pattern or not value.get("entries"):
         return None, None
-    padding = "#" * max(value.get("padding") or 0, 1)
-    filename = _FRAME_TOKEN.sub(padding, str(pattern), count=1)
+    filename = nuke_frame_pattern(str(pattern), value.get("padding"))
     directory = value.get("directory")
     path = f"{directory}/{filename}" if directory else filename
     value_type, entry = _normalize_string(path, declared_engine_type)
@@ -279,21 +344,26 @@ def _normalize_sequence(value: dict[str, Any], declared_engine_type: str | None)
     return value_type, {**entry, "first": value.get("first"), "last": value.get("last")}
 
 
-def _normalize_artifact_dict(value: dict[str, Any], declared_engine_type: str | None) -> tuple[str | None, Any]:
-    """Keyed by the dict's own ``type``, which is what the engine says the value is."""
-    artifact_type = value.get("type")
-    if not artifact_type:
-        msg = "It holds a dict, which this protocol has no type for."
+def _normalize_object(engine_object: _EngineObject, declared_engine_type: str | None) -> tuple[str | None, Any]:
+    """Keyed by the object's own class, which is what the engine says the value is."""
+    class_name = engine_object.class_name
+    if _is_engine_sequence(engine_object):
+        return _normalize_sequence(engine_object.state, declared_engine_type)
+    reading = _CLASS_READINGS.get(class_name)
+    if reading is not None and reading.holds_bytes:
+        # Serialized, these bytes are base64 text indistinguishable from prose.
+        msg = f"It holds {class_name} bytes the engine never saved to a file."
         raise UnrepresentableValueError(msg)
-    if artifact_type in _BYTE_ARTIFACT_TYPES:
-        msg = f"It holds {artifact_type} bytes the engine never saved to a file."
+    field = _value_field(class_name)
+    if field not in engine_object.state:
+        msg = f"It holds a {class_name}, which this protocol has no type for."
         raise UnrepresentableValueError(msg)
 
-    inner = value.get("value")
+    inner = engine_object.state[field]
     if isinstance(inner, str):
-        return _normalize_string(inner, str(artifact_type))
-    if isinstance(inner, dict):
-        msg = f"It holds a {artifact_type} wrapping a dict, which this protocol has no type for."
+        return _normalize_string(inner, class_name)
+    if isinstance(inner, (dict, _EngineObject)):
+        msg = f"It holds a {class_name} wrapping a dict, which this protocol has no type for."
         raise UnrepresentableValueError(msg)
     return _normalize_item(inner, declared_engine_type)
 

@@ -44,11 +44,13 @@ class NukeConnectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
 @dataclass
 @PayloadRegistry.register
 class NukeConnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """Host fields name the claim that refused this connect, empty on a version refusal."""
+    """Host and run fields are set only on a claim refusal."""
 
     supported_protocol_versions: list[int]
     host_client_name: str = ""
     host_connected_at: float = 0.0
+    running: bool = False
+    workflow_id: str = ""
 
 
 @dataclass
@@ -74,8 +76,27 @@ class NukeDisconnectResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure)
 
 @dataclass
 @PayloadRegistry.register
+class NukePingRequest(RequestPayload):
+    """A reply proves the engine is alive, unlike a transport ``ping`` frame, which only proves the connection is."""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukePingResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    """The engine answered."""
+
+
+@dataclass
+@PayloadRegistry.register
+class NukePingResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
+    """Never returned by this library; every verb declares a failure result."""
+
+
+@dataclass
+@PayloadRegistry.register
 class NukeListWorkflowsRequest(RequestPayload):
     runnable_only: bool = True
+    templates_only: bool = False
 
 
 @dataclass
@@ -138,7 +159,7 @@ class NukeLoadWorkflowResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSucces
 @dataclass
 @PayloadRegistry.register
 class NukeLoadWorkflowResultFailure(WorkflowNotAlteredMixin, ResultPayloadFailure):
-    """``engine_state_cleared`` indicates that the previous graph did not survive."""
+    """``engine_state_cleared`` is true only when a reload closed the host's workflow and the reopen failed."""
 
     workflow_id: str = ""
     engine_state_cleared: bool = False
@@ -289,6 +310,7 @@ class NukeGetCurrentProjectRequest(RequestPayload):
 @dataclass
 @PayloadRegistry.register
 class NukeGetCurrentProjectResultSuccess(WorkflowNotAlteredMixin, ResultPayloadSuccess):
+    project_id: str
     name: str
     workspace_dir: str
     validation_status: str

@@ -13,6 +13,7 @@ class Verb:
 
     CONNECT = "NukeConnectRequest"
     DISCONNECT = "NukeDisconnectRequest"
+    PING = "NukePingRequest"
     LIST_WORKFLOWS = "NukeListWorkflowsRequest"
     DESCRIBE_WORKFLOW = "NukeDescribeWorkflowRequest"
     LOAD_WORKFLOW = "NukeLoadWorkflowRequest"
@@ -77,6 +78,8 @@ class ValueType:
     INT = "GTInt"
     FLOAT = "GTFloat"
     BOOL = "GTBool"
+    # A declared type this protocol has no knob for, so a host can mark the parameter unsupported.
+    UNKNOWN = "GTUnknown"
 
 
 VALUE_TYPES = (
@@ -87,4 +90,5 @@ VALUE_TYPES = (
     ValueType.INT,
     ValueType.FLOAT,
     ValueType.BOOL,
+    ValueType.UNKNOWN,
 )

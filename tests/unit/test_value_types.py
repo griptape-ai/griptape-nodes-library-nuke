@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -22,6 +23,39 @@ from nuke_host_api.protocol import VALUE_TYPES, ValueType
 from nuke_host_api.value_types import UnrepresentableValueError
 
 URL = "https://cdn.example.com/render.png"
+
+
+@dataclass
+class PlateDescriptor:
+    """A library value that is not a griptape artifact but follows the same ``value`` convention."""
+
+    value: str
+
+
+class LibraryModels:
+    @dataclass
+    class Sequence:
+        """A library's own edit sequence, sharing only its class name with the engine's ``Sequence``."""
+
+        name: str
+        shots: list[str]
+
+
+@dataclass
+class RenderStats:
+    """A library value with no field a host can read."""
+
+    width: int
+    height: int
+
+
+@dataclass
+class EXRPartArtifact:
+    """Stands in for griptape-nodes-library-openexr's descriptor, which this library does not depend on."""
+
+    file_path: str
+    part_index: int = 0
+    name: str = ""
 
 
 @pytest.fixture(autouse=True)
@@ -76,6 +110,7 @@ def _sequence(
         ("ImageSequenceArtifact", ValueType.IMAGE),
         ("list[ImageUrlArtifact]", ValueType.IMAGE),
         ("list[VideoUrlArtifact]", ValueType.MOVIE),
+        ("EXRPartArtifact", ValueType.IMAGE),
         ("list[int]", ValueType.INT),
         ("list[str]", ValueType.TEXT),
         ("list[AudioUrlArtifact]", ValueType.FILE),
@@ -84,7 +119,15 @@ def _sequence(
         ("all", ValueType.TEXT),
         # Unknown artifact classes degrade to a file rather than leaking the engine name.
         ("AudioUrlArtifact", ValueType.FILE),
-        ("SomethingInventedNextRelease", ValueType.TEXT),
+        ("Any", ValueType.TEXT),
+        ("list[any]", ValueType.TEXT),
+        # Unknown non-artifact classes have no knob, so a host can flag them as unsupported.
+        ("SomethingInventedNextRelease", ValueType.UNKNOWN),
+        ("dict", ValueType.UNKNOWN),
+        ("python", ValueType.TEXT),
+        ("yaml", ValueType.TEXT),
+        ("json", ValueType.TEXT),
+        ("list[PromptDriver]", ValueType.UNKNOWN),
         (None, ValueType.TEXT),
     ],
 )
@@ -413,6 +456,14 @@ class TestLocators:
         descriptor = value_types.normalize_value("not a path at all", "ImageUrlArtifact")
         assert descriptor == {"value_type": ValueType.TEXT, "value": "not a path at all", "engine_type": "str"}
 
+    def test_an_unset_parameter_of_an_unmapped_class_is_unknown(self) -> None:
+        descriptor = value_types.normalize_value(None, "PromptDriver")
+        assert descriptor == {"value_type": ValueType.UNKNOWN, "value": None, "engine_type": "NoneType"}
+
+    def test_text_on_a_parameter_of_an_unmapped_class_narrows_to_text(self) -> None:
+        descriptor = value_types.normalize_value("a prompt", "PromptDriver")
+        assert descriptor["value_type"] == ValueType.TEXT
+
 
 class TestUnrepresentable:
     @pytest.mark.parametrize("value", [URL, ImageUrlArtifact(URL), {"type": "ImageUrlArtifact", "value": URL}])
@@ -472,11 +523,19 @@ class TestSerializedArtifacts:
         [
             (
                 {"$type": "griptape.artifacts:ImageUrlArtifact", "type": "ImageUrlArtifact", "value": "/a.png"},
-                {"type": "ImageUrlArtifact", "value": "/a.png"},
+                value_types._EngineObject("ImageUrlArtifact", {"type": "ImageUrlArtifact", "value": "/a.png"}),
             ),
             ({"$type": "builtins:tuple", "$value": [1, {"$type": "pathlib:Path", "$value": "/a.png"}]}, [1, "/a.png"]),
             ({"$type": "builtins:dict", "$value": {"$type": "data"}}, {"$type": "data"}),
             ({"$type": "builtins:float", "$value": "inf"}, float("inf")),
+            (
+                {"$type": "exr_header_artifact:EXRPartArtifact", "file_path": "/a.exr", "part_index": 0},
+                value_types._EngineObject("EXRPartArtifact", {"file_path": "/a.exr", "part_index": 0}),
+            ),
+            (
+                {"$type": "some.module:Outer.Inner", "value": "/a.png"},
+                value_types._EngineObject("Inner", {"value": "/a.png"}),
+            ),
         ],
     )
     def test_a_tagged_value_reads_as_its_state(self, tagged: Any, plain: Any) -> None:
@@ -511,6 +570,36 @@ class TestValueCodec:
         with pytest.raises(UnrepresentableValueError, match="no plain-data form"):
             value_types.normalize_value(object(), "any")
 
+    def test_a_dataclass_is_read_like_an_artifact_of_the_same_shape(self) -> None:
+        descriptor = value_types.normalize_value(PlateDescriptor("/show/plate.exr"))
+        assert descriptor == {
+            "value_type": ValueType.IMAGE,
+            "value": {"path": "/show/plate.exr", "format": "exr", "first": None, "last": None},
+            "engine_type": "PlateDescriptor",
+        }
+
+    def test_a_dataclass_with_no_readable_field_names_its_class(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="RenderStats"):
+            value_types.normalize_value(RenderStats(1920, 1080), "RenderStats")
+
+    def test_a_library_class_named_sequence_is_not_read_as_a_frame_sequence(self) -> None:
+        with pytest.raises(UnrepresentableValueError, match="Sequence"):
+            value_types.normalize_value(LibraryModels.Sequence("edit_v3", ["sh010"]), "any")
+
+    def test_a_list_of_exr_parts_is_one_entry_each(self) -> None:
+        parts = [EXRPartArtifact("/show/a.exr"), EXRPartArtifact("/show/b.exr")]
+        descriptor = value_types.normalize_value(parts, "list[EXRPartArtifact]")
+        assert descriptor["value_type"] == ValueType.IMAGE
+        assert [entry["path"] for entry in descriptor["value"]] == ["/show/a.exr", "/show/b.exr"]
+
+    def test_an_exr_part_is_an_image_at_its_file_path(self) -> None:
+        descriptor = value_types.normalize_value(EXRPartArtifact("/show/beauty.exr"), "EXRPartArtifact")
+        assert descriptor == {
+            "value_type": ValueType.IMAGE,
+            "value": {"path": "/show/beauty.exr", "format": "exr", "first": None, "last": None},
+            "engine_type": "EXRPartArtifact",
+        }
+
 
 class TestEngineValue:
     """A host sends back what it read, and the engine is handed what it holds."""
@@ -533,3 +622,26 @@ class TestEngineValue:
     def test_a_read_value_round_trips(self) -> None:
         read = value_types.normalize_value([ImageUrlArtifact("/a/1.png")], "list[ImageUrlArtifact]")["value"]
         assert value_types.engine_value(read) == ["/a/1.png"]
+
+
+class TestNukeFramePattern:
+    """Nuke reads `#` and `%0Nd`; the engine's scanner also emits `@` and `$F`."""
+
+    @pytest.mark.parametrize(
+        ("pattern", "padding", "expected"),
+        [
+            ("frame_####.png", 4, "frame_####.png"),
+            ("frame_%04d.png", 4, "frame_####.png"),
+            ("frame_@@@@.png", 4, "frame_####.png"),
+            ("frame_$F4.png", 4, "frame_####.png"),
+            ("frame_%d.png", 0, "frame_#.png"),
+        ],
+    )
+    def test_token_is_rewritten_to_hashes(self, pattern: str, padding: int, expected: str) -> None:
+        assert value_types.nuke_frame_pattern(pattern, padding) == expected
+
+    def test_only_the_first_token_is_rewritten(self) -> None:
+        assert value_types.nuke_frame_pattern("v%02d/frame_%04d.png", 4) == "v####/frame_%04d.png"
+
+    def test_pattern_without_token_is_unchanged(self) -> None:
+        assert value_types.nuke_frame_pattern("plate.png", 4) == "plate.png"

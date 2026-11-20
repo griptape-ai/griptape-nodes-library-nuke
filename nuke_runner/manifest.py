@@ -4,13 +4,18 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = "griptape-nuke-runner/1.1"
+SCHEMA_VERSION = "griptape-nuke-runner/1.2"
 
 
 @dataclass
 class ManifestInput:
     path: str
     node: str
+    # Set only for sequence inputs. The runner hands "<path> <first>-<last>" to
+    # Read_File_Knob.fromUserText so Nuke sets first/last/origfirst/origlast/origset
+    # itself; a bare setValue leaves the range authored into the .nk in place.
+    first: int | None = None
+    last: int | None = None
 
     def __post_init__(self) -> None:
         self.path = self.path.replace("\\", "/")
@@ -60,7 +65,10 @@ class JobManifest:
                 "schema": self.schema,
                 "script": self.script,
                 "frame_range": self.frame_range,
-                "inputs": {k: {"path": v.path, "node": v.node} for k, v in self.inputs.items()},
+                "inputs": {
+                    k: {"path": v.path, "node": v.node, "first": v.first, "last": v.last}
+                    for k, v in self.inputs.items()
+                },
                 "outputs": {
                     k: {"path": v.path, "node": v.node, "format": v.format, "type": v.type}
                     for k, v in self.outputs.items()
@@ -81,7 +89,10 @@ class JobManifest:
             schema=data["schema"],
             script=data["script"],
             frame_range=data.get("frame_range", [1001, 1001]),
-            inputs={k: ManifestInput(path=v["path"], node=v["node"]) for k, v in data.get("inputs", {}).items()},
+            inputs={
+                k: ManifestInput(path=v["path"], node=v["node"], first=v.get("first"), last=v.get("last"))
+                for k, v in data.get("inputs", {}).items()
+            },
             outputs={
                 k: ManifestOutput(
                     path=v["path"],
