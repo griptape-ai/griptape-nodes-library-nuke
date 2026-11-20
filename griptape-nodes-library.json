@@ -34,7 +34,11 @@
         "category": "FoundryNuke",
         "description": "Start flow for Nuke",
         "display_name": "Nuke Start Flow",
-        "icon": "logos/nuke.png"
+        "icon": "logos/nuke.png",
+        "hidden_from_library": true,
+        "deprecation": {
+          "deprecation_message": "Use Start Flow. Publish to Nuke Gizmo now works with the standard Start Flow node."
+        }
       }
     },
     {
@@ -44,7 +48,22 @@
         "category": "FoundryNuke",
         "description": "End flow for Nuke",
         "display_name": "Nuke End Flow",
-        "icon": "logos/nuke.png"
+        "icon": "logos/nuke.png",
+        "hidden_from_library": true,
+        "deprecation": {
+          "deprecation_message": "Use End Flow. Publish to Nuke Gizmo now works with the standard End Flow node."
+        }
+      }
+    },
+    {
+      "class_name": "NukeConfiguration",
+      "file_path": "nuke_nodes/nuke_configuration.py",
+      "metadata": {
+        "category": "FoundryNuke",
+        "description": "Remembers how this workflow was published as a Nuke gizmo. Added by Publish to Nuke Gizmo.",
+        "display_name": "Nuke Configuration",
+        "icon": "logos/nuke.png",
+        "hidden_from_library": true
       }
     },
     {

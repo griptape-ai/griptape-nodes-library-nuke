@@ -61,7 +61,6 @@ def _publish(publisher: NukeGizmoPublisher, install_dir: Path, staging: Path):  
         mock.patch.object(publisher, "_collect_versions", return_value=[1, 2]),
         mock.patch.object(publisher, "_ensure_init_plugin_path"),
         mock.patch.object(publisher, "_regenerate_menu_py"),
-        mock.patch.object(publisher, "_save_publish_config"),
         mock.patch("publish_gizmo.nuke_gizmo_publisher.WorkflowRegistry") as registry,
         mock.patch("publish_gizmo.nuke_gizmo_publisher.GriptapeNodes") as griptape_nodes,
         mock.patch("publish_gizmo.nuke_gizmo_publisher.NukeGizmoBuilder") as builder,
