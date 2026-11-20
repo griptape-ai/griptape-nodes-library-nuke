@@ -144,7 +144,7 @@ def with_saved_defaults(live_shape: dict, saved_shape: dict) -> dict:
 
 
 def end_node_names(declared_shape: dict) -> frozenset[str]:
-    """Nodes whose outputs the workflow declares; a run that resolves none of them delivered nothing."""
+    """Nodes whose outputs the workflow declares."""
     outputs = declared_shape.get("outputs")
     if not isinstance(outputs, dict):
         return frozenset()
