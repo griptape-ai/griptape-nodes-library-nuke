@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import shutil
+import sys
 from pathlib import Path
 
 from publish_gizmo.nuke_discovery import (
     GIZMO_INSTALL_CUSTOM,
     compute_gizmo_install_path_choices,
     default_gizmo_path,
+    discover_nuke_executables,
     normalize_path_str,
 )
 
@@ -48,3 +51,19 @@ class TestDefaultGizmoPath:
 
     def test_falls_back_to_dot_nuke_when_no_candidates(self) -> None:
         assert default_gizmo_path([]) == normalize_path_str(str(Path.home() / ".nuke"))
+
+
+class TestDiscoverNukeExecutables:
+    def test_windows_skips_crash_feedback_executable(self, monkeypatch, tmp_path) -> None:
+        install = tmp_path / "Nuke14.1v1"
+        install.mkdir()
+        nuke_exe = install / "Nuke14.1.exe"
+        nuke_exe.touch()
+        # Windows globbing is case-insensitive, so "Nuke*.exe" also matches nukeCrashFeedback.exe.
+        (install / "NukeCrashFeedback.exe").touch()
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("ProgramFiles", str(tmp_path))
+        monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+        assert discover_nuke_executables() == [str(nuke_exe.resolve())]
