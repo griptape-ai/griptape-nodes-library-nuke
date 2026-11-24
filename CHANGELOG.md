@@ -10,6 +10,43 @@ the `library_version` in `griptape-nodes-library.json`.
 
 <!-- Entries go in changelog.d/, one file each. See changelog.d/README.md. -->
 
+## [0.5.0] - 2026-11-24
+
+### Added
+
+- The workflow list for hosts names the library that ships each library workflow in a new
+  `library_name` field, so a host can group or label templates by library. It is empty for the
+  user's own workflows.
+
+### Changed
+
+- **Breaking:** The library requires engine 0.111.0 or later. On an older engine from PyPI it no
+  longer loads, so update the engine before updating the library.
+- **Breaking:** Nuke acts only on the workflow it loaded. With none loaded, execute, the
+  parameter-value verbs, execution state and cancel report that instead of driving the workflow
+  open in the editor. A host that drove an editor's workflow without loading it must send
+  `NukeLoadWorkflowRequest` for that workflow first.
+- Loading a workflow from Nuke uses the copy an editor tab already has open, unsaved edits
+  included, instead of reloading it from disk. Loading a workflow Nuke opened itself still reopens
+  it from its file. A failed load leaves Nuke's previous workflow loaded, and the next load closes
+  it only if Nuke opened it.
+
+### Fixed
+
+- The inputs and outputs Nuke reads, sets and runs with come from the workflow as it stands, so a
+  Start Flow or End Flow parameter added in the editor works before the workflow is saved.
+- The `Nuke Version` dropdown on the Nuke Script node lists only Nuke on Windows, instead of also
+  listing Nuke's crash reporter, `nukeCrashFeedback`, for Nuke 14.1 and later.
+  [#166](https://github.com/griptape-ai/griptape-nodes-library-nuke/issues/166)
+- Nuke keeps working while the engine has other workflows open, such as editor tabs, instead of
+  failing with `WorkflowNotNamedError`. Loading a workflow from Nuke replaces the one Nuke loaded
+  before and leaves other open workflows alone.
+  [#204](https://github.com/griptape-ai/griptape-nodes-library-nuke/issues/204)
+- The Griptape node in Nuke now reports a run as failed when the workflow's End Flow never ran,
+  naming the node the run stopped at. It used to report "Workflow completed successfully" with no
+  outputs delivered.
+  [#193](https://github.com/griptape-ai/griptape-nodes-library-nuke/issues/193)
+
 ## [0.4.0] - 2026-11-11
 
 ### Added
@@ -43,5 +80,6 @@ the `library_version` in `griptape-nodes-library.json`.
   published workflow no longer carries absolute paths from the author's machine.
   [#182](https://github.com/griptape-ai/griptape-nodes-library-nuke/pull/182)
 
-[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-nuke/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-nuke/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/griptape-ai/griptape-nodes-library-nuke/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/griptape-ai/griptape-nodes-library-nuke/compare/v0.3.0...v0.4.0
