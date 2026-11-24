@@ -78,7 +78,7 @@ class TestValidateInstallPath:
     def _validate(self, metadata: dict) -> list[Exception]:
         publisher = _publisher(metadata)
         with (
-            mock.patch.object(publisher, "_get_nuke_start_flow_node", return_value=mock.Mock()),
+            mock.patch.object(publisher, "_has_start_node", return_value=True),
             mock.patch("publish_gizmo.nuke_gizmo_publisher.GriptapeNodes") as griptape_nodes,
         ):
             griptape_nodes.ConfigManager.return_value.workspace_path = Path(WORKSPACE)
@@ -105,17 +105,14 @@ class TestValidateInstallPath:
         assert str(target) in str(errors[0])
 
 
-class TestSavePublishConfig:
+class TestPublishConfig:
     def test_resolved_custom_path_is_stored(self) -> None:
         """The dialog re-reads this value, so storing the relative one reintroduces the bug."""
         publisher = _publisher(_custom("gizmos/nuke"))
-        start_flow = mock.Mock()
-        start_flow.metadata = {}
-        with (
-            mock.patch.object(publisher, "_get_nuke_start_flow_node", return_value=start_flow),
-            mock.patch("publish_gizmo.nuke_gizmo_publisher.GriptapeNodes") as griptape_nodes,
-        ):
+        with mock.patch("publish_gizmo.nuke_gizmo_publisher.GriptapeNodes") as griptape_nodes:
             griptape_nodes.ConfigManager.return_value.workspace_path = Path(WORKSPACE)
-            publisher._save_publish_config(Path("/opt/studio/gizmos/wf_v1.gizmo"), 1)  # noqa: SLF001
+            config = publisher._publish_config(Path("/opt/studio/gizmos/wf_v1.gizmo"), 1)  # noqa: SLF001
 
-        assert start_flow.metadata["publish_config"]["custom_gizmo_path"] == f"{WORKSPACE}/gizmos/nuke"
+        assert config["custom_gizmo_path"] == f"{WORKSPACE}/gizmos/nuke"
+        assert config["gizmo_path"] == "/opt/studio/gizmos/wf_v1.gizmo"
+        assert config["version"] == 1

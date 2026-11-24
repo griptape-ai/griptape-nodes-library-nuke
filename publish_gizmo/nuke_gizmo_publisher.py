@@ -5,7 +5,7 @@ import platform
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from griptape_nodes.common.project_templates.directory import DirectoryDefinition
 from griptape_nodes.common.project_templates.loader import load_project_template_from_yaml
@@ -18,6 +18,7 @@ from griptape_nodes.common.project_templates.validation import (
     ProjectValidationInfo,
     ProjectValidationStatus,
 )
+from griptape_nodes.exe_types.node_types import StartNode
 from griptape_nodes.node_library.workflow_registry import WorkflowRegistry
 from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowRequest, GetTopLevelFlowResultSuccess
 from griptape_nodes.retained_mode.events.os_events import (
@@ -49,6 +50,13 @@ from publish_gizmo.constants import (
 from publish_gizmo.nuke_discovery import GIZMO_INSTALL_CUSTOM
 from publish_gizmo.nuke_gizmo_builder import NukeGizmoBuilder
 from publish_gizmo.output_paths import absolutize
+from publish_gizmo.publish_config import (
+    CUSTOM_GIZMO_PATH,
+    GIZMO_INSTALL_PATH,
+    GIZMO_PATH,
+    VERSION,
+    saved_publish_config,
+)
 
 if TYPE_CHECKING:
     from griptape_nodes.node_library.workflow_registry import Workflow
@@ -79,9 +87,12 @@ SCRIPT_ANCHORED_DIRECTORIES = {
 
 
 class NukeGizmoPublisher:
-    def __init__(self, workflow_name: str, metadata: dict | None = None) -> None:
+    def __init__(
+        self, workflow_name: str, metadata: dict | None = None, configuration: dict[str, Any] | None = None
+    ) -> None:
         self._workflow_name = workflow_name
         self._metadata: dict = metadata or {}
+        self._configuration = configuration
         self._packager = WorkflowPackager(workflow_name)
 
     def publish_workflow(self) -> ResultPayload:
@@ -158,8 +169,6 @@ class NukeGizmoPublisher:
             first_time_setup = self._ensure_init_plugin_path(install_dir)
             self._regenerate_menu_py(griptape_dir)
 
-            self._save_publish_config(gizmo_path, version)
-
             self._packager.emit_progress(10.0, "Gizmo installed successfully!")
             notes = self._build_publish_notes(
                 install_dir=install_dir, install_dir_created=install_dir_created, lock_error=lock_error
@@ -177,6 +186,9 @@ class NukeGizmoPublisher:
                 # rendering, so the notes are repeated into it as prose.
                 result_details="\n\n".join([f"Gizmo v{version} installed to: {gizmo_path}", *notes]),
                 metadata={"publish_next_steps": next_steps, "publish_notes": notes},
+                # The engine keeps this on the workflow's Nuke Configuration node and saves the
+                # workflow, so the next publish dialog offers to update this version.
+                configuration=self._publish_config(gizmo_path, version),
             )
         except Exception as e:
             logger.exception("Failed to publish workflow '%s'", self._workflow_name)
@@ -246,7 +258,7 @@ class NukeGizmoPublisher:
         """Replace declared defaults in *workflow_shape* with the values set on the canvas.
 
         ``extract_workflow_shape`` reports ``Parameter.default_value`` and never consults
-        ``node.parameter_values``. Every NukeStartFlow input is a user-added parameter whose
+        ``node.parameter_values``. Every Start Flow input is a user-added parameter whose
         declared default is None, so the value the artist typed lives only in
         ``parameter_values`` — without this the gizmo's knobs are built with no value line
         and Nuke initializes them to 0 / empty, which run_button.py then sends back as a
@@ -581,8 +593,8 @@ class NukeGizmoPublisher:
 
     def _validate(self) -> list[Exception]:
         errors: list[Exception] = []
-        if self._get_nuke_start_flow_node() is None:
-            errors.append(ValueError("No NukeStartFlow node found in the workflow."))
+        if not self._has_start_node():
+            errors.append(ValueError("This workflow has no Start Flow node. Add one to define the gizmo's knobs."))
             return errors
         install_dir = self._resolve_gizmo_install_path()
         if install_dir is None:
@@ -624,24 +636,19 @@ class NukeGizmoPublisher:
             return None
         return Path(absolutize(str(choice), str(GriptapeNodes.ConfigManager().workspace_path)))
 
-    def _get_nuke_start_flow_node(self):  # noqa: ANN202
+    def _has_start_node(self) -> bool:
         result = GriptapeNodes.handle_request(GetTopLevelFlowRequest())
         if not isinstance(result, GetTopLevelFlowResultSuccess) or result.flow_name is None:
-            return None
+            return False
         control_flow = GriptapeNodes.FlowManager().get_flow_by_name(result.flow_name)
-        for node in control_flow.nodes.values():
-            if node.__class__.__name__ == "NukeStartFlow":
-                return node
-        return None
+        return any(isinstance(node, StartNode) for node in control_flow.nodes.values())
 
     # -- Version management --
 
     def _get_saved_version(self) -> int | None:
-        start_flow = self._get_nuke_start_flow_node()
-        if start_flow is not None:
-            v = start_flow.metadata.get("publish_config", {}).get("version")
-            if v is not None:
-                return int(v)
+        v = saved_publish_config(self._configuration).get(VERSION)
+        if v is not None:
+            return int(v)
         v = self._metadata.get("version")
         return int(v) if v is not None else None
 
@@ -670,20 +677,18 @@ class NukeGizmoPublisher:
         existing = self._collect_versions(companion_base)
         return max(existing) + 1 if existing else 1
 
-    def _save_publish_config(self, gizmo_path: Path, version: int) -> None:
-        start_flow = self._get_nuke_start_flow_node()
-        if start_flow is None:
-            return
+    def _publish_config(self, gizmo_path: Path, version: int) -> dict[str, Any]:
+        """The settings for the next publish to start from."""
         # Store the resolved custom path so the next publish dialog round-trips an
         # absolute value instead of the relative one the file picker handed back.
         custom_path = self._metadata.get("custom_gizmo_path")
         if custom_path:
             custom_path = absolutize(str(custom_path), str(GriptapeNodes.ConfigManager().workspace_path))
-        start_flow.metadata["publish_config"] = {
-            "gizmo_install_path": self._metadata.get("gizmo_install_path"),
-            "custom_gizmo_path": custom_path,
-            "gizmo_path": str(gizmo_path),
-            "version": version,
+        return {
+            GIZMO_INSTALL_PATH: self._metadata.get("gizmo_install_path"),
+            CUSTOM_GIZMO_PATH: custom_path,
+            GIZMO_PATH: str(gizmo_path),
+            VERSION: version,
         }
 
     # -- Plugin registration file writers --

@@ -40,6 +40,7 @@ def _publish_workflow_request_handler(request: RequestPayload) -> ResultPayload:
     publisher = NukeGizmoPublisher(
         workflow_name=request.workflow_name,
         metadata=request.metadata,
+        configuration=request.configuration,
     )
     return publisher.publish_workflow()
 
@@ -63,6 +64,8 @@ class NukeLibraryAdvanced(AdvancedNodeLibrary):
                 display_name="Publish to Nuke Gizmo",
                 description="Package the workflow as a versioned .gizmo installed into a Nuke plugin directory.",
                 icon=PUBLISH_TARGET_ICON,
+                configuration_node_type="NukeConfiguration",
+                configuration_node_library_name=library_data.name,
             ),
         )
 
