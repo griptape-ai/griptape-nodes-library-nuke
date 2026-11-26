@@ -3,7 +3,7 @@ title: Setting up Nuke
 description: Where the library finds Nuke, how to add an installation, the license, and the Nuke settings.
 ---
 
-This page covers what to check when the **Nuke Version** list is empty, when your Nuke is not listed, or when Nuke cannot find its license.
+The library runs your own Foundry Nuke installation, so it needs to know where Nuke is and how to get a license. This page explains how it finds Nuke, how to add an installation, and what to check when the **Nuke Version** list is empty or Nuke cannot find its license.
 
 ## What you need
 

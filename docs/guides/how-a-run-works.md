@@ -3,7 +3,7 @@ title: How a Nuke Script run works
 description: What the Nuke Script node does during a run, where its outputs are saved, and what its error messages mean.
 ---
 
-This page covers where a render ends up, how inputs are handled, and what the error messages mean.
+The Nuke Script node runs your comp in Nuke in the background, without opening Nuke's interface. This page explains what happens during a run, where the outputs are saved, and what the error messages mean.
 
 ## What happens in a run
 

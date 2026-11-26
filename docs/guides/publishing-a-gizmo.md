@@ -3,7 +3,7 @@ title: Publishing a workflow as a gizmo
 description: How to publish a workflow to Nuke, where the files go, and how to run the gizmo.
 ---
 
-This page covers publishing a workflow that starts with Nuke Start Flow and ends with Nuke End Flow, and what to check when the published gizmo does not show up in Nuke.
+Publishing turns a Griptape workflow into a gizmo you can use from Nuke's node graph. The workflow starts with a Nuke Start Flow node and ends with a Nuke End Flow node. This page covers how to publish, where the files go, and what to check when the gizmo does not show up in Nuke.
 
 ## Publish
 
