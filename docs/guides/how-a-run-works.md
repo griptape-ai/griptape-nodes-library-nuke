@@ -3,17 +3,19 @@ title: How a Nuke Script run works
 description: What the Nuke Script node does during a run, where its outputs are saved, and what its error messages mean.
 ---
 
-The Nuke Script node runs your comp in Nuke in the background, without opening Nuke's interface. This page explains what happens during a run, where the outputs are saved, and what the error messages mean.
+The Nuke Script node takes a comp you built in Nuke, a `.nk` script, and runs it as one step of a Griptape workflow. A workflow is a set of connected nodes in Griptape Nodes. The node renders the comp in the background without opening Nuke's window, then passes the result to the next node. This page explains what happens during a run, where the outputs are saved, and what the error messages mean.
+
+Inputs and outputs come from marks you make in Nuke with the Annotator panel. A Read node (loads a file into Nuke) marked as an input becomes an input on the node. A Write node (renders a file out of Nuke) marked as an output becomes an output on the node. See [The Griptape Annotator panel](annotator-panel.md).
 
 ## What happens in a run
 
-The node starts Nuke in the background, opens your `.nk`, points each marked Read node at the file you supplied, applies any knob values you set, and renders each marked Write node over the frame range. Your `.nk` file is not changed. Nuke's proxy mode is switched off for the run.
+The node starts Nuke in the background, opens your `.nk`, points each marked Read node at the file you supplied, applies any knob values you set (a knob is a setting on a Nuke node), and renders each marked Write node over the frame range. Your `.nk` file is not changed. Nuke's proxy mode is switched off for the run.
 
 The render range applies to every output. An image output is one file. Mark the output as a Sequence to keep every frame in the range.
 
 ## Where outputs are saved
 
-Each output is saved in the project's outputs folder. With the default project layout:
+Each output is saved in the outputs folder of your Griptape Nodes project. With the default project layout:
 
 | Marked as | You get | Where and how it is named |
 |-----------|---------|---------------------------|
@@ -53,7 +55,7 @@ If something is connected to the **Failed** output, the workflow carries on down
 
 ## Baked copies
 
-**Save Baked Copy** writes the script the workflow would run, without rendering.
+**Save Baked Copy** writes a `.nk` script with everything the workflow would feed it already applied, without rendering. You can hand it to a comp artist to open in Nuke.
 
 - An input left empty keeps the file path stored in the script.
 - Inputs that had to be downloaded are saved in the project's outputs folder instead of a temporary folder, so the baked copy can still find them.

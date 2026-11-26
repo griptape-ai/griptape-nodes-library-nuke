@@ -3,9 +3,11 @@ description: Marks the end of a workflow that you will publish as a Nuke gizmo, 
 when_to_use: "Use it as the last node of a workflow you plan to publish with Publish to Nuke Gizmo. Do not use it for workflows that stay in Griptape Nodes."
 ---
 
+Nuke End Flow marks the last node of a workflow that you want to use from inside Nuke. A workflow is a set of connected nodes in Griptape Nodes. When you publish it with **Publish to Nuke Gizmo**, the workflow becomes a gizmo, which is a custom node you add to the node graph in Nuke. The parameters you add to this node become the results the gizmo shows after it runs. See [Publishing a workflow as a gizmo](../guides/publishing-a-gizmo.md).
+
 ## When to use it
 
-You have built a workflow that should become a gizmo you can drop into a Nuke script. End it with this node. Anything you add to it becomes a result on the gizmo.
+You have built a workflow that should become a gizmo you can drop into a Nuke script. End it with this node.
 
 ## What it needs
 
@@ -19,9 +21,9 @@ The style-transfer workflow from [Nuke Start Flow](NukeStartFlow.md) ends here. 
 
 ## Parameters
 
-Each parameter you add becomes a read-only result on the gizmo's **Outputs** tab, with a **Copy Link** button beside it. The result is labelled with the parameter's display name, or with its name in capitalised words when it has no display name.
+Each parameter you add becomes a read-only result, called a knob in Nuke, on the gizmo's **Outputs** tab, with a **Copy Link** button beside it. The result is labelled with the parameter's display name, or with its name in capitalised words when it has no display name.
 
-- Image, video, audio and file results are shown through a Read node inside the gizmo.
+- Image, video, audio and file results are shown through a Read node inside the gizmo. A Read node loads a file into Nuke.
 - When the workflow has more than one image, video, audio or file result, an **Active Output** menu on the Outputs tab picks which one the gizmo passes on.
 - In a Nuke script, refer to a result with an expression such as `[value mygizmo_v01.caption_out]`. The knob name is the parameter name followed by `_out`.
 

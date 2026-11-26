@@ -3,13 +3,13 @@ title: The Griptape Annotator panel
 description: How to mark Read and Write nodes as inputs and outputs, and expose knobs, in Nuke.
 ---
 
-The Griptape Annotator is a panel inside Nuke where you mark which Read nodes are inputs, which Write nodes are outputs, and which knobs to expose. The Nuke Script node uses those marks to build its inputs, outputs and controls.
+The Griptape Annotator is a panel inside Nuke. You use it to tell Griptape Nodes what in your comp can change from outside. You mark which Read nodes (they load images into the comp) are inputs, which Write nodes (they render images out of the comp) are outputs, and which knobs to expose. A knob is a setting on a Nuke node, such as the white point on a Grade. Exposing a knob makes it a control on the Nuke Script node in Griptape Nodes.
 
-The panel writes your choices to a `.gt.json` file beside the script, with the same name. The Nuke Script node builds its inputs, outputs and controls from that file. A script with no `.gt.json` file still runs, but the node has no inputs or outputs.
+The Nuke Script node runs a `.nk` script, a saved Nuke comp, as a step in a Griptape workflow. It builds its inputs, outputs and controls from your marks. The panel writes your choices to a `.gt.json` file beside the script, with the same name. A script with no `.gt.json` file still runs, but the node has no inputs or outputs.
 
 ## Opening the panel
 
-Click **Open in Nuke** on the Nuke Script node. Nuke opens the script with the panel available. In Nuke, choose **Panels > Griptape Annotator**. A **Refresh** button at the top re-reads the open script. Save the `.nk` script before you annotate it.
+Click **Open in Nuke** on the Nuke Script node. Nuke opens the script in its normal window with the panel available. In Nuke, choose **Panels > Griptape Annotator**. A **Refresh** button at the top re-reads the open script. Save the `.nk` script before you annotate it.
 
 An input or output is named after its Nuke node in lower case, so a Read node called `Plate` becomes an input called `plate`.
 
@@ -22,7 +22,7 @@ The tab lists every node in the script. Inputs are marked with an arrow pointing
 - **Clear Role** removes the mark from the selected node.
 - Selecting a node shows its knobs on the right. Tick a knob's box to expose it as a control, and clear the box to stop exposing it.
 
-Marked nodes get a green tile colour in the Node Graph. Nodes with exposed knobs get purple.
+Marked nodes get a green tile colour in Nuke's Node Graph. Nodes with exposed knobs get purple.
 
 Each mark, clear and tick is written to the `.gt.json` file at once. There is no Save button for them. If the script has not been saved, the panel asks you to save it first and writes nothing.
 

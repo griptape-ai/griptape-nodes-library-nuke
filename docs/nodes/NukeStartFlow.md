@@ -3,9 +3,11 @@ description: Marks the start of a workflow that you will publish as a Nuke gizmo
 when_to_use: "Use it as the first node of a workflow you plan to publish with Publish to Nuke Gizmo. Do not use it for workflows that stay in Griptape Nodes."
 ---
 
+Nuke Start Flow marks the first node of a workflow that you want to use from inside Nuke. A workflow is a set of connected nodes in Griptape Nodes. When you publish it with **Publish to Nuke Gizmo**, the workflow becomes a gizmo, which is a custom node you add to the node graph in Nuke. The parameters you add to this node become the gizmo's controls. See [Publishing a workflow as a gizmo](../guides/publishing-a-gizmo.md).
+
 ## When to use it
 
-You have built a workflow that should become a gizmo you can drop into a Nuke script. Start it with this node. Anything you add to it becomes a control on the gizmo.
+You have built a workflow that should become a gizmo you can drop into a Nuke script. Start it with this node.
 
 The publish step stops with the message "No NukeStartFlow node found in the workflow." if the workflow has no Nuke Start Flow node.
 
@@ -17,11 +19,11 @@ The publish step stops with the message "No NukeStartFlow node found in the work
 
 ## Example
 
-You are wrapping a style-transfer workflow for the comp team. Add a Nuke Start Flow, then use its add-parameter control to add an `image` parameter for the plate and a `strength` number. After publishing, the gizmo in Nuke has an input for the plate and a `strength` knob, filled in with the values you had set when you published.
+You are wrapping a style-transfer workflow for the comp team. Add a Nuke Start Flow, then use its add-parameter control to add an `image` parameter for the plate and a `strength` number. After publishing, the gizmo in Nuke has an input for the plate and a `strength` knob (a number control), filled in with the values you had set when you published.
 
 ## Parameters
 
-Each parameter you add becomes a control on the **Inputs** tab of the published gizmo. The control is labelled with the parameter's display name, or with its name in capitalised words when it has no display name.
+Each parameter you add becomes a control, called a knob in Nuke, on the **Inputs** tab of the published gizmo. The control is labelled with the parameter's display name, or with its name in capitalised words when it has no display name.
 
 | Parameter | Knob on the gizmo |
 |-----------|-------------------|
