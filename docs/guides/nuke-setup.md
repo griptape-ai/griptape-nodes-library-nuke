@@ -67,7 +67,7 @@ Engine Settings is the settings area of Griptape Nodes. Add entries to `nuke.ins
 
 The **Nuke Executable (override)** field on the Nuke Script node holds a full path to a Nuke program. It is in the **Advanced** group, which starts collapsed.
 
-- When a **Nuke Version** is selected, the render and **Save Baked Copy** use that installation's program and ignore this field.
+- When a **Nuke Version** is selected, the render and **Save Baked Copy** use that installation's program and ignore this field. A Nuke Version is always selected once any Nuke is found, so a path here for a different copy of Nuke affects only **Open in Nuke**.
 - **Open in Nuke** starts the program in this field when it is set.
 - When the **Nuke Version** list says "(none configured)", the render and the baked copy use this path, or the `nuke.executable` Engine Setting.
 - The path must exist, or the run does not start, even when the render ignores it.

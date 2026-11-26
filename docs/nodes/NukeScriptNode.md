@@ -68,7 +68,7 @@ Shown as **Refresh UI**. Re-reads the installations and the `.gt.json` file. Cli
 
 ### nuke_executable
 
-Shown as **Nuke Executable (override)**, in the **Advanced** group, which starts collapsed. A full path to a Nuke program, for when you want to run a copy of Nuke that is not in the **Nuke Version** list. See [Choosing which Nuke runs](../guides/nuke-setup.md#choosing-which-nuke-runs).
+Shown as **Nuke Executable (override)**, in the **Advanced** group, which starts collapsed. A full path to a Nuke program. **Open in Nuke** always uses it. Renders and baked copies use it only when the **Nuke Version** list says "(none configured)", because a Nuke Version is always selected once any Nuke is found. See [Choosing which Nuke runs](../guides/nuke-setup.md#choosing-which-nuke-runs).
 
 ### baked_script_path
 
