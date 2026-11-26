@@ -3,7 +3,7 @@ title: The Griptape Annotator panel
 description: How to mark Read and Write nodes as inputs and outputs, and expose knobs, in Nuke.
 ---
 
-Read this page when you are preparing a `.nk` script for the Nuke Script node, or when the node shows the wrong inputs, outputs or controls.
+This page covers preparing a `.nk` script for the Nuke Script node, and what to check when the node shows the wrong inputs, outputs or controls.
 
 The panel writes your choices to a `.gt.json` file beside the script, with the same name. The Nuke Script node builds its inputs, outputs and controls from that file. A script with no `.gt.json` file still runs, but the node has no inputs or outputs.
 

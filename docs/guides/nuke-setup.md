@@ -3,7 +3,7 @@ title: Setting up Nuke
 description: Where the library finds Nuke, how to add an installation, the license, and the Nuke settings.
 ---
 
-Read this page when the **Nuke Version** list is empty, when your Nuke is not listed, or when Nuke cannot find its license.
+This page covers what to check when the **Nuke Version** list is empty, when your Nuke is not listed, or when Nuke cannot find its license.
 
 ## What you need
 

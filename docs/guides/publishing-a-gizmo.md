@@ -3,7 +3,7 @@ title: Publishing a workflow as a gizmo
 description: How to publish a workflow to Nuke, where the files go, and how to run the gizmo.
 ---
 
-Read this page when you are ready to publish a workflow that starts with Nuke Start Flow and ends with Nuke End Flow, or when the published gizmo does not show up in Nuke.
+This page covers publishing a workflow that starts with Nuke Start Flow and ends with Nuke End Flow, and what to check when the published gizmo does not show up in Nuke.
 
 ## Publish
 
