@@ -8,7 +8,7 @@ Read this page when the **Nuke Version** list is empty, when your Nuke is not li
 ## What you need
 
 - A Foundry Nuke installation on the same machine as Griptape Nodes. Annotator builds ship for Nuke 14, 15, 16 and 17.
-- A Nuke license. If Nuke needs `foundry_LICENSE` to find it, set that in the Secrets panel. The library passes it to Nuke. A `foundry_LICENSE` value in `nuke.env` or in an installation's `env_overrides` is used instead.
+- A Nuke license. If Nuke needs `foundry_LICENSE` to find it, add it as a secret under **Settings → API Keys & Secrets** (**Add Secret**). The library passes it to Nuke. A `foundry_LICENSE` value in `nuke.env` or in an installation's `env_overrides` is used instead.
 
 Publishing a gizmo does not start Nuke, so it needs neither.
 
