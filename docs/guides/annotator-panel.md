@@ -28,6 +28,8 @@ Each mark, clear and tick is written to the `.gt.json` file at once. There is no
 
 The same actions are in right-click menus. Right-click inside a node's properties panel and choose **Griptape > Mark as Input**, **Mark as Output** or **Clear Griptape Role**. Right-click a knob's animation button and choose **Griptape > Expose Knob** or **Un-expose Knob**.
 
+The menus differ from the panel in two ways. **Griptape > Mark as Input** is not limited to Read nodes, so mark only Read nodes as inputs. Marking or clearing a node from a right-click does not recolour its tile or refresh the panel until the panel refreshes. Expose and Un-expose do refresh the panel.
+
 ## The Overview tab
 
 The tab shows a **Sidecar** line that reads "current" or "stale — script changed since annotation", and a list of the inputs, outputs and exposed knobs. An **Advanced** section holds the raw `.gt.json` text with a **Save Raw JSON** button, which checks that the text is valid JSON before it writes it.

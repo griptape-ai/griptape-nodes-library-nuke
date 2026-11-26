@@ -88,7 +88,7 @@ Shown in the **Status** group. "Render complete." after a successful run. After 
 
 - A frame value of 0 is treated as unset and becomes 1001, so setting `frame_start` or `frame_end` to 0 uses frame 1001.
 - Decimal controls accept values from -10 to 10 only. Whole-number controls have no limit.
-- When a **Nuke Version** is selected, renders and baked copies ignore `nuke_executable`, but the path must still exist.
+- When a **Nuke Version** is selected, renders and baked copies ignore `nuke_executable`, but a render still needs the path to exist.
 - If you save the `.nk` after annotating it, the sidecar is stale. A run after reopening the workflow sets no inputs, renders no outputs, and still reports "Render complete." Click **Refresh UI** first. See [When the script changes](../guides/annotator-panel.md#when-the-script-changes).
 - Knobs exposed on a node that is marked as an input or output do not appear as controls.
 - Outputs marked `ThreeDUrlArtifact` are skipped and stay empty.

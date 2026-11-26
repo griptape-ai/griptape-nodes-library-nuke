@@ -39,4 +39,4 @@ Shows whether the workflow ended on the success path or the failure path. It is 
 
 ### result_details
 
-A message about how the workflow ended, in the **Status** group. You can type it or connect a text value to it. After a run it starts with `[SUCCEEDED]` or `[FAILED]`, followed on the next line by your message, or by "No details supplied by flow" when you gave none. It stays inside Griptape Nodes and does not appear on the published gizmo.
+A message about how the workflow ended, in the **Status** group. Connect a text value to it. After a run it starts with `[SUCCEEDED]` or `[FAILED]`, followed on the next line by your message, or by "No details supplied by flow" when you gave none. It stays inside Griptape Nodes and does not appear on the published gizmo.
