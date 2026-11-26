@@ -1,0 +1,1 @@
+- The library now ships a docs page for each node, shown in the editor's Docs panel.
